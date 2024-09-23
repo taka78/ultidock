@@ -6,4 +6,6 @@ First, prep your ligands with extract.py, then run dock_beta.py with the output 
 
 THIS IS NOT A STABLE PROJECT. USE IT AT YOUR OWN RISK.
 
+BTW, for comparison, I ran simulations with all the ligands from the wget file over 3 days. After separating them, there were over 1.2 million ligand files, totaling around 80GB in size. My computer is just a basic machine with Ryzen 5 3600X with 24GB of RAM. If you have a real server with lots of cores and NVMe SSDs —maybe even Optane— please let me know so I can run simulations for all known molecules.
+
 I've uploaded my 4H10 docking attempt. I found some possible suspects, but I'm neither a molecular physicist nor a bioinformatician (?). I'm just a simple physicist, trying to find my way to ultimate simulations.
