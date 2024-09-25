@@ -2,6 +2,9 @@ import threading
 import time
 import glob
 import subprocess
+import os
+from config import LIGANDS_DIR, DOCKING_DIR, ANALYSIS_DIR, VINA_DIR
+
 
 class ProcessFileThread(threading.Thread):
     def __init__(self, f, barrier, event):
@@ -18,11 +21,11 @@ class ProcessFileThread(threading.Thread):
     def process_file(self):
         """Processes the file `f` and then deletes it."""
         print(f"Processing {self.f}")
-        subprocess.run(["/mnt/c/Users/taha_/OneDrive/Belgeler/docking/autodock_vina_1_1_2_linux_x86/bin/vina_split", "--input", f"{self.f}"])
+        subprocess.run([f"{VINA_DIR}", "--input", f"{self.f}"])
         # Delete the file
 
 def main():
-    FILES = glob.glob("/mnt/g/ligands-prep/*")
+    FILES = glob.glob(f"{LIGANDS_DIR}")
 
     # Create a barrier object
     barrier = threading.Barrier(len(FILES))

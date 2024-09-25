@@ -1,0 +1,7 @@
+wget http://files.docking.org/3D/AD/BBMN/ADBBMN.xaa.pdbqt.gz -O ADBBMN.xaa.pdbqt.gz
+wget http://files.docking.org/3D/AD/BBRN/ADBBRN.xaa.pdbqt.gz -O ADBBRN.xaa.pdbqt.gz
+wget http://files.docking.org/3D/AD/BDMN/ADBDMN.xaa.pdbqt.gz -O ADBDMN.xaa.pdbqt.gz
+wget http://files.docking.org/3D/AD/BDRN/ADBDRN.xaa.pdbqt.gz -O ADBDRN.xaa.pdbqt.gz
+wget http://files.docking.org/3D/AD/BEMN/ADBEMN.xaa.pdbqt.gz -O ADBEMN.xaa.pdbqt.gz
+wget http://files.docking.org/3D/AD/BERN/ADBERN.xaa.pdbqt.gz -O ADBERN.xaa.pdbqt.gz
+wget http://files.docking.org/3D/AD/BFRN/ADBFRN.xaa.pdbqt.gz -O ADBFRN.xaa.pdbqt.gz
