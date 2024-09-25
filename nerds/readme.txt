@@ -1,2 +1,0 @@
-#choosing the affinity values less than -7 kcal/mol and Dist from RMSD l.b. less than 2Å and Best mode RMSD u.b. less than 3Å and creating a new dataframe with them
-#choosing the only if a ZINC_ID is duplicated from great_ones and creating a new dataframe with them
