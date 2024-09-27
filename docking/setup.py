@@ -1,5 +1,9 @@
 import os
 import subprocess
+import os, sys
+
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "lib"))
 
 
 def ask_for_input(prompt, default):
@@ -13,6 +17,8 @@ def create_directory_if_needed(directory):
         print(f"Directory {directory} created.")
     else:
         print(f"Directory {directory} already exists, continuing without creating it.")
+
+
 
 
 def download_ligands_from_file(wget_file_path, LIGANDS_RAW_DIR):
@@ -57,10 +63,14 @@ def main():
     LIGANDS_DIR = ask_for_input(f"Enter the path for ligand files", os.path.join(CURRENT_DIR, "LIGANDS_DIR"))
     DOCKING_DIR = ask_for_input(f"Enter the path for docking files", os.path.join(CURRENT_DIR, "DOCKING_DIR"))
     ANALYSIS_DIR = ask_for_input(f"Enter the path for analysis files", os.path.join(CURRENT_DIR, "ANALYSIS_DIR"))
-    VINA_DIR = ask_for_input(f"Enter the path for analysis files", os.path.join(CURRENT_DIR, "VINA_DIR"))
+    VINA_DIR = ask_for_input(f"Enter the path for Autodock Vina ", os.path.join(CURRENT_DIR, "VINA_DIR"))
     LIGANDS_RAW_DIR = os.path.join(LIGANDS_DIR, 'ligands_raw')
+    LIGANDS_READY_DIR = os.path.join(LIGANDS_DIR, 'ligands_ready')
+    MACRO_MOL_DIR = ask_for_input(f"Enter the path for macro molecule of your choice.", os.path.join(CURRENT_DIR, "MACRO_MOL_DIR"))
+
 
     create_directory_if_needed(LIGANDS_RAW_DIR)
+    create_directory_if_needed(LIGANDS_READY_DIR)
 
     # Ask for the .wget file location
     wget_file_path = ask_for_input("Enter the path to the .wget file", os.path.join(CURRENT_DIR, "ligands.wget"))
@@ -71,10 +81,13 @@ def main():
 
     # Save these to config.py
     with open('config.py', 'w') as config_file:
+        config_file.write(f'# config.py \n')
+        config_file.write(f'# Paths for directories \n')
         config_file.write(f'LIGANDS_DIR = "{LIGANDS_DIR}"\n')
         config_file.write(f'DOCKING_DIR = "{DOCKING_DIR}"\n')
         config_file.write(f'ANALYSIS_DIR = "{ANALYSIS_DIR}"\n')
         config_file.write(f'VINA_DIR = "{VINA_DIR}"\n')
+        config_file.write(f'MACRO_MOL_DIR = "{MACRO_MOL_DIR}"\n')
 
 
     # Create default files in the current directory

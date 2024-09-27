@@ -10,10 +10,11 @@ import pandas as pd
 import gc
 from threading import Barrier
 import multiprocessing
+from config import LIGANDS_DIR, DOCKING_DIR, ANALYSIS_DIR, VINA_DIR, MACRO_MOL_DIR, LIGANDS_READY_DIR
 
 
 
-all_files = glob.glob("/mnt/g/ligands-prep/*.pdbqt")
+all_files = glob.glob("f{LIGANDS_DIR}/*.pdbqt")
 
 def chunk_list(data, chunk_size):
     new_data = []
@@ -38,13 +39,13 @@ def dock(f):
     print(f"Memory usage: {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2} MB")
     try:
         subprocess.run([
-            "/mnt/c/Users/taha_/OneDrive/Belgeler/docking/autodock_vina_1_1_2_linux_x86/bin/vina",
-            "--receptor", "/mnt/g/4h10_edited-autodock-with-remark.pdbqt",
-            "--ligand", f"/mnt/g/ligands-prep/{f}",
-            "--center_x", "20",
-            "--center_y", "-15",
-            "--center_z", "0",
-            "--size_x", "30",
+            f"{VINA_DIR}",
+            "--receptor", f"{MACRO_MOL_DIR}",
+            "--ligand", f"{LIGANDS_READY_DIR}/{f}",
+            "--center_x", "20", #########
+            "--center_y", "-15", ### im working on a auto-center 
+            "--center_z", "0",   ###  on macro molecule (and maybe de-hydration) alghorythm
+            "--size_x", "30",    ### soo don't worry about it
             "--size_y", "30",
             "--size_z", "30",
             "--cpu", "6",
