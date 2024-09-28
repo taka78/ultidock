@@ -3,75 +3,84 @@ import time
 import glob
 import shutil
 import subprocess
+import os
 import gzip
 from config import LIGANDS_DIR, DOCKING_DIR, ANALYSIS_DIR, VINA_DIR
 
-def delete_the_archives(self):
-    """Processes the file `f` and then deletes it."""
-
-
 class ProcessFileThread(threading.Thread):
-    def __init__(self, f, barrier, event):
+    def __init__(self, f, extraction_barrier):
         super().__init__()
-        self.f = f
-        self.barrier = barrier
-        self.event = event
+        self.f = f  # File path
+        self.extraction_barrier = extraction_barrier
 
     def run(self):
+        # First, extract the archive
         self.extract_all()
-        self.barrier.wait()
-        self.event.set()
+        # Wait until all files are extracted
+        self.extraction_barrier.wait()  # Sync point after extraction
+        # Then, process with vina_split
         self.process_file()
-        self.barrier.wait()
-        self.event.set()
 
     def extract_all(self):
-        print(self.f)
+        # Ensure the file has the .gz extension
+        if not self.f.endswith(".gz"):
+            print(f"{self.f} is not a .gz file.")
+            return
+
+        # Get the path without the .gz extension for the output file
+        extracted_file_path = self.f[:-3]
+
+        # Open the .gz file and extract its contents
         try:
-            with gzip.open(f'{self.f}',"rb") as f_in:
-                with open(self.f) as f_out:
-                    f_out.write(f"{self.f}.a")
+            with gzip.open(self.f, 'rb') as gz_file:
+                with open(extracted_file_path, 'wb') as extracted_file:
+                    shutil.copyfileobj(gz_file, extracted_file)
+            print(f"Extracted: {extracted_file_path}")
+            
+            # After successful extraction, delete the .gz file
+            os.remove(self.f)
+            print(f"Deleted archive: {self.f}")
+
         except Exception as e:
-            print(f"{self.f}", "occured error", e)
-            pass
+            print(f"Failed to extract {self.f}: {e}")
 
     def process_file(self):
-        """Processes the file `f` and then deletes it."""
-        print(f"Processing {self.f}")
-        subprocess.run([f"{VINA_DIR}/bin/vina_split", "--input", f"{self.f}"])
+        extracted_file_path = self.f[:-3]  # Path without the .gz extension
         
-        # Delete the file
+        if not extracted_file_path.endswith(".pdbqt"):
+            print(f"{extracted_file_path} is not a ligand file.")
+            return
+        try:
+            """Processes the file using vina_split."""
+            print(f"Processing {extracted_file_path}")
+            subprocess.run([f"{VINA_DIR}/bin/vina_split", "--input", f"{extracted_file_path}"])
+            os.remove(extracted_file_path)
+        except Exception as e:
+            print(e)
+            pass
 
-    
 def main():
     print(LIGANDS_DIR)
-    FILES = glob.glob(f"{LIGANDS_DIR}/ligands_raw/*")
-    #print(FILES)
 
-    # Create a barrier object
-    barrier = threading.Barrier(len(FILES)+1)
+    # Phase 1: Find all .gz files
+    FILES = glob.glob(f"{LIGANDS_DIR}/*.gz")
+    
+    # Create a barrier that will block the process_file phase until all threads have finished extracting
+    extraction_barrier = threading.Barrier(len(FILES) + 1)  # +1 includes the main thread
 
-    # Create an event object to signal to the main thread that all of the threads have finished processing their files
-    event = threading.Event()
-
-    # Create a thread for each file
+    # Create a thread for each file (both for extraction and split process)
     threads = []
     for f in FILES:
-        t = ProcessFileThread(f, barrier, event)
+        t = ProcessFileThread(f, extraction_barrier)
         threads.append(t)
         t.start()
 
-    # Wait for all of the threads to finish processing their files
+    # Main thread waits on the barrier as well
+    extraction_barrier.wait()  # This ensures the main thread participates in the barrier
+
+    # Wait for all threads to complete
     for t in threads:
         t.join()
-
-    # Wait for the event to be set before moving on
-    event.wait()
-
-    for f in FILES:
-        #print(f"Deleting archive {f}")
-        subprocess.run(["sudo", "rm", "-f", f"{f}"])
-    
 
 if __name__ == "__main__":
     main()
