@@ -9,7 +9,7 @@
 
 <p>If you're familiar with docking workflows, this project might come in handy for your research.</p>
 
-<p>All things shorted out now.</p>
+<p>All things should be sorted out now.</p>
 
 <p>To start, download your wget file from your choice of ligand database and put it in your work directory. First run <code>setup.py</code> so that you can create your own workdir as you want. After that, process your ligands using <code>extract.py</code>, then pass the generated files to <code>dock_beta.py</code> -WIP- for docking. This should cover all your docking needs for now. My long-term goal is to automate the entire pipeline and potentially integrate GPU acceleration—though I haven’t found the time for that yet. Be sure to configure the resource allocations in the scripts to align with your system specs for optimal performance. That's my immediate goal, so give it a shot!</p>
 
