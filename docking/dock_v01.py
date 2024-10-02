@@ -1,3 +1,4 @@
+#dock_v01.py
 import threading
 import glob
 import subprocess
@@ -81,9 +82,38 @@ class DockingProcessor:
         with open("grid_parameters.gpf", "w") as gpf_file:
             gpf_file.write(gpf_content)
 
+    def check_memory(self):
+        bunch = []
+        for i in range(0, len(self.FILES), 6):
+            current_bunch = self.FILES[i:i+6]
+            bunch.extend(current_bunch)
+            memory_info = psutil.Process().memory_info()
+            print(f"Memory usage: {memory_info.rss / (1024 * 1024)} MB")
+
+            if memory_info.rss > 22528000:
+                #print("Memory usage exceeded the limit.")
+                self.event.set()
+                self.barrier.wait()
+                break
+
+        print(f"Bunch loaded.")
+
+    def run(self):
+        self.process_files()
+
+class ProcessFileThread(threading.Thread):
+    
+    def __init__(self, bunch, barrier, event, callback):
+        super().__init__()
+        self.bunch = bunch
+        self.barrier = barrier
+        self.event = event
+        self.callback = callback
+        self.DockingProcessor = DockingProcessor  # Store DockingProcessor instance
+
 
     # Function to parse ligand's .pdbqt file and extract atomic coordinates
-    def calculate_grid_center_and_size(ligand_file):
+    def calculate_grid_center_and_size(self, ligand_file):
         x_coords, y_coords, z_coords = [], [], []
         
         with open(ligand_file, 'r') as file:
@@ -106,44 +136,18 @@ class DockingProcessor:
         
         return (center_x, center_y, center_z), (size_x, size_y, size_z)
 
-
-
-    def check_memory(self):
-        bunch = []
-        for i in range(0, len(self.FILES), 6):
-            current_bunch = self.FILES[i:i+6]
-            bunch.extend(current_bunch)
-            memory_info = psutil.Process().memory_info()
-            print(f"Memory usage: {memory_info.rss / (1024 * 1024)} MB")
-
-            if memory_info.rss > 22528000:
-                print("Memory usage exceeded the limit.")
-                self.event.set()
-                self.barrier.wait()
-                break
-
-        print(f"Bunch loaded.")
-
-    def run(self):
-        self.process_files()
-
-class ProcessFileThread(threading.Thread):
-    def __init__(self, bunch, barrier, event, callback):
-        super().__init__()
-        self.bunch = bunch
-        self.barrier = barrier
-        self.event = event
-        self.callback = callback
-
     def run(self):
         # Calculate grid center and size dynamically for each ligand
-        grid_center, grid_size = calculate_grid_center_and_size(f)
-        
+        macro_mols = glob.glob(f"{MACRO_MOL_DIR}/*.pdbqt")
+        macro_mol = macro_mols[0]
+        print(DOCKING_DIR)
         try:
+            grid_center, grid_size = self.calculate_grid_center_and_size(f"{macro_mol}")
             for f in self.bunch:
+                print(f)
                 subprocess.run([
-                    f"{VINA_DIR}",
-                    "--receptor", f"{MACRO_MOL_DIR}",
+                    f"{VINA_DIR}/bin/vina",
+                    "--receptor", f"{macro_mol}",
                     "--ligand", f"{f}",
                     "--center_x", str(grid_center[0]),
                     "--center_y", str(grid_center[1]),
@@ -152,7 +156,7 @@ class ProcessFileThread(threading.Thread):
                     "--size_y", str(grid_size[1]),
                     "--size_z", str(grid_size[2]),
                     "--cpu", "6",
-                    "--out", f"{f}_{uuid.uuid4()}.pdbqt"
+                    "--out", f"{DOCKING_DIR}/{f[-26:]}_{uuid.uuid4()}.pdbqt" #this is not gonna last..
                 ])
 
                 # Check memory usage
@@ -161,7 +165,7 @@ class ProcessFileThread(threading.Thread):
 
                 # Set event if memory usage is above the limit
                 if memory_info.rss > 2252800000000:
-                    print("Memory usage exceeded the limit.")
+                    print(f"Memory usage exceeded the limit.")
                     self.event.set()
                     self.barrier.wait()
 

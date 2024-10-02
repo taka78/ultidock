@@ -1,3 +1,4 @@
+#setup.py
 import os
 import subprocess
 import os, sys
@@ -87,6 +88,8 @@ def main():
     create_directory_if_needed(DOCKING_DIR)
     create_directory_if_needed(ANALYSIS_DIR)
     create_directory_if_needed(VINA_DIR)
+    create_directory_if_needed(MACRO_MOL_DIR)
+
 
     print("Configuration saved to config.py and default directory files created!")
 
