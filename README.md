@@ -18,6 +18,7 @@
 <p>Since this process demands fast random read/write operations, using a traditional hard drive may result in significant delays. I recommend using a high-speed NVMe SSD, or even better, an Intel Optane drive. <strong>INTEL, ARE YOU LISTENING?</strong></p>
 
 <h3><strong>DISCLAIMER:</strong> This is an experimental project. Use at your own risk.</h3>
+<h2><strong>Warning: This script act as a great CPU burner test. Please make sure that you have a adequate cooler</h2>
 
 <p>For context, I ran simulations on all ligands from the <code>wget</code> file, which took approximately 3 days. After processing, I generated over 1.2 million ligand files, taking up around 80GB of storage. My setup is modest—a Ryzen 5 3600X with 24GB of RAM. If you have access to a more powerful server with many cores and fast NVMe storage (Optane would be ideal), please reach out. I would love to run simulations for a wider range of molecules.</p>
 
