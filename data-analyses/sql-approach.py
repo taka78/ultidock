@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS docking_results (
 ''')
 conn.commit()
 
-files = glob.glob(f"{folder_path}/docking-outputs/*.pdbqt")
+files = glob.glob(f"{folder_path}/docking/DOCKING_DIR/*.pdbqt")
+print(folder_path)
 
 def process_pdbqt_file(file_path):
     with open(file_path, "r") as f:
