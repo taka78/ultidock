@@ -48,7 +48,7 @@ wget http://some-ligand-url.com/ligand2.mol2</code></pre>
   <h3>3. Run the Docking Pipeline</h3>
   <p>From within the <code>docking/</code> directory, run:</p>
 
-  <pre><code>python run.py</code></pre>
+  <pre><code>python3 run.py</code></pre>
 
   <p>This will:</p>
   <ul>
@@ -61,9 +61,9 @@ wget http://some-ligand-url.com/ligand2.mol2</code></pre>
   <h3>4. Analyze Results</h3>
   <p>Once docking is complete, you can sort and analyze the output:</p>
 
-  <pre><code>python3 output-analyses.py</code></pre>
+  <pre><code>python3 data-analyses/output-analyses.py</code></pre>
 
-  <p>This script parses <code>.pdbqt</code> results and outputs CSVs using Pandas. SQL-based analysis is planned in future versions.</p>
+  <p>This script parses <code>.pdbqt</code> results and outputs CSVs using Pandas. <code>data-analyses/real-analyses.py</code> will be a great tool to find the best affinity and geometrically well positioned ligand molecules. It will automatically find and list the best molecules. SQL-based analysis is planned in future versions.</p>
 
   <hr />
 
