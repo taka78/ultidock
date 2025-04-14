@@ -86,5 +86,8 @@
   <h3>Disclaimer</h3>
   <p>This is a beta release. Features are evolving. Stability is not guaranteed. Use at your own risk.</p>
 
+<div style="text-align: center;">
+  <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/taka78/ultidock/dev-beta/traffic-badge.json" alt="GitHub Traffic Badge" />
+
 </body>
 </html>
