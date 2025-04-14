@@ -3,8 +3,12 @@ import glob
 import re
 import os
 import pandas as pd
+# Add docking/ directory to path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'docking')))
 
-files = glob.glob('/mnt/g/docking-outputs-not-wrecked-ep1-part-2/*.pdbqt')
+from config import DOCKING_DIR
+
+files = glob.glob(os.path.join(DOCKING_DIR, "*.pdbqt"))
 main_df = pd.DataFrame()
 print(files)
 
