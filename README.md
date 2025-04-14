@@ -3,7 +3,6 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Ultidock – Beta Branch</title>
 </head>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; margin: 2rem; background-color: #fdfdfd; color: #333;">
 
@@ -62,7 +61,7 @@ wget http://some-ligand-url.com/ligand2.mol2</code></pre>
   <h3>4. Analyze Results</h3>
   <p>Once docking is complete, you can sort and analyze the output:</p>
 
-  <pre><code>python output-analyses.py</code></pre>
+  <pre><code>python3 output-analyses.py</code></pre>
 
   <p>This script parses <code>.pdbqt</code> results and outputs CSVs using Pandas. SQL-based analysis is planned in future versions.</p>
 
