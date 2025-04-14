@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.sqlite3
+*.db
+.DS_Store
+.env
+.vscode/
+.idea/
+# Ignore all docking outputs
+docking/*.pdbqt
+
+# But keep these explicitly tracked
+!results/*.pdbqt
+!docking/MACRO_MOL_DIR/*.pdbqt
