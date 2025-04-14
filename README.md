@@ -1,29 +1,109 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <h1>Ultidock Project</h1>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Ultidock – Beta Branch</title>
 </head>
-<body>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; margin: 2rem; background-color: #fdfdfd; color: #333;">
 
-<p>If you're familiar with docking workflows, this project could be a valuable tool for your research.</p>
+  <h1>Ultidock Project – Beta Channel</h1>
+  <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/taka78/ultidock/dev-beta/traffic-badge.json" alt="GitHub Traffic Badge" />
 
-<p>Everything should now be streamlined and ready to use.</p>
+  <p>Ultidock is a parallelized, semi-automated docking pipeline designed for high-throughput molecular screening using AutoDock Vina. This <strong>beta branch</strong> is stable and functional, built to simplify ligand screening for researchers and students with moderate hardware setups.</p>
 
-<p>To begin, download your desired ligand files using only one <code>wget</code> file -which has a lot of wget command- from any ligand databases, and place it in the "docking" folder of your working directory. Then, position your macromolecule in the <code>MACRO_DIR</code> folder. After that, simply run the <code>run.py</code> script inside the "docking" folder. The script will automatically download the ligands, split the molecules, create and center the AutoDock Vina simulation grid on the macromolecule, and initiate the simulation. This should meet most of your docking needs. I've drastically automated the entire pipeline, and my next goal is to integrate GPU acceleration—though I haven't found the time for that yet. And maybe adding a step-by-step guide would be nice. Be sure to configure the resource allocation in the scripts according to your system specifications for optimal performance. Give it a try!</p>
+  <hr />
 
-<p>Once the docking process is complete, the focus shifts to finding ligands with the best affinity—those that are in favorable geometric positions and exhibit low binding energy. To help with this, convert all <code>.pdbqt</code> files into readable data using the <code>output-analyses.py</code> script. I've opted to use CSV format due to the large amount of data, but feel free to choose a format that works best for you. The script utilizes Pandas to efficiently process and sort the data.</p>
+  <h2>How It Works</h2>
+  <p>This version of Ultidock performs the following tasks:</p>
+  <ul>
+    <li>Downloads ligand structures using a <code>.wget</code> list</li>
+    <li>Prepares a grid around a supplied macromolecule</li>
+    <li>Runs docking jobs in batches via AutoDock Vina</li>
+    <li>Outputs structured docking results into a specified directory</li>
+  </ul>
 
-<p>Since this process demands fast random read/write operations, using a traditional hard drive may result in significant delays. I recommend using a high-speed NVMe SSD, or even better, an Intel Optane drive. <strong>INTEL, ARE YOU LISTENING?</strong></p>
+  <hr />
 
-<h3><strong>DISCLAIMER:</strong> This is an experimental project. Use at your own risk.</h3>
-<h2><strong>Warning: This script act as a great CPU burner test. Please make sure that you have an adequate cooler.</h2>
+  <h2>Step-by-Step Instructions</h2>
 
-<p>For context, I ran simulations on all ligands from the <code>wget</code> file, which took approximately 3 days. After processing, I generated over 1.2 million ligand files, taking up around 80GB of storage. My setup is modest—a Ryzen 5 3600X with 24GB of RAM. If you have access to a more powerful server with many cores and fast NVMe storage (Optane would be ideal), please reach out. I would love to run simulations for a wider range of molecules.</p>
+  <h3>1. Prepare Your Macromolecule</h3>
+  <ul>
+    <li>Download your macromolecule from <a href="https://www.rcsb.org/">RCSB PDB</a> or <a href="https://alphafold.ebi.ac.uk/">AlphaFold</a>.</li>
+    <li>Remove all water molecules and unnecessary chains.</li>
+    <li><strong>Keep REMARK headers</strong> as shown in the example files.</li>
+    <li>Convert it to <code>.pdbqt</code> format and place it in: <code>docking/MACRO_MOL_DIR/</code></li>
+  </ul>
 
-<p>Currently, I've uploaded my results from docking with 4H10. I identified a few promising candidates, but keep in mind—I’m not a molecular physicist or bioinformatician, just a physicist exploring more advanced simulations.</p>
+  <h3>2. Prepare the Ligand Download List</h3>
+  <ul>
+    <li>Create a file named <code>ligands.wget</code> that contains <code>wget</code> commands for your desired ligands.</li>
+    <li>Example sources: <a href="https://zinc15.docking.org/">ZINC15</a>, <a href="https://pubchem.ncbi.nlm.nih.gov/">PubChem</a>, <a href="https://www.ebi.ac.uk/chembl/">ChEMBL</a>, <a href="https://go.drugbank.com/">DrugBank</a></li>
+  </ul>
+
+  <pre><code>wget http://some-ligand-url.com/ligand1.mol2
+wget http://some-ligand-url.com/ligand2.mol2</code></pre>
+
+  <p>Save this file in your main working directory: <code>docking/ligands.wget</code></p>
+
+  <h3>3. Run the Docking Pipeline</h3>
+  <p>From within the <code>docking/</code> directory, run:</p>
+
+  <pre><code>python run.py</code></pre>
+
+  <p>This will:</p>
+  <ul>
+    <li>Download ligands</li>
+    <li>Generate a centered grid box</li>
+    <li>Run docking jobs sequentially using multiple threads</li>
+    <li>Save the output <code>.pdbqt</code> files in <code>DOCKING_DIR</code></li>
+  </ul>
+
+  <h3>4. Analyze Results</h3>
+  <p>Once docking is complete, you can sort and analyze the output:</p>
+
+  <pre><code>python output-analyses.py</code></pre>
+
+  <p>This script parses <code>.pdbqt</code> results and outputs CSVs using Pandas. SQL-based analysis is planned in future versions.</p>
+
+  <hr />
+
+  <h2>Performance Notes</h2>
+  <p>This version is designed for CPU-based processing. An NVMe SSD is recommended for best performance, but Optane or other high-end storage is no longer required thanks to simplified I/O handling.</p>
+
+  <blockquote><strong>Warning:</strong> This tool is CPU-intensive. Ensure your system is cooled and monitored during batch runs.</blockquote>
+
+  <hr />
+
+  <h2>System Configuration (Used in Development)</h2>
+  <ul>
+    <li>CPU: AMD Ryzen 5 3600X</li>
+    <li>RAM: 24 GB DDR4</li>
+    <li>Storage: 1 TB NVMe SSD</li>
+    <li>Environment: WSL + Python 3.10</li>
+  </ul>
+
+  <p>Running ~1.2 million ligands against a macromolecule (4H10) took about 3 days and generated ~80 GB of data.</p>
+
+  <hr />
+
+  <h2>What's Coming in dev-beta</h2>
+
+  <p>The <code>dev-beta</code> branch improves on this version with:</p>
+  <ul>
+    <li>SQLite-based result logging</li>
+    <li>Multi-thread-safe database inserts</li>
+    <li>GPU acceleration (coming soon)</li>
+    <li>Automated grid generation via <code>setup.py</code></li>
+    <li>Cleaner, portable directory structure</li>
+  </ul>
+
+  <p>If you're looking for better performance tracking and large-scale scalability, try the <code>dev-beta</code> branch instead.</p>
+
+  <hr />
+
+  <h3>Disclaimer</h3>
+  <p>This is a beta release. Features are evolving. Stability is not guaranteed. Use at your own risk.</p>
 
 </body>
 </html>
-
