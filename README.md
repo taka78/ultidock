@@ -6,7 +6,7 @@
 </head>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; margin: 2rem; background-color: #f8f8f8; color: #333;">
 
-  <h1>Ultidock Project – Beta Channel</h1>
+  <h1>Ultidock Project – Dev Channel</h1>
 
   <p>Ultidock is a parallelized, automated docking pipeline designed for high-throughput molecular screening. If you're familiar with docking workflows, this tool is designed to minimize manual steps and accelerate large-scale simulations.</p>
 
