@@ -83,6 +83,23 @@
 
   <hr />
 
+  <hr />
+
+  <h2>📖 Citation</h2>
+  
+  <p>If you use <strong>Ultidock</strong> in your research, publication, or automated pipeline, please consider citing it as:</p>
+  
+  <blockquote>
+    Turgut, T. (2025). <em>Ultidock: A Lightweight Parallelized Docking Pipeline for Ligand Screening</em>. GitHub Repository. 
+    <a href="https://github.com/taka78/ultidock">https://github.com/taka78/ultidock</a>
+  </blockquote>
+  
+  <p>
+    You are free to use and modify this software under the MIT License. 
+    However, citation and credit are appreciated to support continued development.
+  </p>
+
+
   <h3>Disclaimer</h3>
   <p>This is a beta release. Features are evolving. Stability is not guaranteed. Use at your own risk.</p>
 
