@@ -3,14 +3,24 @@ import os
 import sqlite3
 import threading
 
+# Pull the results directory from config
+try:
+    from config import RESULTS_DIR
+except ImportError:
+    RESULTS_DIR = "results"  # fallback if config is missing (for testability)
+
 class DockingDatabaseManager:
-    def __init__(self, db_path='docking_results.db'):
-        self.db_path = db_path
-        # Create a lock for thread-safe database operations
+    def __init__(self, db_filename='ultidock_results.db'):
+        # Ensure the directory exists
+        os.makedirs(RESULTS_DIR, exist_ok=True)
+
+        self.db_path = os.path.join(RESULTS_DIR, db_filename)
         self.lock = threading.Lock()
-        # Allow the connection to be shared across threads
+
+        # Connect with multi-thread support
         self.connection = sqlite3.connect(self.db_path, check_same_thread=False)
         self.cursor = self.connection.cursor()
+
         self._initialize_db()
 
     def _initialize_db(self):
@@ -27,7 +37,6 @@ class DockingDatabaseManager:
         self.connection.commit()
 
     def insert_docking_result(self, ligand_name, binding_affinity, rmsd_lb, rmsd_ub):
-        """Insert a new docking result into the database safely."""
         with self.lock:
             try:
                 self.cursor.execute('''
