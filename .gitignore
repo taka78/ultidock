@@ -13,6 +13,28 @@ __pycache__/
 docking/*.pdbqt
 docking/config.py
 
-# But keep these explicitly tracked
-!results/*.pdbqt
+# But keep these explicitly trackedresults/*.pdbqt
+# Ignore everything under results/
+
+# But allow nerds and geeks subfolders
+!results/nerds/
+!results/geeks/
+
+# Then allow specific file types inside those
+!results/nerds/*.pdbqt
+!results/nerds/*.mp4
+!results/nerds/*.gif
+!results/geeks/*.pdbqt
+!results/geeks/*.mp4
+!results/geeks/*.gif
+
+# Ignore everything under docking/
+docking/*
+
+# Ignore everything under docking/
+# Allow Python scripts and key subfolders
+!docking/*.py
+!docking/VINA_DIR/
+!docking/MACRO_MOL_DIR/
+!docking/VINA_DIR/**
 !docking/MACRO_MOL_DIR/*.pdbqt
