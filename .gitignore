@@ -11,6 +11,7 @@ __pycache__/
 .idea/
 # Ignore all docking outputs
 docking/*.pdbqt
+docking/config.py
 
 # But keep these explicitly tracked
 !results/*.pdbqt
