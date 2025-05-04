@@ -1,5 +1,6 @@
-#dock_v01.py
+#dock_v02.py
 import threading
+import queue
 import glob
 import subprocess
 import time
@@ -19,7 +20,61 @@ class DockingProcessor:
         self.FILES = glob.glob(f"{LIGANDS_DIR}/*.pdbqt")
         self.barrier = Barrier(6)
         self.event = threading.Event()
-        self.db_manager = DockingDatabaseManager(DB_PATH)   # Initialize here clearly
+        # Initialize database manager and queue for async writes
+        self.db_manager = DockingDatabaseManager(DB_PATH)
+        self.db_queue = queue.Queue()
+        self.db_thread = threading.Thread(target=self._db_worker, daemon=True)
+        self.db_thread.start()
+
+
+    def _db_worker(self):
+        print("🧵 DB worker started")
+        buffer = []
+        seen_none = False
+
+        while True:
+            try:
+                print("🕒 DB worker waiting for item...")
+                item = self.db_queue.get(timeout=10)
+                print(f"📥 DB worker received: {item}")
+
+                if item == "INIT":
+                    print("🧊 Received warm-up INIT. Touching DB...")
+                    self.db_manager.insert_bulk([])  # Safe no-op
+                    self.db_queue.task_done()
+                    continue
+
+                elif item == "SHUTDOWN":
+                    print("🛑 Shutdown signal received. Flushing and exiting DB thread.")
+                    if buffer:
+                        self.db_manager.insert_bulk(buffer)
+                    self.db_queue.task_done()
+                    break
+
+                # Item is valid
+                if isinstance(item, list):
+                    for rec in item:
+                        if isinstance(rec, tuple) and len(rec) == 4:
+                            buffer.append(rec)
+                        else:
+                            print(f"❌ Skipping bad sub-record in list: {rec}")
+                elif isinstance(item, tuple) and len(item) == 4:
+                    buffer.append(item)
+                else:
+                    print(f"❌ Skipping malformed record: {item}")
+
+                self.db_queue.task_done()  # ✅ Very important!
+
+                if len(buffer) >= 500:
+                    print(f"📤 Flushing 500 records to DB")
+                    self.db_manager.insert_bulk(buffer)
+                    buffer.clear()
+
+            except queue.Empty:
+                if buffer:
+                    print(f"⏳ Timeout flush: Writing {len(buffer)} records to DB")
+                    self.db_manager.insert_bulk(buffer)
+                    buffer.clear()
 
     def memory_monitor(self, threshold):
         while True:
@@ -38,12 +93,11 @@ class DockingProcessor:
             with lock:
                 completed_threads += 1
 
-        for i in range(0, len(self.FILES), 100):
-            bunch = self.FILES[i:i+100]
-            thread = ProcessFileThread(bunch, self.barrier, self.event, thread_callback, self.db_manager)
+        for ligand_file in self.FILES:
+            thread = ProcessFileThread([ligand_file], self.barrier, self.event, thread_callback, self.db_queue)
             threads.append(thread)
 
-        threshold = 1024 # available memory threshold in bytes
+        threshold = 1024  # available memory threshold in bytes
         while True:
             if psutil.virtual_memory().available > threshold:
                 break
@@ -55,7 +109,14 @@ class DockingProcessor:
         while completed_threads < len(threads):
             time.sleep(1)
 
-        self.db_manager.close()  # safely close DB here so that db is not locked
+        time.sleep(2)  # Give threads time to finish putting into the queue
+
+        self.db_queue.put("INIT")
+        self.db_queue.put("SHUTDOWN")
+        self.db_queue.join()           # Wait for all DB queue tasks to complete
+        self.db_thread.join()          # Wait for the DB thread to fully exit
+        self.db_manager.close()        # Only now it's safe to close DB
+
         gc.collect()
         self.check_memory()
 
@@ -77,34 +138,27 @@ class DockingProcessor:
             gpf_file.write(gpf_content)
 
     def check_memory(self):
-        # This function prints memory usage for batches of files.
         bunch = []
         for i in range(0, len(self.FILES), 6):
             current_bunch = self.FILES[i:i+6]
             bunch.extend(current_bunch)
             memory_info = psutil.Process().memory_info()
             print(f"Memory usage: {memory_info.rss / (1024 * 1024)} MB")
-
-            if memory_info.rss > 22528000:
-                #print("Memory usage exceeded the limit.")
-                self.event.set()
-                self.barrier.wait()
-                break
-
-        print(f"Bunch loaded.")
+            break  # ← prevent barrier from ever being reached
 
     def run(self):
         self.process_files()
 
 class ProcessFileThread(threading.Thread):
     
-    def __init__(self, bunch, barrier, event, callback, db_manager):
+    def __init__(self, bunch, barrier, event, callback, db_queue):
         super().__init__()
         self.bunch = bunch
         self.barrier = barrier
         self.event = event
         self.callback = callback
-        self.db_manager = db_manager
+        self.db_queue = db_queue
+
 
 
     # Function to parse ligand's .pdbqt file and extract atomic coordinates
@@ -153,6 +207,8 @@ class ProcessFileThread(threading.Thread):
         macro_mol = macro_mols[0]
         receptor_name = macro_mol.split("/")[-1]
         try:
+            buffer = []
+            BATCH_SIZE = 500
             grid_center, grid_size = self.calculate_grid_center_and_size(f"{macro_mol}")
             for ligand_file in self.bunch:
                 print(ligand_file)
@@ -175,11 +231,14 @@ class ProcessFileThread(threading.Thread):
                 ligand_name = ligand_file.split("/")[-1]
 
                 if affinity is not None:
-                    self.db_manager.insert_docking_result(
-                        f"{ligand_name}-{receptor_name}", affinity, rmsd_lb, rmsd_ub
-                    )
+                    # collect into a batch
+                    buffer.append((f"{ligand_name}-{receptor_name}", affinity, rmsd_lb, rmsd_ub))
+                    # once we hit BATCH_SIZE, hand it off & clear
+                    if len(buffer) >= BATCH_SIZE:
+                        self.db_queue.put(buffer.copy())
+                        buffer.clear()
                 else:
-                    print(f"Warning: Docking result parsing failed for {ligand_name}")                
+                    print(f"Warning: failed to parse {ligand_name}")             
                 # Check memory usage
                 memory_info = psutil.Process().memory_info()
                 print(f"Memory usage: {memory_info.rss / (1024 * 1024):.2f} MB")
@@ -189,6 +248,8 @@ class ProcessFileThread(threading.Thread):
                     print(f"Memory usage exceeded the limit.")
                     self.event.set()
                     self.barrier.wait()
+            if buffer:
+                self.db_queue.put(buffer)
 
         except Exception as e:
             print(e)
@@ -204,3 +265,4 @@ if __name__ == "__main__":
     processor = DockingProcessor()
     processor.run()
 ###im stupid
+#     

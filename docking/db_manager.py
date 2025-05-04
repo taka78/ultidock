@@ -21,6 +21,10 @@ class DockingDatabaseManager:
         self.connection = sqlite3.connect(self.db_path, check_same_thread=False)
         self.cursor = self.connection.cursor()
 
+        # Performance tuning
+        self.connection.execute("PRAGMA journal_mode=WAL;")
+        self.connection.execute("PRAGMA synchronous = NORMAL;")
+
         self._initialize_db()
 
     def _initialize_db(self):
@@ -47,6 +51,25 @@ class DockingDatabaseManager:
             except sqlite3.Error as e:
                 print(f"An error occurred while inserting docking result: {e}")
                 self.connection.rollback()
+
+    def insert_bulk(self, records):
+        """Batch‐insert a list of (ligand_name, affinity, rmsd_lb, rmsd_ub)."""
+        if not records:
+            print("ℹ️ insert_bulk: received empty list, skipping.")
+            return  # Don't try to insert an empty list
+
+        with self.lock:
+            self.cursor.executemany(
+                """
+                INSERT INTO docking_results
+                (ligand_name, binding_affinity, rmsd_lb, rmsd_ub)
+                VALUES (?, ?, ?, ?)
+                """,
+                records
+            )
+            self.connection.commit()
+
+
 
     def close(self):
         if self.connection:
