@@ -34,7 +34,7 @@ Ultidock is a powerful and fully automated molecular docking pipeline built arou
 cd ultidock
 </code></pre>
 
-<h3>2. Adjust the expected analysing standarts for your molecule from <pre><code>analyse_docking_results.py</code></pre>:</h3>
+<h3>2. Adjust the expected analysing standarts for your molecule from <code>analyse_docking_results.py</code>:</h3>
 <pre><code>
     DEFAULT_AFFINITY = -7.0        # kcal/mol // you should change this according to how much chemically active your macromolecule.
     DEFAULT_RMSD_LB = 5.0          # Å // you should change this according to how big your macromolecule's docking site is.
@@ -72,11 +72,25 @@ python docking/analyse_docking_results.py --out results.xlsx
 
 <h2>🤝 Contributing</h2>
 <p>Contributions are welcome! Please open an issue or submit a pull request.</p>
+<hr />
 
-<h2>📜 License</h2>
-<p>This project is licensed under the MIT License. See the <a href=\"LICENSE\">LICENSE</a> file for details.</p>
+  <h2>📖 Citation</h2>
+  
+  <p>If you use <strong>Ultidock</strong> in your research, publication, or automated pipeline, please consider citing it as:</p>
+  
+  <blockquote>
+    Turgut, T. (2025). <em>Ultidock: A Lightweight Parallelized Docking Pipeline for Ligand Screening</em>. GitHub Repository. 
+    <a href="https://github.com/taka78/ultidock">https://github.com/taka78/ultidock</a>
+  </blockquote>
+  
+  <p>
+    You are free to use and modify this software under the MIT License. 
+    However, citation and credit are appreciated to support continued development.
+  </p>
 
-<hr>
+
+  <hr />
+
 <p align=\"center\">⭐ If you find Ultidock useful, please star the repository!</p>
 
 </body>
