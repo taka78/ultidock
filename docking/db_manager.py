@@ -32,19 +32,25 @@ class DockingDatabaseManager:
             CREATE TABLE IF NOT EXISTS docking_results (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ligand_name TEXT,
-                binding_affinity REAL,
-                rmsd_lb REAL,
-                rmsd_ub REAL,
+                "binding_affinity (kcal/mol)" REAL,
+                "rmsd_lb (Å)" REAL,
+                "rmsd_ub (Å)" REAL,
                 docking_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         self.connection.commit()
 
+
     def insert_docking_result(self, ligand_name, binding_affinity, rmsd_lb, rmsd_ub):
         with self.lock:
             try:
                 self.cursor.execute('''
-                    INSERT INTO docking_results (ligand_name, binding_affinity, rmsd_lb, rmsd_ub)
+                    INSERT INTO docking_results (
+                        ligand_name,
+                        "binding_affinity (kcal/mol)",
+                        "rmsd_lb (Å)",
+                        "rmsd_ub (Å)"
+                    )
                     VALUES (?, ?, ?, ?)
                 ''', (ligand_name, binding_affinity, rmsd_lb, rmsd_ub))
                 self.connection.commit()
@@ -52,22 +58,28 @@ class DockingDatabaseManager:
                 print(f"An error occurred while inserting docking result: {e}")
                 self.connection.rollback()
 
+
     def insert_bulk(self, records):
-        """Batch‐insert a list of (ligand_name, affinity, rmsd_lb, rmsd_ub)."""
+        """Batch-insert a list of (ligand_name, affinity, rmsd_lb, rmsd_ub)."""
         if not records:
             print("ℹ️ insert_bulk: received empty list, skipping.")
-            return  # Don't try to insert an empty list
+            return
 
         with self.lock:
             self.cursor.executemany(
-                """
-                INSERT INTO docking_results
-                (ligand_name, binding_affinity, rmsd_lb, rmsd_ub)
+                '''
+                INSERT INTO docking_results (
+                    ligand_name,
+                    "binding_affinity (kcal/mol)",
+                    "rmsd_lb (Å)",
+                    "rmsd_ub (Å)"
+                )
                 VALUES (?, ?, ?, ?)
-                """,
+                ''',
                 records
             )
             self.connection.commit()
+
 
 
 
