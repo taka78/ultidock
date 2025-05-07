@@ -120,7 +120,7 @@ def main():
         config_file.write('VINA_DIR = os.path.join(BASE_DIR, "VINA_DIR")\n')
         config_file.write('VINA_GPU_DIR = os.path.join(BASE_DIR, "VINA_GPU_DIR")\n')
         config_file.write('MACRO_MOL_DIR = os.path.join(BASE_DIR, "MACRO_MOL_DIR")\n')
-        config_file.write('RESULTS_DIR = os.path.join(BASE_DIR, "results")\n')
+        config_file.write('RESULTS_DIR = os.path.join(BASE_DIR, "RESULTS")\n')
         config_file.write('GPU_TYPE = "' + GPU_TYPE + '"\n')
         config_file.write('DB_PATH = os.path.join(RESULTS_DIR, "ultidock_results.db")\n')
 
