@@ -1,6 +1,7 @@
 #dock_v02.py
-import os
+import os, stat
 import threading
+from threading import Semaphore
 import queue
 import glob
 import subprocess
@@ -13,15 +14,31 @@ from threading import Barrier
 from config import LIGANDS_DIR, DOCKING_DIR, ANALYSIS_DIR, VINA_DIR, MACRO_MOL_DIR, DB_PATH, GPU_TYPE, RESULTS_DIR
 from db_manager import DockingDatabaseManager
 
+def _ensure_vina_exec():
+    for exe in ("vina", "vina_split"):
+        path = os.path.join(VINA_DIR, "bin", exe)
+        try:
+            st = os.stat(path)
+            # if owner-x isn’t already set, add it (resulting in at least 0o755)
+            if not (st.st_mode & stat.S_IXUSR):
+                os.chmod(path, st.st_mode | stat.S_IXUSR)
+        except FileNotFoundError:
+            print(f"Warning: {exe} not found at {path}")
 
 
 class DockingProcessor:
 
     def __init__(self):
+        _ensure_vina_exec()
         self.FILES = glob.glob(f"{LIGANDS_DIR}/*.pdbqt")
         self.barrier = Barrier(6)
         self.event = threading.Event()
         # Initialize database manager and queue for async writes
+        cpu_count = os.cpu_count() or 1
+        cpus_per_vina = 2
+        max_parallel = max(1, cpu_count // cpus_per_vina)
+        print(f"Allowing up to {max_parallel} concurrent Vina runs")
+        self.vina_sem = Semaphore(max_parallel)
         self.db_manager = DockingDatabaseManager(DB_PATH)
         self.db_queue = queue.Queue()
         self.db_thread = threading.Thread(target=self._db_worker, daemon=True)
@@ -29,24 +46,24 @@ class DockingProcessor:
 
 
     def _db_worker(self):
-        print("🧵 DB worker started")
+        print("DB worker started")
         buffer = []
         seen_none = False
 
         while True:
             try:
-                print("🕒 DB worker waiting for item...")
+                print("DB worker waiting for item...")
                 item = self.db_queue.get(timeout=10)
-                print(f"📥 DB worker received: {item}")
+                print(f"DB worker received: {item}")
 
                 if item == "INIT":
-                    print("🧊 Received warm-up INIT. Touching DB...")
+                    print("Received warm-up INIT. Touching DB...")
                     self.db_manager.insert_bulk([])  # Safe no-op
                     self.db_queue.task_done()
                     continue
 
                 elif item == "SHUTDOWN":
-                    print("🛑 Shutdown signal received. Flushing and exiting DB thread.")
+                    print("Shutdown signal received. Flushing and exiting DB thread.")
                     if buffer:
                         self.db_manager.insert_bulk(buffer)
                     self.db_queue.task_done()
@@ -55,25 +72,25 @@ class DockingProcessor:
                 # Item is valid
                 if isinstance(item, list):
                     for rec in item:
-                        if isinstance(rec, tuple) and len(rec) == 4:
+                        if isinstance(rec, tuple) and len(rec) == 5:
                             buffer.append(rec)
                         else:
-                            print(f"❌ Skipping bad sub-record in list: {rec}")
+                            print(f"Skipping bad sub-record in list: {rec}")
                 elif isinstance(item, tuple) and len(item) == 4:
                     buffer.append(item)
                 else:
-                    print(f"❌ Skipping malformed record: {item}")
+                    print(f"Skipping malformed record: {item}")
 
-                self.db_queue.task_done()  # ✅ Very important!
+                self.db_queue.task_done()  #Very important!
 
                 if len(buffer) >= 500:
-                    print(f"📤 Flushing 500 records to DB")
+                    print(f"Flushing 500 records to DB")
                     self.db_manager.insert_bulk(buffer)
                     buffer.clear()
 
             except queue.Empty:
                 if buffer:
-                    print(f"⏳ Timeout flush: Writing {len(buffer)} records to DB")
+                    print(f"Timeout flush: Writing {len(buffer)} records to DB")
                     self.db_manager.insert_bulk(buffer)
                     buffer.clear()
 
@@ -95,7 +112,14 @@ class DockingProcessor:
                 completed_threads += 1
 
         for ligand_file in self.FILES:
-            thread = ProcessFileThread([ligand_file], self.barrier, self.event, thread_callback, self.db_queue)
+            thread = ProcessFileThread(
+                [ligand_file],
+                self.barrier,
+                self.event,
+                thread_callback,
+                self.db_queue,
+                self.vina_sem      # ← new argument
+            )
             threads.append(thread)
 
         threshold = 1024  # available memory threshold in bytes
@@ -152,13 +176,14 @@ class DockingProcessor:
 
 class ProcessFileThread(threading.Thread):
     
-    def __init__(self, bunch, barrier, event, callback, db_queue):
+    def __init__(self, bunch, barrier, event, callback, db_queue, vina_sem):
         super().__init__()
         self.bunch = bunch
         self.barrier = barrier
         self.event = event
         self.callback = callback
         self.db_queue = db_queue
+        self.vina_sem = vina_sem
 
 
 
@@ -186,7 +211,7 @@ class ProcessFileThread(threading.Thread):
         
         return (center_x, center_y, center_z), (size_x, size_y, size_z)
     
-    def parse_vina_output_file(self, filepath, receptor_name):
+    def parse_vina_output_file(self, filepath, receptor_name,ligand_file):
     
         #  Retry a few times to let file system catch up
         for _ in range(3):
@@ -245,7 +270,7 @@ class ProcessFileThread(threading.Thread):
                     # Finalize this model block
                     if current_model is not None and current_ligand_id and current_affinity is not None:
                         tag = f"{current_ligand_id}-Model{current_model}-{receptor_name}"
-                        results.append((tag, current_affinity, current_rmsd_lb, current_rmsd_ub))
+                        results.append((tag, current_affinity, current_rmsd_lb, current_rmsd_ub, ligand_file))
 
                     # Reset all block data
                     current_model = None
@@ -273,24 +298,47 @@ class ProcessFileThread(threading.Thread):
             for ligand_file in self.bunch:
                 print(ligand_file)
                 output_file = f"{DOCKING_DIR}/{ligand_file[-26:]}_{uuid.uuid4()}.pdbqt" # will that last though?
-                subprocess.run([
-                    f"{VINA_DIR}/bin/vina",
-                    "--receptor", f"{macro_mol}",
-                    "--ligand", f"{ligand_file}",
-                    "--center_x", str(grid_center[0]),
-                    "--center_y", str(grid_center[1]),
-                    "--center_z", str(grid_center[2]),
-                    "--size_x", str(grid_size[0]),
-                    "--size_y", str(grid_size[1]),
-                    "--size_z", str(grid_size[2]),
-                    "--cpu", "6", # Number of CPU cores to use- CHANGE IT YOU LITTLE M SERIES MAC USERS
-                    "--out", output_file #i said it's not gonna last
-                ])
+                self.vina_sem.acquire()  # Acquire the semaphore before running Vina
+                try:
+                    result = subprocess.run([
+                        f"{VINA_DIR}/bin/vina",
+                        "--receptor", f"{macro_mol}",
+                        "--ligand", f"{ligand_file}",
+                        "--center_x", str(grid_center[0]),
+                        "--center_y", str(grid_center[1]),
+                        "--center_z", str(grid_center[2]),
+                        "--size_x", str(grid_size[0]),
+                        "--size_y", str(grid_size[1]),
+                        "--size_z", str(grid_size[2]),
+                        "--cpu", "2",
+                        "--out", output_file
+                    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1200)
+                finally:
+                    self.vina_sem.release()
+                print(f"[{threading.current_thread().name}] Docking {ligand_file}")
 
-                parsed_results = self.parse_vina_output_file(output_file, receptor_name)
+
+                # Check for subprocess failure
+                if result.returncode != 0:
+                    print(f"Vina failed for: {ligand_file}")
+                    print(f"STDOUT:\n{result.stdout.strip()}")
+                    print(f"STDERR:\n{result.stderr.strip()}")
+                    continue  # skip to the next ligand
+
+                # Wait until the output file really exists
+                timeout = 5
+                while not os.path.exists(output_file) and timeout > 0:
+                    time.sleep(0.1)
+                    timeout -= 0.1
+
+                if not os.path.exists(output_file):
+                    print(f"Output file missing for: {ligand_file}")
+                    continue
+
+                parsed_results = self.parse_vina_output_file(output_file, receptor_name, ligand_file)
 
                 if not parsed_results:
-                    print(f"⚠️ No valid docking data in: {output_file}")
+                    print(f"No valid docking data in: {output_file}")
                     continue
 
                 buffer.extend(parsed_results)
@@ -306,8 +354,8 @@ class ProcessFileThread(threading.Thread):
                 # Set event if memory usage is above the limit 
                 if memory_info.rss > 2252800000000: #Set your own limit
                     print(f"Memory usage exceeded the limit.")
-                    self.event.set()
-                    self.barrier.wait()
+                    #self.event.set()
+                    #self.barrier.wait()
             if buffer:
                 self.db_queue.put(buffer)
 
@@ -322,7 +370,8 @@ class ProcessFileThread(threading.Thread):
 
 
 if __name__ == "__main__":
+    start_time = time.time()
     processor = DockingProcessor()
     processor.run()
-###im stupid
-#     
+    print("Process finished --- %s seconds ---" % (time.time() - start_time))
+###i can be stupid 
