@@ -7,7 +7,7 @@ import threading
 try:
     from config import RESULTS_DIR
 except ImportError:
-    RESULTS_DIR = "results"  # fallback if config is missing (for testability)
+    RESULTS_DIR = "RESULTS"  # fallback if config is missing (for testability)
 
 class DockingDatabaseManager:
     def __init__(self, db_filename='ultidock_results.db'):
@@ -35,13 +35,13 @@ class DockingDatabaseManager:
                 "binding_affinity (kcal/mol)" REAL,
                 "rmsd_lb (Å)" REAL,
                 "rmsd_ub (Å)" REAL,
+                "docking_file" TEXT,
                 docking_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         self.connection.commit()
 
-
-    def insert_docking_result(self, ligand_name, binding_affinity, rmsd_lb, rmsd_ub):
+    def insert_docking_result(self, ligand_name, binding_affinity, rmsd_lb, rmsd_ub, docking_file):
         with self.lock:
             try:
                 self.cursor.execute('''
@@ -49,39 +49,41 @@ class DockingDatabaseManager:
                         ligand_name,
                         "binding_affinity (kcal/mol)",
                         "rmsd_lb (Å)",
-                        "rmsd_ub (Å)"
+                        "rmsd_ub (Å)",
+                        "docking_file"
                     )
-                    VALUES (?, ?, ?, ?)
-                ''', (ligand_name, binding_affinity, rmsd_lb, rmsd_ub))
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (ligand_name, binding_affinity, rmsd_lb, rmsd_ub, docking_file))
                 self.connection.commit()
             except sqlite3.Error as e:
                 print(f"An error occurred while inserting docking result: {e}")
                 self.connection.rollback()
 
-
     def insert_bulk(self, records):
-        """Batch-insert a list of (ligand_name, affinity, rmsd_lb, rmsd_ub)."""
+        """Batch-insert a list of (ligand_name, affinity, rmsd_lb, rmsd_ub, docking_file)."""
         if not records:
             print("ℹ️ insert_bulk: received empty list, skipping.")
             return
 
         with self.lock:
-            self.cursor.executemany(
-                '''
-                INSERT INTO docking_results (
-                    ligand_name,
-                    "binding_affinity (kcal/mol)",
-                    "rmsd_lb (Å)",
-                    "rmsd_ub (Å)"
+            try:
+                self.cursor.executemany(
+                    '''
+                    INSERT INTO docking_results (
+                        ligand_name,
+                        "binding_affinity (kcal/mol)",
+                        "rmsd_lb (Å)",
+                        "rmsd_ub (Å)",
+                        "docking_file"
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    ''',
+                    records
                 )
-                VALUES (?, ?, ?, ?)
-                ''',
-                records
-            )
-            self.connection.commit()
-
-
-
+                self.connection.commit()
+            except sqlite3.Error as e:
+                print(f"An error occurred in bulk insert: {e}")
+                self.connection.rollback()
 
     def close(self):
         if self.connection:
