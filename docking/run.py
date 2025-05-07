@@ -1,3 +1,15 @@
-exec(open("setup.py").read())
-exec(open("extract.py").read())
-exec(open("dock_v02.py").read())
+import os
+from config import BASE_DIR
+
+# List your scripts in one place
+scripts = [
+    "setup.py",
+    "extract.py",
+    "dock_v02.py",
+    "analyse_docking_results.py"
+]
+
+for script in scripts:
+    path = os.path.join(BASE_DIR, script)
+    with open(path) as f:
+        exec(f.read(), globals())
