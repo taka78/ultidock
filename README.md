@@ -1,7 +1,6 @@
-<h1 align=\"center\">🧬 Ultidock: High-Throughput Docking Pipeline</h1>
+<h1 align=\"center\">Ultidock: High-Throughput Docking Pipeline</h1>
 
 <p align=\"center\">
-  <img alt=\"License\" src=\"https://img.shields.io/badge/license-MIT-green\">
   <div style="text-align: center;">
     <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/taka78/ultidock/dev-beta/traffic-badge.json" alt="GitHub Traffic Badge" />
 </p>
@@ -62,27 +61,14 @@ VINA_DIR = f"{BASE_DIR}/docking"
 <p>Edit <code>config.py</code> to set paths and parameters according to your needs.</p>
 
 <h2>🔍 Results</h2>
-<p>Docking results are stored in SQLite (<code>results/ultidock_results.db</code>). Export filtered results easily to CSV or Excel using the provided analysis script.</p>
+<p>Docking results are stored in SQLite (<code>results/ultidock_results.db</code>). Results will be exported to CSV automatically.</p>
 
 <h2>💾 Exporting Results</h2>
 
-<pre><code># Default CSV export
-python docking/analyse_docking_results.py
-
-# Export to Excel
+<pre><code>
+# Export to Excel (if you need an .xlsx file for whatever the reason.)
 python docking/analyse_docking_results.py --out results.xlsx
 </code></pre>
-
-<h2>📦 Making a Release on GitHub</h2>
-<ol>
-  <li>Go to your repository on GitHub.</li>
-  <li>Click on <strong>"Releases"</strong> in the sidebar.</li>
-  <li>Click <strong>"Draft a new release"</strong>.</li>
-  <li>Tag your release (e.g., <code>v1.0.0</code>) and give it a descriptive title.</li>
-  <li>Add release notes (changes, improvements, fixes).</li>
-  <li>Optionally attach any binary files or pre-built executables.</li>
-  <li>Publish the release.</li>
-</ol>
 
 <h2>🤝 Contributing</h2>
 <p>Contributions are welcome! Please open an issue or submit a pull request.</p>
