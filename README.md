@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 </head>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; margin: 2rem; background-color: #f8f8f8; color: #333;">
-  <h3>Could be broken or working faster than ever. I think I solved it. I hope? I know it's not parsing RMSD values right, I will get into it. Shut up. </h3>
+
   <h1>Ultidock Project – Dev Channel</h1>
 
   <p>Ultidock is a parallelized, automated docking pipeline designed for high-throughput molecular screening. If you're familiar with docking workflows, this tool is designed to minimize manual steps and accelerate large-scale simulations.</p>
@@ -35,6 +35,8 @@
     <li>Place the file in your <code>docking/</code> directory.</li>
     <li>Add your macromolecule structure to the <code>MACRO_MOL_DIR</code>.</li>
     <li>Run the main script:<br /><code>python run.py</code></li>
+    <li>Analyse the database for good candidates.<li>
+
   </ol>
 
   <p>This will:</p>
