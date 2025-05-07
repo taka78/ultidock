@@ -1,112 +1,97 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-</head>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; margin: 2rem; background-color: #f8f8f8; color: #333;">
+<h1 align=\"center\">🧬 Ultidock: High-Throughput Docking Pipeline</h1>
 
-  <h1>Ultidock Project – Dev Channel</h1>
+<p align=\"center\">
+  <img alt=\"License\" src=\"https://img.shields.io/badge/license-MIT-green\">
+  <div style="text-align: center;">
+    <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/taka78/ultidock/dev-beta/traffic-badge.json" alt="GitHub Traffic Badge" />
+</p>
 
-  <p>Ultidock is a parallelized, automated docking pipeline designed for high-throughput molecular screening. If you're familiar with docking workflows, this tool is designed to minimize manual steps and accelerate large-scale simulations.</p>
+<h2>📖 Overview</h2>
+<p>
+Ultidock is a powerful and fully automated molecular docking pipeline built around AutoDock Vina, optimized for large-scale ligand screening with SQLite database integration for efficient data handling.
+</p>
 
-  <hr />
+<h2>✨ Features</h2>
+<ul>
+  <li><strong>Fully Automated Workflow:</strong> Setup, extraction, docking, and analysis.</li>
+  <li><strong>Optimized Performance:</strong> Multithreaded docking processes.</li>
+  <li><strong>SQLite Database Integration:</strong> Structured data storage for large datasets.</li>
+  <li><strong>Flexible Analysis:</strong> Advanced SQL-based data filtering and export.</li>
+  <li><strong>User-Friendly Config:</strong> Simple configuration through a single <code>config.py</code>.</li>
+</ul>
 
-  <h2>What’s New in the Beta Channel</h2>
+<h2>⚙️ Requirements</h2>
+<ul>
+  <li>Python 3.10+</li>
+  <li>AutoDock Vina (included)</li>
+  <li>SQLite3 (built-in Python)</li>
+  <li>Pandas, NumPy</li>
+</ul>
 
-  After a long (and slightly painful) detour through text-based read/write workflows, this release brings a full migration to SQL. Logging is now handled through an SQLite database with multi-thread-safe access, drastically improving performance and scalability.</p>
+<h2>🚀 Quick Start</h2>
+<h3>1. Clone the repository:</h3>
 
-  <ul>
-    <li>Switched from flat file parsing to structured <strong>SQLite logging</strong></li>
-    <li>Introduced <strong>multi-thread-safe database access</strong> with locking</li>
-    <li>Database includes: ligand name, receptor, affinity, RMSD, and timestamp</li>
-    <li>Setup is fully automated via <code>setup.py</code>, which generates <code>config.py</code> with clean paths</li>
-    <li>Paths are now relative to the working directory for better portability</li>
-    <li>Results are stored in a <code>results/</code> directory, with the database created on first run</li>
-    <li>Foundation laid for future features: resumable runs, GPU acceleration, and dashboard integration</li>
-  </ul>
+<pre><code>git clone https://github.com/taka78/ultidock.git
+cd ultidock
+</code></pre>
 
-  <hr />
-
-  <h2>How to Use</h2>
-
-  <ol>
-    <li>Create a <code>wget</code> file containing ligand download commands.</li>
-    <li>Place the file in your <code>docking/</code> directory.</li>
-    <li>Add your macromolecule structure to the <code>MACRO_MOL_DIR</code>.</li>
-    <li>Run the main script:<br /><code>python run.py</code></li>
-    <li>Analyse the database for good candidates.<li>
-
-  </ol>
-
-  <p>This will:</p>
-  <ul>
-    <li>Download and preprocess ligand files</li>
-    <li>Automatically calculate and center the docking grid</li>
-    <li>Start the docking process using AutoDock Vina with threading</li>
-    <li>Log results to the database during execution</li>
-  </ul>
-
-  <p>To analyze results, use:</p>
-  <pre><code>python output-analyses.py</code></pre>
-
-  <p>A direct SQL integration with the analysis tool is planned, but for now, this script uses Pandas to extract and export results, typically to CSV.</p>
-
-  <hr />
-
-  <h2>Performance Notes</h2>
-
-  <p>Early versions of Ultidock were heavily reliant on sequential text I/O, which significantly slowed down large-scale runs. SQL support changes everything. Once your data reaches millions of ligands or gigabytes of processed results, having indexed and structured access becomes critical.</p>
-
-  <p><strong>SQLite now handles all result logging.</strong> If you're using a standard NVMe SSD, performance should be excellent. There's no longer a need to consider specialty drives like Optane for I/O bottlenecks.</p>
-
-  <blockquote><strong>Note:</strong> This script is computationally intensive. Ensure proper CPU cooling and monitor system resources during execution.</blockquote>
-
-  <hr />
-
-  <h2>System Configuration (Dev Setup)</h2>
-
-  <ul>
-    <li>CPU: AMD Ryzen 5 3600X</li>
-    <li>RAM: 24 GB DDR4</li>
-    <li>Storage: 1 TB NVMe SSD</li>
-    <li>Environment: WSL (Linux)</li>
-  </ul>
-
-  <p>Running ~1.2 million ligands against a single macromolecule (4H10) took around 3 days, generating approximately 80 GB of data.</p>
-
-  <hr />
-
-  <h2>Collaboration & Future Work</h2>
-
-  <p>If you have access to more powerful compute infrastructure or are interested in contributing, particularly toward GPU integration or AI-assisted result filtering, feel free to reach out.</p>
-
-  <p>This project is being developed by a physicist—not a molecular biologist—but the goal is to make advanced simulations more accessible, modular, and fast. Future directions include dynamic simulations and adaptive docking methods.</p>
-
-  <hr />
-
-  <hr />
-
-  <h2>📖 Citation</h2>
-  
-  <p>If you use <strong>Ultidock</strong> in your research, publication, or automated pipeline, please consider citing it as:</p>
-  
-  <blockquote>
-    Turgut, T. (2025). <em>Ultidock: A Lightweight Parallelized Docking Pipeline for Ligand Screening</em>. GitHub Repository. 
-    <a href="https://github.com/taka78/ultidock">https://github.com/taka78/ultidock</a>
-  </blockquote>
-  
-  <p>
-    You are free to use and modify this software under the MIT License. 
-    However, citation and credit are appreciated to support continued development.
-  </p>
+<h3>2. Adjust the expected analysing standarts for your molecule from <pre><code>analyse_docking_results.py</code></pre>:</h3>
+<pre><code>
+    DEFAULT_AFFINITY = -7.0        # kcal/mol // you should change this according to how much chemically active your macromolecule.
+    DEFAULT_RMSD_LB = 5.0          # Å // you should change this according to how big your macromolecule's docking site is.
+    DEFAULT_RMSD_UB = 10.0         # Å // you should change this according to how big your macromolecule's docking site is.
+    DEFAULT_MIN_MODEL = 2          # integer // you should change this according to how picky you are.
+</code></pre>
 
 
-  <h3>Disclaimer</h3>
-  <p>This is a beta release. Features are evolving. Stability is not guaranteed. Use at your own risk.</p>
+<h3>3. Run the pipeline:</h3>
+<pre><code>python3 /path/to/your/ultidock/docking/run.py
+</code></pre>
 
-<div style="text-align: center;">
-  <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/taka78/ultidock/dev-beta/traffic-badge.json" alt="GitHub Traffic Badge" />
+
+<h2>🛠 Configuration (<code>config.py</code>)</h2>
+<p>Defined all paths and default thresholds in a single configuration file for seamless adjustments automatically when you run run.py:</p>
+
+<pre><code>BASE_DIR = '/path/to/your/ultidock'
+DB_PATH = f"{BASE_DIR}/results/ultidock_results.db"
+LIGANDS_DIR = f"{BASE_DIR}/docking/LIGANDS_DIR"
+MACRO_MOL_DIR = f"{BASE_DIR}/docking/MACRO_MOL_DIR"
+DOCKING_DIR = f"{BASE_DIR}/docking"
+VINA_DIR = f"{BASE_DIR}/docking"
+</code></pre>
+<p>Edit <code>config.py</code> to set paths and parameters according to your needs.</p>
+
+<h2>🔍 Results</h2>
+<p>Docking results are stored in SQLite (<code>results/ultidock_results.db</code>). Export filtered results easily to CSV or Excel using the provided analysis script.</p>
+
+<h2>💾 Exporting Results</h2>
+
+<pre><code># Default CSV export
+python docking/analyse_docking_results.py
+
+# Export to Excel
+python docking/analyse_docking_results.py --out results.xlsx
+</code></pre>
+
+<h2>📦 Making a Release on GitHub</h2>
+<ol>
+  <li>Go to your repository on GitHub.</li>
+  <li>Click on <strong>"Releases"</strong> in the sidebar.</li>
+  <li>Click <strong>"Draft a new release"</strong>.</li>
+  <li>Tag your release (e.g., <code>v1.0.0</code>) and give it a descriptive title.</li>
+  <li>Add release notes (changes, improvements, fixes).</li>
+  <li>Optionally attach any binary files or pre-built executables.</li>
+  <li>Publish the release.</li>
+</ol>
+
+<h2>🤝 Contributing</h2>
+<p>Contributions are welcome! Please open an issue or submit a pull request.</p>
+
+<h2>📜 License</h2>
+<p>This project is licensed under the MIT License. See the <a href=\"LICENSE\">LICENSE</a> file for details.</p>
+
+<hr>
+<p align=\"center\">⭐ If you find Ultidock useful, please star the repository!</p>
 
 </body>
 </html>
