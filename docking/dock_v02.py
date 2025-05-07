@@ -192,7 +192,7 @@ class ProcessFileThread(threading.Thread):
         for _ in range(3):
             if os.path.exists(filepath):
                 break
-            time.sleep(0.05)  # Small delay (50ms)
+            time.sleep(0.05)  # Small delay (50ms) yay
         else:
             print(f"parse_vina_output_file: File not found after retries: {filepath}")
             return []
