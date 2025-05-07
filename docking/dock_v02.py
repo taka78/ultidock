@@ -1,4 +1,5 @@
 #dock_v02.py
+import os
 import threading
 import queue
 import glob
@@ -185,18 +186,77 @@ class ProcessFileThread(threading.Thread):
         
         return (center_x, center_y, center_z), (size_x, size_y, size_z)
     
-    def parse_vina_output(self, output_file):
-        # Real parsing of Vina output file:
-        affinity, rmsd_lb, rmsd_ub = None, None, None
-        with open(output_file, 'r') as f:
-            for line in f:
-                if line.startswith("REMARK VINA RESULT"):
+    def parse_vina_output_file(self, filepath, receptor_name):
+    
+        #  Retry a few times to let file system catch up
+        for _ in range(3):
+            if os.path.exists(filepath):
+                break
+            time.sleep(0.05)  # Small delay (50ms)
+        else:
+            print(f"parse_vina_output_file: File not found after retries: {filepath}")
+            return []
+        results = []
+        current_model = None
+        current_affinity = None
+        current_rmsd_lb = None
+        current_rmsd_ub = None
+        current_ligand_id = None
+        inside_model_block = False
+
+        with open(filepath, 'r') as fp:
+            for line in fp:
+                line = line.strip()
+
+                if line.startswith("MODEL"):
+                    # Start new block
+                    if current_model is not None and current_ligand_id and current_affinity is not None:
+                        tag = f"{current_ligand_id}-{receptor_name}-M{current_model}"
+                        results.append((tag, current_affinity, current_rmsd_lb, current_rmsd_ub))
+
+                    # Reset state
+                    inside_model_block = True
+                    current_affinity = None
+                    current_rmsd_lb = None
+                    current_rmsd_ub = None
+                    current_ligand_id = None
+
+                    try:
+                        current_model = int(line.split()[1])
+                    except (IndexError, ValueError):
+                        current_model = None
+
+                elif line.startswith("REMARK VINA RESULT:") and inside_model_block:
                     parts = line.split()
-                    affinity = float(parts[3])
-                    rmsd_lb = float(parts[4])
-                    rmsd_ub = float(parts[5])
-                    break
-        return affinity, rmsd_lb, rmsd_ub
+                    if len(parts) >= 6 and parts[0:3] == ['REMARK', 'VINA', 'RESULT:']:
+                        try:
+                            current_affinity = float(parts[3])
+                            current_rmsd_lb = float(parts[4])
+                            current_rmsd_ub = float(parts[5])
+                        except ValueError:
+                            continue
+
+                elif line.startswith("REMARK  Name") and inside_model_block:
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        current_ligand_id = parts[3]
+
+                elif line.startswith("ENDMDL") and inside_model_block:
+                    # Finalize this model block
+                    if current_model is not None and current_ligand_id and current_affinity is not None:
+                        tag = f"{current_ligand_id}-Model{current_model}-{receptor_name}"
+                        results.append((tag, current_affinity, current_rmsd_lb, current_rmsd_ub))
+
+                    # Reset all block data
+                    current_model = None
+                    current_affinity = None
+                    current_rmsd_lb = None
+                    current_rmsd_ub = None
+                    current_ligand_id = None
+                    inside_model_block = False
+
+        return results
+
 
     def run(self):
         # Calculate grid center and size dynamically for each ligand
@@ -227,18 +287,18 @@ class ProcessFileThread(threading.Thread):
                     "--out", output_file #i said it's not gonna last
                 ])
 
-                affinity, rmsd_lb, rmsd_ub = self.parse_vina_output(output_file)
-                ligand_name = ligand_file.split("/")[-1]
+                parsed_results = self.parse_vina_output_file(output_file, receptor_name)
 
-                if affinity is not None:
-                    # collect into a batch
-                    buffer.append((f"{ligand_name}-{receptor_name}", affinity, rmsd_lb, rmsd_ub))
-                    # once we hit BATCH_SIZE, hand it off & clear
-                    if len(buffer) >= BATCH_SIZE:
-                        self.db_queue.put(buffer.copy())
-                        buffer.clear()
-                else:
-                    print(f"Warning: failed to parse {ligand_name}")             
+                if not parsed_results:
+                    print(f"⚠️ No valid docking data in: {output_file}")
+                    continue
+
+                buffer.extend(parsed_results)
+
+                if len(buffer) >= BATCH_SIZE:
+                    self.db_queue.put(buffer.copy())
+                    buffer.clear()
+ 
                 # Check memory usage
                 memory_info = psutil.Process().memory_info()
                 print(f"Memory usage: {memory_info.rss / (1024 * 1024):.2f} MB")
