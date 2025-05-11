@@ -6,7 +6,7 @@ token = os.environ['GH_TOKEN']
 repo = os.environ['REPO']
 
 headers = {
-    'Authorization': f'token {token}',
+    'Authorization': f'Bearer {token}'
     'Accept': 'application/vnd.github.v3+json'
 }
 
