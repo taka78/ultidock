@@ -25,7 +25,7 @@ Ultidock is a fully automated and lightweight molecular docking pipeline built a
   <li>Python 3.10 or newer</li>
   <li><a href="https://vina.scripps.edu/">AutoDock Vina</a> (included or preconfigured)</li>
   <li>SQLite3 (included with Python)</li>
-  <li>Pandas, NumPy (install via <code>pip install -r requirements.txt</code>)</li>
+  <li>Pandas, NumPy etc. </li>
 </ul>
 
 <h2>🚀 Quick Start</h2>
