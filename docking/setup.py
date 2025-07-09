@@ -57,22 +57,30 @@ def download_ligands_from_file(wget_file_path, LIGANDS_DIR):
         with open(wget_file_path, 'r') as file:
             for command in file:
                 command = command.strip()
-                if command:
-                    if '-O' in command:
-                        parts = command.split('-O')
-                        url = parts[0].strip()
-                        filename = parts[1].strip()
-                        full_output_path = os.path.join(LIGANDS_DIR, filename)
-                        final_command = f"{url} -O {full_output_path}"
-                    else:
-                        final_command = f"{command} -P {LIGANDS_DIR}"
+                if not command:
+                    continue
 
-                    print(f"Executing: {final_command}")
+                # Set common wget options (all timeouts in seconds)
+                wget_opts = "--timeout=60 --read-timeout=60 --tries=2 --waitretry=2"
+
+                if '-O' in command:
+                    parts = command.split('-O')
+                    url = parts[0].strip()
+                    filename = parts[1].strip()
+                    full_output_path = os.path.join(LIGANDS_DIR, filename)
+                    final_command = f"wget {wget_opts} {url} -O {full_output_path}"
+                else:
+                    final_command = f"{command} {wget_opts} -P {LIGANDS_DIR}"
+
+                print(f"Executing: {final_command}")
+                try:
                     subprocess.run(final_command, shell=True, check=True)
+                except subprocess.CalledProcessError:
+                    print(f"Warning: Failed to download with command: {final_command}")
 
-        print(f"All downloads completed and stored in {LIGANDS_DIR}")
-    except subprocess.CalledProcessError as e:
-        print(f"Error during command execution: {e}")
+        print(f"All downloads attempted. Ligands stored in {LIGANDS_DIR}")
+    except Exception as e:
+        print(f"Error during .wget file processing: {e}")
 
 
 def main():
@@ -88,12 +96,9 @@ def main():
     DOCKING_DIR = ask_for_input("Enter the path for docking files", os.path.join(CURRENT_DIR, "DOCKING_DIR"))
     ANALYSIS_DIR = ask_for_input("Enter the path for analysis files", os.path.join(CURRENT_DIR, "ANALYSIS_DIR"))
     VINA_DIR = ask_for_input("Enter the path for Autodock Vina", os.path.join(CURRENT_DIR, "VINA_DIR"))
-    VINA_GPU_DIR = ask_for_input("Enter the path for Vina-GPU-2.0 files", os.path.join(CURRENT_DIR, "VINA_GPU_DIR"))
+    AUTODOCK_GPU_DIR = ask_for_input("Enter the path for Autodock-GPU files", os.path.join(CURRENT_DIR, "AUTODOCK_GPU_DIR"))
     MACRO_MOL_DIR = ask_for_input("Enter the path for macro molecule of your choice", os.path.join(CURRENT_DIR, "MACRO_MOL_DIR"))
     RESULTS_DIR = ask_for_input("Enter the path for results files", os.path.join(CURRENT_DIR, "RESULTS_DIR"))
-
-    # Define the results directory (only the path; the DB file will be created later by your DB manager)
-    RESULTS_DIR = os.path.join(CURRENT_DIR, "RESULTS")
 
     # Ask for the .wget file location
     wget_file_path = ask_for_input("Enter the path to the .wget file", os.path.join(CURRENT_DIR, "ligands.wget"))
@@ -103,7 +108,7 @@ def main():
     create_directory_if_needed(DOCKING_DIR)
     create_directory_if_needed(ANALYSIS_DIR)
     create_directory_if_needed(VINA_DIR)
-    create_directory_if_needed(VINA_GPU_DIR)
+    create_directory_if_needed(AUTODOCK_GPU_DIR)
     create_directory_if_needed(MACRO_MOL_DIR)
     create_directory_if_needed(RESULTS_DIR)
 
@@ -118,9 +123,9 @@ def main():
         config_file.write('DOCKING_DIR = os.path.join(BASE_DIR, "DOCKING_DIR")\n')
         config_file.write('ANALYSIS_DIR = os.path.join(BASE_DIR, "ANALYSIS_DIR")\n')
         config_file.write('VINA_DIR = os.path.join(BASE_DIR, "VINA_DIR")\n')
-        config_file.write('VINA_GPU_DIR = os.path.join(BASE_DIR, "VINA_GPU_DIR")\n')
+        config_file.write('AUTODOCK_GPU_DIR = os.path.join(BASE_DIR, "AUTODOCK_GPU_DIR")\n')
         config_file.write('MACRO_MOL_DIR = os.path.join(BASE_DIR, "MACRO_MOL_DIR")\n')
-        config_file.write('RESULTS_DIR = os.path.join(BASE_DIR, "RESULTS")\n')
+        config_file.write('RESULTS_DIR = os.path.join(BASE_DIR, "results")\n')
         config_file.write('GPU_TYPE = "' + GPU_TYPE + '"\n')
         config_file.write('DB_PATH = os.path.join(RESULTS_DIR, "ultidock_results.db")\n')
 
