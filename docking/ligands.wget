@@ -1,1 +1,25 @@
-wget http://files.docking.org/3D/AD/BBMN/ADBBMN.xaa.pdbqt.gz -O ADBBMN.xaa.pdbqt.gz
+wget -nH -r -l7 -np -A '*-O-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22d/H23/H23P000/f/H23P000-O-daaaaf.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-O-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22d/H23/H23P000/c/H23P000-O-daaaac.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-P-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22d/H23/H23P000/a/H23P000-P-daaaaa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-L-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22g/H23/H23P000/a/H23P000-L-gaaaaa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-M-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22g/H23/H23P000/a/H23P000-M-gaaaaa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-N-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22g/H23/H23P000/a/H23P000-N-gaaaaa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-O-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22g/H23/H23P000/a/H23P000-O-gaaaaa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-P-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22g/H23/H23P000/a/H23P000-P-gaaaaa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-M-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22k/H23/H23P000/a/H23P000-M-kaa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-N-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22k/H23/H23P000/a/H23P000-N-kaa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-O-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22k/H23/H23P000/a/H23P000-O-kaa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-M-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22l/H23/H23P000/a/H23P000-M-laa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-N-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22l/H23/H23P000/a/H23P000-N-lab.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-N-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22l/H23/H23P000/a/H23P000-N-laa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-N-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22l/H23/H23P000/a/H23P000-N-lac.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-O-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22l/H23/H23P000/a/H23P000-O-laa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-O-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22l/H23/H23P000/a/H23P000-O-lab.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-P-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22l/H23/H23P000/a/H23P000-P-laa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-L-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22m/H23/H23P000/a/H23P000-L-maa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-M-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22m/H23/H23P000/a/H23P000-M-maa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-N-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22m/H23/H23P000/a/H23P000-N-maa.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-N-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22m/H23/H23P000/a/H23P000-N-mab.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-N-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22m/H23/H23P000/a/H23P000-N-mac.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-N-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22m/H23/H23P000/a/H23P000-N-mad.pdbqt.tgz
+wget -nH -r -l7 -np -A '*-O-*pdbqt.tgz' http://files.docking.org/zinc22/zinc-22m/H23/H23P000/a/H23P000-O-maa.pdbqt.tgz
