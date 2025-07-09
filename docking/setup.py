@@ -1,4 +1,3 @@
-
 import os
 import subprocess
 import sys
@@ -24,24 +23,25 @@ def detect_gpu():
     """Detect the GPU type (NVIDIA, AMD, or CPU fallback)."""
     
     # Check for NVIDIA GPU using nvidia-smi
-    if shutil.which("nvidia-smi"):
+    has_nvidia = shutil.which("nvidia-smi")
+    has_amd = shutil.which("rocm-smi")
+
+    if has_nvidia:
         try:
             subprocess.run(["nvidia-smi"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            print("NVIDIA GPU detected.")
             return "NVIDIA"
         except subprocess.CalledProcessError:
-            print("NVIDIA GPU detected but nvidia-smi failed to execute.")
-            return "Unknown"
+            print("NVIDIA GPU detected but inaccessible.")
 
-    # Check for AMD GPU using ROCm tools
-    if shutil.which("rocm-smi"):
+    if has_amd:
         try:
             subprocess.run(["rocm-smi"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            print("AMD GPU detected.")
             return "AMD"
         except subprocess.CalledProcessError:
-            print("AMD GPU detected but rocm-smi failed to execute.")
-            return "Unknown"
+            print("AMD GPU detected but inaccessible.")
 
-    # Default to CPU if no GPU is detected
     print("No compatible GPU detected. Using CPU mode.")
     return "CPU"
 
@@ -57,65 +57,79 @@ def download_ligands_from_file(wget_file_path, LIGANDS_DIR):
         with open(wget_file_path, 'r') as file:
             for command in file:
                 command = command.strip()
-                if command:
-                    if '-O' in command:
-                        parts = command.split('-O')
-                        url = parts[0].strip()
-                        filename = parts[1].strip()
-                        full_output_path = os.path.join(LIGANDS_DIR, filename)
-                        final_command = f"{url} -O {full_output_path}"
-                    else:
-                        final_command = f"{command} -P {LIGANDS_DIR}"
+                if not command:
+                    continue
 
-                    print(f"Executing: {final_command}")
+                # Set common wget options (all timeouts in seconds)
+                wget_opts = "--timeout=60 --read-timeout=60 --tries=2 --waitretry=2"
+
+                if '-O' in command:
+                    parts = command.split('-O')
+                    url = parts[0].strip()
+                    filename = parts[1].strip()
+                    full_output_path = os.path.join(LIGANDS_DIR, filename)
+                    final_command = f"wget {wget_opts} {url} -O {full_output_path}"
+                else:
+                    final_command = f"{command} {wget_opts} -P {LIGANDS_DIR}"
+
+                print(f"Executing: {final_command}")
+                try:
                     subprocess.run(final_command, shell=True, check=True)
+                except subprocess.CalledProcessError:
+                    print(f"Warning: Failed to download with command: {final_command}")
 
-        print(f"All downloads completed and stored in {LIGANDS_DIR}")
-    except subprocess.CalledProcessError as e:
-        print(f"Error during command execution: {e}")
+        print(f"All downloads attempted. Ligands stored in {LIGANDS_DIR}")
+    except Exception as e:
+        print(f"Error during .wget file processing: {e}")
 
 
 def main():
-    CURRENT_DIR = os.getcwd()
-
+    CURRENT_DIR = os.path.abspath(os.path.dirname(__file__))
+    print("=" * 50)
     print("Welcome to the Ultidock Setup")
+    print("=" * 50)
 
-    GPU_TYPE = detect_gpu()  # This won't crash the script anymore
+    GPU_TYPE = detect_gpu()  # Detect GPU type
 
     # Ask for directory paths
     LIGANDS_DIR = ask_for_input("Enter the path for ligand files", os.path.join(CURRENT_DIR, "LIGANDS_DIR"))
     DOCKING_DIR = ask_for_input("Enter the path for docking files", os.path.join(CURRENT_DIR, "DOCKING_DIR"))
     ANALYSIS_DIR = ask_for_input("Enter the path for analysis files", os.path.join(CURRENT_DIR, "ANALYSIS_DIR"))
-    VINA_GPU_DIR = ask_for_input("Enter the path for Vina-GPU-2.0 files", os.path.join(CURRENT_DIR, "VINA_GPU_DIR"))
     VINA_DIR = ask_for_input("Enter the path for Autodock Vina", os.path.join(CURRENT_DIR, "VINA_DIR"))
-    MACRO_MOL_DIR = ask_for_input("Enter the path for macro molecule of your choice.", os.path.join(CURRENT_DIR, "MACRO_MOL_DIR"))
+    AUTODOCK_GPU_DIR = ask_for_input("Enter the path for Autodock-GPU files", os.path.join(CURRENT_DIR, "AUTODOCK_GPU_DIR"))
+    MACRO_MOL_DIR = ask_for_input("Enter the path for macro molecule of your choice", os.path.join(CURRENT_DIR, "MACRO_MOL_DIR"))
+    RESULTS_DIR = ask_for_input("Enter the path for results files", os.path.join(CURRENT_DIR, "RESULTS_DIR"))
 
     # Ask for the .wget file location
     wget_file_path = ask_for_input("Enter the path to the .wget file", os.path.join(CURRENT_DIR, "ligands.wget"))
 
-    # Detect GPU and select the appropriate docking engine
-
-    # Save these to config.py
-    with open('config.py', 'w') as config_file:
-        config_file.write(f'# config.py \n')
-        config_file.write(f'# Paths for directories \n')
-        config_file.write(f'LIGANDS_DIR = "{LIGANDS_DIR}"\n')
-        config_file.write(f'DOCKING_DIR = "{DOCKING_DIR}"\n')
-        config_file.write(f'ANALYSIS_DIR = "{ANALYSIS_DIR}"\n')
-        config_file.write(f'VINA_DIR = "{VINA_DIR}"\n')
-        config_file.write(f'VINA_GPU_DIR = "{VINA_GPU_DIR}"\n')  # Fixed overwrite issue
-        config_file.write(f'MACRO_MOL_DIR = "{MACRO_MOL_DIR}"\n')
-        config_file.write(f'GPU_TYPE = "{GPU_TYPE}"\n')  # Save GPU detection result
-
-    # Create required directories
+    # Create required directories (including results)
     create_directory_if_needed(LIGANDS_DIR)
     create_directory_if_needed(DOCKING_DIR)
     create_directory_if_needed(ANALYSIS_DIR)
-    create_directory_if_needed(VINA_GPU_DIR)
     create_directory_if_needed(VINA_DIR)
+    create_directory_if_needed(AUTODOCK_GPU_DIR)
     create_directory_if_needed(MACRO_MOL_DIR)
+    create_directory_if_needed(RESULTS_DIR)
 
-    print("Configuration saved to config.py and default directory files created!")
+    # Save configuration to config.py (only declaring paths; DB file is not created here)
+    with open('config.py', 'w') as config_file:
+        config_file.write('# config.py\n')
+        config_file.write('# Auto-generated config.py\n')
+        config_file.write('import os\n\n')
+        # Use the directory where config.py is located as the base directory.
+        config_file.write('BASE_DIR = os.path.abspath(os.path.dirname(__file__))\n\n')
+        config_file.write('LIGANDS_DIR = os.path.join(BASE_DIR, "LIGANDS_DIR")\n')
+        config_file.write('DOCKING_DIR = os.path.join(BASE_DIR, "DOCKING_DIR")\n')
+        config_file.write('ANALYSIS_DIR = os.path.join(BASE_DIR, "ANALYSIS_DIR")\n')
+        config_file.write('VINA_DIR = os.path.join(BASE_DIR, "VINA_DIR")\n')
+        config_file.write('AUTODOCK_GPU_DIR = os.path.join(BASE_DIR, "AUTODOCK_GPU_DIR")\n')
+        config_file.write('MACRO_MOL_DIR = os.path.join(BASE_DIR, "MACRO_MOL_DIR")\n')
+        config_file.write('RESULTS_DIR = os.path.join(BASE_DIR, "results")\n')
+        config_file.write('GPU_TYPE = "' + GPU_TYPE + '"\n')
+        config_file.write('DB_PATH = os.path.join(RESULTS_DIR, "ultidock_results.db")\n')
+
+        print("Configuration saved to config.py and default directories are ensured!")
 
     # Download the ligands using the URLs from the .wget file
     download_ligands_from_file(wget_file_path, LIGANDS_DIR)
