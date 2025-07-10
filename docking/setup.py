@@ -57,30 +57,23 @@ def download_ligands_from_file(wget_file_path, LIGANDS_DIR):
         with open(wget_file_path, 'r') as file:
             for command in file:
                 command = command.strip()
-                if not command:
-                    continue
+                if command:
+                    if '-O' in command:
+                        parts = command.split('-O')
+                        url = parts[0].strip()
+                        filename = parts[1].strip()
+                        full_output_path = os.path.join(LIGANDS_DIR, filename)
+                        final_command = f"{url} -O {full_output_path}"
+                    else:
+                        final_command = f"{command} -P {LIGANDS_DIR}"
 
-                # Set common wget options (all timeouts in seconds)
-                wget_opts = "--timeout=60 --read-timeout=60 --tries=2 --waitretry=2"
-
-                if '-O' in command:
-                    parts = command.split('-O')
-                    url = parts[0].strip()
-                    filename = parts[1].strip()
-                    full_output_path = os.path.join(LIGANDS_DIR, filename)
-                    final_command = f"wget {wget_opts} {url} -O {full_output_path}"
-                else:
-                    final_command = f"{command} {wget_opts} -P {LIGANDS_DIR}"
-
-                print(f"Executing: {final_command}")
-                try:
+                    print(f"Executing: {final_command}")
                     subprocess.run(final_command, shell=True, check=True)
-                except subprocess.CalledProcessError:
-                    print(f"Warning: Failed to download with command: {final_command}")
 
-        print(f"All downloads attempted. Ligands stored in {LIGANDS_DIR}")
-    except Exception as e:
-        print(f"Error during .wget file processing: {e}")
+        print(f"All downloads completed and stored in {LIGANDS_DIR}")
+    except subprocess.CalledProcessError as e:
+        print(f"Error during command execution: {e}")
+
 
 
 def main():
