@@ -34,6 +34,7 @@ docking/*
 # Ignore everything under docking/
 # Allow Python scripts and key subfolders
 !docking/*.py
+!docking/AUTODOCK_GPU_DIR/
 !docking/VINA_DIR/
 !docking/MACRO_MOL_DIR/
 !docking/VINA_DIR/**
