@@ -11,7 +11,7 @@ import uuid
 import gc
 import numpy as np
 from threading import Barrier
-from config import LIGANDS_DIR, DOCKING_DIR, ANALYSIS_DIR, VINA_DIR, MACRO_MOL_DIR, DB_PATH, GPU_TYPE, RESULTS_DIR
+from config import LIGANDS_DIR, DOCKING_DIR, ANALYSIS_DIR, VINA_DIR, AUTODOCK_GPU_DIR, MACRO_MOL_DIR, DB_PATH, GPU_TYPE, RESULTS_DIR
 from db_manager import DockingDatabaseManager
 
 def _ensure_vina_exec():
@@ -24,6 +24,11 @@ def _ensure_vina_exec():
                 os.chmod(path, st.st_mode | stat.S_IXUSR)
         except FileNotFoundError:
             print(f"Warning: {exe} not found at {path}")
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+BINARY_PATH = os.path.join(AUTODOCK_GPU_DIR, "bin", "autodock_gpu_128wi")
+COMPILER_SCRIPT = os.path.join(os.path.dirname(__file__), "autodock-gpu-compiler.sh")
 
 
 class DockingProcessor:
@@ -300,19 +305,34 @@ class ProcessFileThread(threading.Thread):
                 output_file = f"{DOCKING_DIR}/{ligand_file[-26:]}_{uuid.uuid4()}.pdbqt" # will that last though?
                 self.vina_sem.acquire()  # Acquire the semaphore before running Vina
                 try:
-                    result = subprocess.run([
-                        f"{VINA_DIR}/bin/vina",
-                        "--receptor", f"{macro_mol}",
-                        "--ligand", f"{ligand_file}",
-                        "--center_x", str(grid_center[0]),
-                        "--center_y", str(grid_center[1]),
-                        "--center_z", str(grid_center[2]),
-                        "--size_x", str(grid_size[0]),
-                        "--size_y", str(grid_size[1]),
-                        "--size_z", str(grid_size[2]),
-                        "--cpu", "2",
-                        "--out", output_file
-                    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1200)
+                    if GPU_TYPE == "NVIDIA":
+                        # Run AutoDock-GPU
+                        result = subprocess.run([
+                            f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_128wi",
+                            "--l", f"{ligand_file}",
+                            "--r", f"{macro_mol}",
+                            "--center_x", str(grid_center[0]),
+                            "--center_y", str(grid_center[1]),
+                            "--center_z", str(grid_center[2]),
+                            "--size_x", str(grid_size[0]),
+                            "--size_y", str(grid_size[1]),
+                            "--size_z", str(grid_size[2]),
+                            "--out", output_file
+                        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1200)
+                    else:
+                        result = subprocess.run([
+                            f"{VINA_DIR}/bin/vina",
+                            "--receptor", f"{macro_mol}",
+                            "--ligand", f"{ligand_file}",
+                            "--center_x", str(grid_center[0]),
+                            "--center_y", str(grid_center[1]),
+                            "--center_z", str(grid_center[2]),
+                            "--size_x", str(grid_size[0]),
+                            "--size_y", str(grid_size[1]),
+                            "--size_z", str(grid_size[2]),
+                            "--cpu", "2",
+                            "--out", output_file
+                        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1200)
                 finally:
                     self.vina_sem.release()
                 print(f"[{threading.current_thread().name}] Docking {ligand_file}")

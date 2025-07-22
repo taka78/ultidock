@@ -39,3 +39,5 @@ docking/*
 !docking/MACRO_MOL_DIR/
 !docking/VINA_DIR/**
 !docking/MACRO_MOL_DIR/*.pdbqt
+
+!docking/autodock-gpu-compiler.sh
