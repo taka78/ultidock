@@ -3,6 +3,9 @@ import subprocess
 import sys
 import shutil
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "lib"))
 
 
@@ -106,7 +109,7 @@ def main():
     create_directory_if_needed(RESULTS_DIR)
 
     # Save configuration to config.py (only declaring paths; DB file is not created here)
-    with open('config.py', 'w') as config_file:
+    with open(os.path.join(ROOT_DIR,"docking", "config.py"), 'w') as config_file:
         config_file.write('# config.py\n')
         config_file.write('# Auto-generated config.py\n')
         config_file.write('import os\n\n')
@@ -118,7 +121,7 @@ def main():
         config_file.write('VINA_DIR = os.path.join(BASE_DIR, "VINA_DIR")\n')
         config_file.write('AUTODOCK_GPU_DIR = os.path.join(BASE_DIR, "AUTODOCK_GPU_DIR")\n')
         config_file.write('MACRO_MOL_DIR = os.path.join(BASE_DIR, "MACRO_MOL_DIR")\n')
-        config_file.write('RESULTS_DIR = os.path.join(BASE_DIR, "results")\n')
+        config_file.write('RESULTS_DIR = os.path.join(BASE_DIR, "RESULTS_DIR")\n')
         config_file.write('GPU_TYPE = "' + GPU_TYPE + '"\n')
         config_file.write('DB_PATH = os.path.join(RESULTS_DIR, "ultidock_results.db")\n')
 

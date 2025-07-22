@@ -1,13 +1,18 @@
 import os
 import importlib.util
+import sys
+import importlib
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+
 
 # First run setup.py (which creates config.py), yup im stupid shut up.
-with open("setup.py") as f:
+with open(os.path.join(ROOT_DIR,"docking", "setup.py")) as f:
     exec(f.read(), globals())
 
 # Now that setup.py has run, we can safely import config
-import sys
-import importlib
+
 config = importlib.import_module("config")
 
 # Scripts that require config
