@@ -10,6 +10,7 @@ ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 # First run setup.py (which creates config.py), yup im stupid shut up.
 with open(os.path.join(ROOT_DIR,"docking", "setup.py")) as f:
     exec(f.read(), globals())
+#fixed the import issue with config.py
 
 # Now that setup.py has run, we can safely import config
 
