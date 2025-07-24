@@ -319,6 +319,8 @@ class ProcessFileThread(threading.Thread):
                             "--size_z", str(grid_size[2]),
                             "--out", output_file
                         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1200)
+                        print(f"[AutoDock-GPU stdout]\n{result.stdout}") #debugging time
+                        print(f"[AutoDock-GPU stderr]\n{result.stderr}") #debugging time
                     else:
                         result = subprocess.run([
                             f"{VINA_DIR}/bin/vina",

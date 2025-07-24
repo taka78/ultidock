@@ -11,33 +11,34 @@ NUMWI="${NUMWI:-128}"           # Default work items
 #(like thread-group size):
 #64wi = 64 threads per ligand
 #128wi = 128 threads per ligand (more parallelism)
-#BINARY="./bin/autodock_gpu_${NUMWI,,}wi"
 
-# Check if binary exists
+
+BINARY="${GPU_DIR}/bin/autodock_gpu_${NUMWI,,}wi"
+
+# Check if compiled binary exists
 if [ ! -f "$BINARY" ]; then
-    echo "[INFO] AutoDock-GPU binary not found. Compiling for $DEVICE..."
+    echo "[INFO] AutoDock-GPU binary not found. Compiling for CUDA..."
 
-    if [ "$DEVICE" == "CUDA" ]; then
-        if ! command -v nvcc &>/dev/null; then
-            echo "[ERROR] CUDA toolkit not found. Please install it and try again."
-            exit 1
-        fi
-        export GPU_INCLUDE_PATH="/usr/local/cuda/include"
-        export GPU_LIBRARY_PATH="/usr/local/cuda/lib64"
+    if ! command -v nvcc &> /dev/null; then
+        echo "[ERROR] CUDA toolkit not found. Please install it and try again."
+        exit 1
     fi
 
-    make DEVICE="$DEVICE" NUMWI="$NUMWI" -C "$GPU_DIR"
+    export GPU_INCLUDE_PATH="/usr/local/cuda/include"
+    export GPU_LIBRARY_PATH="/usr/local/cuda/lib64"
 
-    if [ ! -f "$BINARY" ]; then
-        echo "[ERROR] Compilation failed."
+    echo "[INFO] Running make DEVICE=$DEVICE NUMWI=$NUMWI..."
+    make DEVICE=$DEVICE NUMWI=$NUMWI
+
+    # ✅ Check again after make
+    if [ -f "$BINARY" ]; then
+        echo "[INFO] Compilation successful."
+        exit 0
+    else
+        echo "[ERROR] Compilation failed: Binary not found after make."
         exit 2
     fi
 else
-    echo "[INFO] AutoDock-GPU binary already exists at $BINARY"
-fi
-
-# Run it if you passed extra args
-if [ "$#" -gt 1 ]; then
-    shift
-    "$BINARY" "$@"
+    echo "[INFO] AutoDock-GPU binary already compiled."
+    exit 0
 fi
