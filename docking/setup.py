@@ -78,7 +78,20 @@ def download_ligands_from_file(wget_file_path, LIGANDS_DIR):
         print(f"Error during command execution: {e}")
 
 def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE):
-    # Try compiling AutoDock-GPU if needed
+    if GPU_TYPE in ("NVIDIA", "AMD"):
+        # Ensure AutoDock-GPU is compiled if needed
+        # detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE)
+        compiler_script = os.path.join(SCRIPT_DIR, "autodock-gpu-compiler.sh")
+        print(f"AutoDock-GPU is set up for {GPU_TYPE} GPU.")
+        try:
+            subprocess.run(["bash", compiler_script, AUTODOCK_GPU_DIR], check=True)
+        except subprocess.CalledProcessError as e:
+            print("Compiler script failed.")
+            sys.exit(1)
+    else:
+        print("AutoDock will run in CPU mode.")
+
+'''    # Try compiling AutoDock-GPU if needed
     if GPU_TYPE in ("NVIDIA", "AMD"):
         AUTODOCK_GPU_BIN = os.path.join(AUTODOCK_GPU_DIR, "bin", "autodock_gpu_128wi")
 
@@ -93,7 +106,7 @@ def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE):
                 print(e)
                 sys.exit(1)
         else:
-            print("AutoDock-GPU binary already compiled and executable.")
+            print("AutoDock-GPU binary already compiled and executable.")'''
 
 
 def main():
@@ -125,6 +138,7 @@ def main():
     create_directory_if_needed(MACRO_MOL_DIR)
     create_directory_if_needed(RESULTS_DIR)
 
+    # Detect and compile AutoDock-GPU if needed
     detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE)
 
     # Save configuration to config.py (only declaring paths; DB file is not created here)

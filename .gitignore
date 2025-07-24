@@ -41,3 +41,4 @@ docking/*
 !docking/MACRO_MOL_DIR/*.pdbqt
 
 !docking/autodock-gpu-compiler.sh
+docking/AUTODOCK_GPU_DIR/autogrid/autom4te.cache/

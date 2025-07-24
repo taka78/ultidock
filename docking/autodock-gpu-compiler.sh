@@ -15,9 +15,9 @@ NUMWI="${NUMWI:-128}"           # Default work items
 
 BINARY="${GPU_DIR}/bin/autodock_gpu_${NUMWI,,}wi"
 
-# Check if compiled binary exists
+### Step 1: Compile AutoDock-GPU
 if [ ! -f "$BINARY" ]; then
-    echo "[INFO] AutoDock-GPU binary not found. Compiling for CUDA..."
+    echo "[INFO] AutoDock-GPU binary not found. Compiling for $DEVICE..."
 
     if ! command -v nvcc &> /dev/null; then
         echo "[ERROR] CUDA toolkit not found. Please install it and try again."
@@ -30,15 +30,67 @@ if [ ! -f "$BINARY" ]; then
     echo "[INFO] Running make DEVICE=$DEVICE NUMWI=$NUMWI..."
     make DEVICE=$DEVICE NUMWI=$NUMWI
 
-    # ✅ Check again after make
     if [ -f "$BINARY" ]; then
-        echo "[INFO] Compilation successful."
-        exit 0
+        echo "[INFO] AutoDock-GPU compilation successful."
     else
-        echo "[ERROR] Compilation failed: Binary not found after make."
+        echo "[ERROR] AutoDock-GPU compilation failed."
         exit 2
     fi
 else
     echo "[INFO] AutoDock-GPU binary already compiled."
-    exit 0
 fi
+
+### Step 2: Compile AutoGrid
+echo "[INFO] Checking AutoGrid..."
+
+AUTOGRID_DIR="${GPU_DIR}/autogrid"
+AUTOGRID_BINARY="${AUTOGRID_DIR}/autogrid4"
+
+autogrid_needs_compile=false
+
+# Check if binary exists and is runnable
+if [ -x "$AUTOGRID_BINARY" ]; then
+    if ! "$AUTOGRID_BINARY" --help &> /dev/null; then
+        echo "[WARN] AutoGrid binary is not responding. Will recompile."
+        autogrid_needs_compile=true
+    else
+        echo "[INFO] AutoGrid binary is functional."
+    fi
+else
+    echo "[INFO] AutoGrid binary not found or not executable."
+    autogrid_needs_compile=true
+fi
+
+# Compile if necessary
+if [ "$autogrid_needs_compile" = true ]; then
+    if [ ! -d "$AUTOGRID_DIR" ]; then
+        echo "[ERROR] AutoGrid source directory not found at $AUTOGRID_DIR"
+        exit 3
+    fi
+
+    cd "$AUTOGRID_DIR" || exit 4
+    echo "[INFO] Compiling AutoGrid..."
+    echo "[INFO] Preparing AutoGrid build environment..."
+    if [ ! -f configure ]; then
+        echo "[INFO] Running autoreconf to generate configure script..."
+        autoreconf -i
+    fi
+
+    echo "[INFO] Running ./configure..."
+    ./configure
+
+    echo "[INFO] Running make..."
+    make -j$(nproc)
+
+    if [ -x "$AUTOGRID_BINARY" ]; then
+        echo "[INFO] AutoGrid compilation successful."
+    else
+        echo "[ERROR] AutoGrid compilation failed or binary not executable."
+        exit 5
+    fi
+
+    cd "$GPU_DIR" || exit 1
+fi
+
+echo "All components are compiled and ready."
+exit 0
