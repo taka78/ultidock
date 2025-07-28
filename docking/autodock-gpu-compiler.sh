@@ -77,8 +77,13 @@ if [ "$autogrid_needs_compile" = true ]; then
     fi
 
     echo "[INFO] Running ./configure..."
+    if [ ! -f configure ]; then
+        echo "[INFO] No configure script found, running autoreconf..."
+        autoreconf -i
+    fi
     ./configure
-
+    echo "[INFO] Cleaning previous build (if any)..."
+    make clean || true
     echo "[INFO] Running make..."
     make -j$(nproc)
 
