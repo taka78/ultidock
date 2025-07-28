@@ -366,6 +366,7 @@ class ProcessFileThread(threading.Thread):
         fld_files = glob.glob(os.path.join(MACRO_MOL_DIR, "*.maps.fld"))
         fld_file = fld_files[0] if fld_files else None
         try:
+            buffer = []
             BATCH_SIZE = 500
             grid_center, grid_size = self.calculate_grid_center_and_size(f"{macro_mol}")
             for ligand_file in self.bunch:
