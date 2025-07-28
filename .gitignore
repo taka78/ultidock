@@ -40,6 +40,27 @@ docking/*
 !docking/VINA_DIR/**
 !docking/MACRO_MOL_DIR/*.pdbqt
 
+# AutoGrid output files
+*.map
+*.e.map
+*.d.map
+*.xyz
+*.fld
+*.gpf
+
+docking/MACRO_MOL_DIR/*.fld
+docking/MACRO_MOL_DIR/*.gpf
+
+
+# Ignore AutoGrid4 binary (compiled locally)
+docking/AUTODOCK_GPU_DIR/autogrid/autogrid4
+docking/AUTODOCK_GPU_DIR/autogrid/.deps/*
+docking/AUTODOCK_GPU_DIR/autogrid/ad4_shared/*
+docking/AUTODOCK_GPU_DIR/autogrid/config.status
+docking/AUTODOCK_GPU_DIR/autogrid/default_parameters.h
+docking/AUTODOCK_GPU_DIR/autogrid/Makefile
+
+
 !docking/autodock-gpu-compiler.sh
 docking/AUTODOCK_GPU_DIR/autogrid/autom4te.cache/
 docking/config.py
