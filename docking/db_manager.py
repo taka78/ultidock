@@ -62,7 +62,7 @@ class DockingDatabaseManager:
     def insert_bulk(self, records):
         """Batch-insert a list of (ligand_name, affinity, rmsd_lb, rmsd_ub, docking_file)."""
         if not records:
-            print("ℹ️ insert_bulk: received empty list, skipping.")
+            print("ℹinsert_bulk: received empty list, skipping.")
             return
 
         with self.lock:
