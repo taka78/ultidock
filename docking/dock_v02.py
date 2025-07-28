@@ -150,91 +150,6 @@ class DockingProcessor:
         gc.collect()
         self.check_memory()
 
-    def extract_atom_types_from_pdbqt(self, ligand_file): #shoot, this is a mess
-        atom_types = set()
-        try:
-            with open(ligand_file, 'r') as file:
-                for line in file:
-                    if line.startswith(('ATOM', 'HETATM')):
-                        atom_type = line[77:79].strip()
-                        if atom_type:  # Ensure atom_type isn't empty
-                            atom_types.add(atom_type)
-        except Exception as e:
-            print(f"[ERROR] Failed to extract atom types: {e}")
-            raise
-        return ' '.join(sorted(atom_types))
-
-    def run_autogrid(self, receptor_file, ligand_file, grid_center, grid_size): #this is gonna be handy when the times come but yet, yup, that's a mess
-        try:
-            receptor_basename = os.path.basename(receptor_file).replace('.pdbqt', '')
-            receptor_dir = os.path.dirname(receptor_file)
-            gpf_filename = os.path.join(receptor_dir, f"{receptor_basename}.gpf")
-
-            ligand_atom_types = self.extract_atom_types_from_pdbqt(ligand_file)
-
-            gpf_content = f"""npts {grid_size[0]} {grid_size[1]} {grid_size[2]}
-    spacing 0.375
-    gridcenter {grid_center[0]} {grid_center[1]} {grid_center[2]}
-    receptor {receptor_file}
-    ligand_types {ligand_atom_types}
-    """
-
-            with open(gpf_filename, "w") as gpf_file:
-                gpf_file.write(gpf_content)
-
-            # Run AutoGrid4
-            fld_filename = os.path.join(receptor_dir, f"{receptor_basename}.fld")
-            glg_filename = os.path.join(receptor_dir, f"{receptor_basename}.glg")
-
-            subprocess.run([
-                "autogrid4",
-                "-p", gpf_filename,
-                "-l", glg_filename
-            ], check=True)
-
-            if not os.path.exists(fld_filename):
-                raise FileNotFoundError(f"{fld_filename} not created by AutoGrid4")
-
-            print(f" AutoGrid4 completed. Generated {fld_filename}")
-
-            return fld_filename
-
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] AutoGrid4 failed (error code {e.returncode})")
-            raise
-        except Exception as e:
-            print(f"[ERROR] Unexpected error during AutoGrid4: {e}")
-            raise
-
-    def create_gpf(receptor_file, ligand_template, output_gpf="grid_params.gpf", spacing=0.375):
-        try:
-            # Extract atom types from ligand template
-            atom_types = extract_atom_types_from_pdbqt(ligand_template)
-            
-            # Calculate grid center and size based on ligand
-            center, size = calculate_grid_center_and_size(ligand_template)
-
-            with open(output_gpf, 'w') as f:
-                f.write(f"npts {int(size[0]/spacing)} {int(size[1]/spacing)} {int(size[2]/spacing)}\n")
-                f.write(f"gridcenter {center[0]:.3f} {center[1]:.3f} {center[2]:.3f}\n")
-                f.write(f"spacing {spacing}\n")
-                f.write(f"receptor {os.path.basename(receptor_file)}\n")
-                f.write(f"ligand_types {atom_types}\n")
-
-                # Write map files for each atom type
-                for atom in atom_types.split():
-                    f.write(f"map {os.path.splitext(os.path.basename(receptor_file))[0]}.{atom}.map\n")
-
-                # Electrostatic and desolvation maps
-                f.write(f"elecmap {os.path.splitext(os.path.basename(receptor_file))[0]}.e.map\n")
-                f.write(f"dsolvmap {os.path.splitext(os.path.basename(receptor_file))[0]}.d.map\n")
-
-            print(f"[INFO] {output_gpf} created successfully.")
-
-        except Exception as e:
-            print(f"[ERROR] Failed to create GPF: {e}")
-            raise
-
     def check_memory(self):
         bunch = []
         for i in range(0, len(self.FILES), 6):
@@ -244,8 +159,92 @@ class DockingProcessor:
             print(f"Memory usage: {memory_info.rss / (1024 * 1024)} MB")
             break  # ← prevent barrier from ever being reached
 
+
     def run(self):
         self.process_files()
+
+
+class GPFGenerator:
+
+    def extract_atom_types_from_pdbqt(self, ligand_file):
+        atom_types = set()
+        try:
+            with open(ligand_file, 'r') as f:
+                for line in f:
+                    if line.startswith("ATOM") or line.startswith("HETATM"):
+                        atom_type = line[77:79].strip()  # AutoDock-style atom type
+                        if atom_type:
+                            atom_types.add(atom_type)
+        except Exception as e:
+            print(f"[ERROR] Failed to extract atom types: {e}")
+        return " ".join(sorted(atom_types))
+
+    def calculate_grid_center_and_size(self, ligand_file, padding=10.0):
+        x_coords, y_coords, z_coords = [], [], []
+        with open(ligand_file, 'r') as f:
+            for line in f:
+                if line.startswith("ATOM") or line.startswith("HETATM"):
+                    try:
+                        x = float(line[30:38])
+                        y = float(line[38:46])
+                        z = float(line[46:54])
+                        x_coords.append(x)
+                        y_coords.append(y)
+                        z_coords.append(z)
+                    except ValueError:
+                        continue
+
+        center_x = np.mean(x_coords)
+        center_y = np.mean(y_coords)
+        center_z = np.mean(z_coords)
+
+        size_x = np.max(x_coords) - np.min(x_coords) + padding
+        size_y = np.max(y_coords) - np.min(y_coords) + padding
+        size_z = np.max(z_coords) - np.min(z_coords) + padding
+
+        return (center_x, center_y, center_z), (size_x, size_y, size_z)
+
+    def write_gpf_file(self, receptor_file, atom_types, center, size, output_gpf, spacing=0.375):
+        try:
+            # Ensure grid point counts are ODD (AutoDock likes that)
+            npts_x = int(size[0] / spacing)
+            npts_y = int(size[1] / spacing)
+            npts_z = int(size[2] / spacing)
+
+            npts_x = npts_x + 1 if npts_x % 2 == 0 else npts_x
+            npts_y = npts_y + 1 if npts_y % 2 == 0 else npts_y
+            npts_z = npts_z + 1 if npts_z % 2 == 0 else npts_z
+
+            base_name = os.path.splitext(os.path.basename(receptor_file))[0]
+            fld_filename = f"{base_name}.maps.fld"
+
+            with open(output_gpf, 'w') as f:
+                f.write(f"npts {npts_x} {npts_y} {npts_z}\n")  # MUST come before gridcenter
+                f.write(f"gridfld {fld_filename}\n")         # MUST come before gridcenter
+                f.write(f"gridcenter {center[0]:.3f} {center[1]:.3f} {center[2]:.3f}\n")
+                f.write(f"spacing {spacing}\n")
+                f.write(f"receptor {MACRO_MOL_DIR}/{os.path.basename(receptor_file)}\n")
+                f.write(f"ligand_types {atom_types}\n")
+
+                for atom in atom_types.split():
+                    f.write(f"map {base_name}.{atom}.map\n")
+
+                f.write(f"elecmap {base_name}.e.map\n")
+                f.write(f"dsolvmap {base_name}.d.map\n")
+                f.write("dielectric -0.1465\n")
+                f.write("torsdof 0\n")  # TODO : Update if torsion degrees can be parsed DEFINETLY WILL DO THAT
+
+            print(f"[INFO] GPF file created successfully: {output_gpf}")
+
+        except Exception as e:
+            print(f"[ERROR] Failed to write GPF: {e}")
+            raise
+
+
+    def create_gpf(self, receptor_file, ligand_template, output_gpf="grid_params.gpf", spacing=0.375):
+        atom_types = self.extract_atom_types_from_pdbqt(ligand_template)
+        center, size = self.calculate_grid_center_and_size(ligand_template)
+        self.write_gpf_file(receptor_file, atom_types, center, size, output_gpf, spacing)
 
 class ProcessFileThread(threading.Thread):
     
@@ -295,7 +294,7 @@ class ProcessFileThread(threading.Thread):
             print(f"parse_vina_output_file: File not found after retries: {filepath}")
             return []
         results = []
-        current_model = None
+        current_model = None    
         current_affinity = None
         current_rmsd_lb = None
         current_rmsd_ub = None
@@ -364,18 +363,9 @@ class ProcessFileThread(threading.Thread):
             return
         macro_mol = macro_mols[0]
         receptor_name = macro_mol.split("/")[-1]
+        fld_files = glob.glob(os.path.join(MACRO_MOL_DIR, "*.maps.fld"))
+        fld_file = fld_files[0] if fld_files else None
         try:
-            buffer = []
-            if GPU_TYPE == "NVIDIA":
-                print("Using AutoDock-GPU for docking")
-                #calculate the grid with autoGrid4
-                subprocess.run([
-                    "autogrid4",
-                    "-p", f"{macro_mol}.gpf",
-                    "-l", f"{macro_mol}.fld"
-                ], check=True)
-            else:
-                print("Using Vina for docking")
             BATCH_SIZE = 500
             grid_center, grid_size = self.calculate_grid_center_and_size(f"{macro_mol}")
             for ligand_file in self.bunch:
@@ -387,10 +377,10 @@ class ProcessFileThread(threading.Thread):
                         # Run AutoDock-GPU
                         result = subprocess.run([
                             f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_128wi",
-                            "--l", f"{ligand_file}",
-                            "--r", f"{macro_mol}",
-
-                            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1200)
+                            "--lfile", f"{ligand_file}",
+                            "--ffile", f"{fld_file}",
+                            "--nrun", "20"
+                            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=MACRO_MOL_DIR, timeout=1200)
                         print(f"[AutoDock-GPU stdout]\n{result.stdout}") #debugging time
                         print(f"[AutoDock-GPU stderr]\n{result.stderr}") #debugging time
                     else:
