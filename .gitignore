@@ -47,10 +47,11 @@ docking/*
 *.xyz
 *.fld
 *.gpf
+*.glg
 
 docking/MACRO_MOL_DIR/*.fld
 docking/MACRO_MOL_DIR/*.gpf
-
+docking/MACRO_MOL_DIR/*.glg
 
 # Ignore AutoGrid4 binary (compiled locally)
 docking/AUTODOCK_GPU_DIR/autogrid/autogrid4
