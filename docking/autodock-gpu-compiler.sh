@@ -28,7 +28,7 @@ if [ ! -f "$BINARY" ]; then
     export GPU_LIBRARY_PATH="/usr/local/cuda/lib64"
 
     echo "[INFO] Running make DEVICE=$DEVICE NUMWI=$NUMWI..."
-    make DEVICE=$DEVICE NUMWI=$NUMWI
+    make DEVICE=$DEVICE NUMWI=$NUMWI  ### USE CUDATOOLKIT 11.8, CUDA TOOLKIT 13 IS NOT SUPPORTED YET
 
     if [ -f "$BINARY" ]; then
         echo "[INFO] AutoDock-GPU compilation successful."
