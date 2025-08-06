@@ -64,5 +64,4 @@ docking/AUTODOCK_GPU_DIR/autogrid/Makefile
 
 !docking/autodock-gpu-compiler.sh
 docking/AUTODOCK_GPU_DIR/autogrid/autom4te.cache/
-docking/config.py
 docking/AUTODOCK_GPU_DIR/test_cuda
