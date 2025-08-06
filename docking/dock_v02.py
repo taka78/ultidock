@@ -164,8 +164,8 @@ class DockingProcessor:
         self.process_files()
 
 
-class GPFGenerator:
-
+'''
+###this is a placeholder for the GPFGenerator class, which is not used in the current version of the script.
     def extract_atom_types_from_pdbqt(self, ligand_file):
         atom_types = set()
         try:
@@ -178,10 +178,14 @@ class GPFGenerator:
         except Exception as e:
             print(f"[ERROR] Failed to extract atom types: {e}")
         return " ".join(sorted(atom_types))
+'''
 
-    def calculate_grid_center_and_size(self, ligand_file, padding=10.0):
+class GPFGenerator:
+    def calculate_grid_center_and_size(self, receptor_file, padding=10.0):
+        ##in the past i was mixing macro molecules and ligands, which is a bad idea
+        # This function calculates the geometric center and size of the grid based on the receptor file.
         x_coords, y_coords, z_coords = [], [], []
-        with open(ligand_file, 'r') as f:
+        with open(receptor_file, 'r') as f:
             for line in f:
                 if line.startswith("ATOM") or line.startswith("HETATM"):
                     try:
@@ -204,47 +208,74 @@ class GPFGenerator:
 
         return (center_x, center_y, center_z), (size_x, size_y, size_z)
 
-    def write_gpf_file(self, receptor_file, atom_types, center, size, output_gpf, spacing=0.375):
+    def write_gpf_file(self, receptor_file, center, size, output_gpf, spacing=0.375):
+        ###yup, i realised that generating all maps file in one go is more computationally efficient
+        # than parsing all ligands for needed atom types
+        # and then generating maps for each ligand separately.
+        # This is because AutoDock can generate all maps in one go, and then use them
+        # for all ligands separately, as needed. which is much faster than generating maps for each ligand separately.
+        DEFAULT_AUTODOCK_ATOM_TYPES = [
+            "A",  # aliphatic carbon
+            "C",  # aromatic carbon
+            "HD", # hydrogen donor
+            "N",  # nitrogen
+            "NA", # nonpolar nitrogen
+            "OA", # oxygen acceptor
+            "S",  # sulfur
+            "SA", # sulfur acceptor (optional, rarely used)
+            "Cl", "Br", "F", "I", # halogens
+            "Zn", "Mg", "Ca", "Fe", "Mn"  # metals (optional based on use-case)
+        ]
         try:
-            # Ensure grid point counts are ODD (AutoDock likes that)
-            npts_x = int(size[0] / spacing)
-            npts_y = int(size[1] / spacing)
-            npts_z = int(size[2] / spacing)
-
-            npts_x = npts_x + 1 if npts_x % 2 == 0 else npts_x
-            npts_y = npts_y + 1 if npts_y % 2 == 0 else npts_y
-            npts_z = npts_z + 1 if npts_z % 2 == 0 else npts_z
+            # Ensure grid point counts are odd
+            npts = [int(dim / spacing) | 1 for dim in size]  # force odd with bitwise OR
 
             base_name = os.path.splitext(os.path.basename(receptor_file))[0]
             fld_filename = f"{base_name}.maps.fld"
+            output_gpf_path = os.path.join(MACRO_MOL_DIR, os.path.basename(output_gpf))
 
-            with open(output_gpf, 'w') as f:
-                f.write(f"npts {npts_x} {npts_y} {npts_z}\n")  # MUST come before gridcenter
-                f.write(f"gridfld {fld_filename}\n")         # MUST come before gridcenter
+            with open(output_gpf_path, 'w') as f:
+                f.write(f"npts {npts[0]} {npts[1]} {npts[2]}\n")
+                f.write(f"gridfld {fld_filename}\n")
                 f.write(f"gridcenter {center[0]:.3f} {center[1]:.3f} {center[2]:.3f}\n")
                 f.write(f"spacing {spacing}\n")
-                f.write(f"receptor {MACRO_MOL_DIR}/{os.path.basename(receptor_file)}\n")
-                f.write(f"ligand_types {atom_types}\n")
+                f.write(f"receptor {os.path.basename(receptor_file)}\n")
+                f.write(f"ligand_types {' '.join(DEFAULT_AUTODOCK_ATOM_TYPES)}\n")
 
-                for atom in atom_types.split():
+                for atom in DEFAULT_AUTODOCK_ATOM_TYPES:
                     f.write(f"map {base_name}.{atom}.map\n")
 
                 f.write(f"elecmap {base_name}.e.map\n")
                 f.write(f"dsolvmap {base_name}.d.map\n")
                 f.write("dielectric -0.1465\n")
-                f.write("torsdof 0\n")  # TODO : Update if torsion degrees can be parsed DEFINETLY WILL DO THAT
 
-            print(f"[INFO] GPF file created successfully: {output_gpf}")
 
+            print(f"[INFO] GPF file written: {output_gpf_path}")
         except Exception as e:
-            print(f"[ERROR] Failed to write GPF: {e}")
+            print(f"[ERROR] Failed to write GPF file: {e}")
             raise
 
+    def run_autogrid(self, gpf_path):
+        log_path = gpf_path.replace(".gpf", ".glg")
+        try:
+            subprocess.run(
+                [f"{AUTODOCK_GPU_DIR}/autogrid/autogrid4", "-p", os.path.basename(gpf_path), "-l", os.path.basename(log_path)],
+                check=True,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=MACRO_MOL_DIR,
+                timeout=1200
+            )
+            print(f"[INFO] AutoGrid finished. Log written to: {log_path}")
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] AutoGrid execution failed:\n{e.stderr}")
+            raise
 
-    def create_gpf(self, receptor_file, ligand_template, output_gpf="grid_params.gpf", spacing=0.375):
-        atom_types = self.extract_atom_types_from_pdbqt(ligand_template)
-        center, size = self.calculate_grid_center_and_size(ligand_template)
-        self.write_gpf_file(receptor_file, atom_types, center, size, output_gpf, spacing)
+    def create_gpf(self, receptor_file, output_gpf="grid_params.gpf", spacing=0.375):
+        center, size = self.calculate_grid_center_and_size(receptor_file)
+        self.write_gpf_file(receptor_file, center, size, output_gpf, spacing)
+        self.run_autogrid(os.path.join(MACRO_MOL_DIR, os.path.basename(output_gpf)))
+
 
 class ProcessFileThread(threading.Thread):
     
@@ -456,6 +487,8 @@ class ProcessFileThread(threading.Thread):
 
 if __name__ == "__main__":
     start_time = time.time()
+    gpf_gen = GPFGenerator()
+    fld_path = gpf_gen.create_gpf(f"{MACRO_MOL_DIR}/4h10_edited-autodock-with-remark.pdbqt")  # returns .fld path
     processor = DockingProcessor()
     processor.run()
     print("Process finished --- %s seconds ---" % (time.time() - start_time))
