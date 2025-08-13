@@ -3,18 +3,6 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Ultidock – GMX Dev Branch (README)</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", sans-serif; line-height: 1.55; color: #0f172a; padding: 24px; max-width: 980px; margin: auto; }
-    h1, h2, h3 { color: #0b1220; }
-    code, pre { background: #0f172a0d; border-radius: 6px; }
-    pre { padding: 12px; overflow-x: auto; }
-    a { color: #0ea5e9; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .note { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #38bdf8; padding: 12px 14px; border-radius: 6px; }
-    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background: #e2e8f0; padding: 2px 6px; border-radius: 4px; }
-    ul { margin-top: 0.5rem; }
-  </style>
 </head>
 <body>
 
