@@ -10,7 +10,9 @@ from pathlib import Path
 import psutil
 import uuid
 import gc
+import xml.etree.ElementTree as ET
 import numpy as np
+import shutil  
 from threading import Barrier
 from config import LIGANDS_DIR, DOCKING_DIR, ANALYSIS_DIR, VINA_DIR, AUTODOCK_GPU_DIR, MACRO_MOL_DIR, DB_PATH, GPU_TYPE, RESULTS_DIR
 from db_manager import DockingDatabaseManager
@@ -31,6 +33,33 @@ ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 BINARY_PATH = os.path.join(AUTODOCK_GPU_DIR, "bin", "autodock_gpu_128wi")
 COMPILER_SCRIPT = os.path.join(os.path.dirname(__file__), "autodock-gpu-compiler.sh")
 
+def list_nvidia_gpus():
+    """Return a list of GPU indices [0,1,...]. Falls back to [0] if unknown."""
+    if shutil.which("nvidia-smi") is None:
+        return [0]
+    try:
+        out = subprocess.check_output(["nvidia-smi", "-L"], text=True)
+        idxs = []
+        for line in out.strip().splitlines():
+            # lines look like: "GPU 0: NVIDIA GeForce RTX 5070 (UUID: ...)"
+            if line.startswith("GPU "):
+                num = line.split()[1].rstrip(":")
+                idxs.append(int(num))
+        return idxs or [0]
+    except Exception:
+        return [0]
+
+GPU_IDS = list_nvidia_gpus()
+GPU_SEMAPHORES = {i: threading.Semaphore(1) for i in GPU_IDS}
+_GPU_RR_LOCK = threading.Lock()
+_GPU_RR = 0
+
+def next_gpu_id():
+    global _GPU_RR
+    with _GPU_RR_LOCK:
+        gid = GPU_IDS[_GPU_RR % len(GPU_IDS)]
+        _GPU_RR += 1
+        return gid
 
 class DockingProcessor:
 
@@ -124,7 +153,8 @@ class DockingProcessor:
                 self.event,
                 thread_callback,
                 self.db_queue,
-                self.vina_sem      # ← new argument
+                self.vina_sem,
+                gpu_id= next_gpu_id() 
             )
             threads.append(thread)
 
@@ -280,7 +310,7 @@ class GPFGenerator:
 
 class ProcessFileThread(threading.Thread):
     
-    def __init__(self, bunch, barrier, event, callback, db_queue, vina_sem):
+    def __init__(self, bunch, barrier, event, callback, db_queue, vina_sem, gpu_id=0):
         super().__init__()
         self.bunch = bunch
         self.barrier = barrier
@@ -288,7 +318,7 @@ class ProcessFileThread(threading.Thread):
         self.callback = callback
         self.db_queue = db_queue
         self.vina_sem = vina_sem
-
+        self.gpu_id = gpu_id
 
 
     # Function to parse ligand's .pdbqt file and extract atomic coordinates
@@ -387,6 +417,53 @@ class ProcessFileThread(threading.Thread):
         return results
 
 
+    def parse_adgpu_xml(self, xml_path, receptor_name, ligand_file_fallback):
+        """
+        Parse AutoDock-GPU XML and return a list of tuples:
+        (tag, affinity, rmsd_lb, rmsd_ub, ligand_file)
+        tag format: <ligand_id>-Model<run_id>-<receptor_name>
+        """
+        results = []
+        try:
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+
+            # ligand id from <ligand> element (fallback to provided path)
+            ligand_path = root.findtext("ligand") or ligand_file_fallback
+            ligand_id = Path(ligand_path).stem
+
+            runs = root.find("runs")
+            if runs is None:
+                return results
+
+            for run in runs.findall("run"):
+                # run id becomes the "Model" number in your schema
+                run_id_text = run.get("id")
+                try:
+                    run_id = int(run_id_text) if run_id_text is not None else 1
+                except ValueError:
+                    run_id = 1
+
+                # binding energy
+                e_txt = run.findtext("free_NRG_binding")
+                if e_txt is None:
+                    # skip malformed entries
+                    continue
+                try:
+                    affinity = float(e_txt)
+                except ValueError:
+                    continue
+
+                tag = f"{ligand_id}-Model{run_id}-{receptor_name}"
+                # AD-GPU XML doesn't include RMSD values
+                results.append((tag, affinity, None, None, ligand_file_fallback))
+
+        except Exception as e:
+            print(f"[XML-parse] Failed on {xml_path}: {e}")
+
+        return results
+
+
     def run(self):
         # Calculate grid center and size dynamically for each ligand
         macro_mols = glob.glob(f"{MACRO_MOL_DIR}/*.pdbqt")
@@ -405,75 +482,119 @@ class ProcessFileThread(threading.Thread):
             BATCH_SIZE = 500
             grid_center, grid_size = self.calculate_grid_center_and_size(f"{macro_mol}")
             for ligand_file in self.bunch:
+                # ensure output dir exists
+                Path(DOCKING_DIR).mkdir(parents=True, exist_ok=True)
+
+                lig_stem  = Path(ligand_file).stem
+                out_stem  = Path(DOCKING_DIR) / f"{lig_stem}_{uuid.uuid4().hex[:8]}"
+                gpu_pdbqt = f"{out_stem}_out.pdbqt"   # AD-GPU best pose (if --gbest 1)
+                xml_out   = f"{out_stem}.xml"     # AD-GPU XML
+                vina_out  = f"{out_stem}.pdbqt"       # Vina CPU output target
+
+                # Per-GPU semaphore (one job per GPU at a time)
+                sem = GPU_SEMAPHORES.get(self.gpu_id, GPU_SEMAPHORES[min(GPU_SEMAPHORES)])
+
+                env = os.environ.copy()
+                env["OMP_NUM_THREADS"] = "1"
+                env["MKL_NUM_THREADS"] = "1"
+                env["OPENBLAS_NUM_THREADS"] = "1"
+                # If you need hard isolation per thread, uncomment:
+                # env["CUDA_VISIBLE_DEVICES"] = str(self.gpu_id)
+
                 print(ligand_file)
-                lig_stem = Path(ligand_file).stem
-                out_stem = Path(DOCKING_DIR) / f"{lig_stem}_{uuid.uuid4().hex[:8]}"
-                output_file = f"{DOCKING_DIR}/{ligand_file[-26:]}_{uuid.uuid4()}.pdbqt" # will that last though?
-                self.vina_sem.acquire()  # Acquire the semaphore before running Vina
+
+                self.vina_sem.acquire()
+                sem.acquire()
                 try:
                     if GPU_TYPE == "NVIDIA":
-                        # Run AutoDock-GPU
-                        result = subprocess.run([
-                            f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_128wi",
-                            "--lfile", f"{ligand_file}",
-                            "--ffile", f"{fld_file}",
-                            "--nrun", "50" ##it's running too fast soo, why not increase?
-                            "--resnam", str(out_stem)    # AD-GPU will create <basename>_out.pdbqt in DOCKING_DIR
+                        # --- AutoDock-GPU (XML-first) ---
+                        result = subprocess.run(
+                            [
+                                f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_128wi",
+                                "--lfile",   str(Path(ligand_file).resolve()),
+                                "--ffile",   str(Path(fld_file).resolve()),
+                                "--nrun",    "50",
+                                "--gbest",   "5",            # write <resnam>_out.pdbqt (optional but nice)
+                                "--xmloutput","1",           # ensure XML is produced
+                                "--resnam",  str(out_stem),  # basename; outputs land in DOCKING_DIR
+                                "--devnum",  str(int(self.gpu_id) + 1)  # AD-GPU is 1-indexed
+                            ],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            cwd=MACRO_MOL_DIR,
+                            env=env,
+                            timeout=100
+                        )
+                        print(f"[AutoDock-GPU stdout]\n{result.stdout}")
+                        print(f"[AutoDock-GPU stderr]\n{result.stderr}")
 
-                            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=MACRO_MOL_DIR, timeout=1200)
-                        print(f"[AutoDock-GPU stdout]\n{result.stdout}") #debugging time
-                        print(f"[AutoDock-GPU stderr]\n{result.stderr}") #debugging time
+                        if result.returncode != 0:
+                            print(f"Docking failed for: {ligand_file}")
+                            print(f"STDOUT:\n{result.stdout.strip()}")
+                            print(f"STDERR:\n{result.stderr.strip()}")
+                            continue
+                        # Ensure output files are created
+
                     else:
-                        result = subprocess.run([
-                            f"{VINA_DIR}/bin/vina",
-                            "--receptor", f"{macro_mol}",
-                            "--ligand", f"{ligand_file}",
-                            "--center_x", str(grid_center[0]),
-                            "--center_y", str(grid_center[1]),
-                            "--center_z", str(grid_center[2]),
-                            "--size_x", str(grid_size[0]),
-                            "--size_y", str(grid_size[1]),
-                            "--size_z", str(grid_size[2]),
-                            "--cpu", "2",
-                            "--out", output_file
-                        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1200)
-                finally:
+                        # --- Vina CPU fallback (PDBQT parsing) ---
+                        result = subprocess.run(
+                            [
+                                f"{VINA_DIR}/bin/vina",
+                                "--receptor", str(macro_mol),
+                                "--ligand",   str(ligand_file),
+                                "--center_x", str(grid_center[0]),
+                                "--center_y", str(grid_center[1]),
+                                "--center_z", str(grid_center[2]),
+                                "--size_x",   str(grid_size[0]),
+                                "--size_y",   str(grid_size[1]),
+                                "--size_z",   str(grid_size[2]),
+                                "--cpu",      "2",
+                                "--out",      str(vina_out)
+                            ],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            timeout=1200
+                        )
+                        if result.returncode != 0:
+                            print(f"Vina failed for: {ligand_file}")
+                            print(f"STDOUT:\n{result.stdout.strip()}")
+                            print(f"STDERR:\n{result.stderr.strip()}")
+                            continue
+                    # Ensure output files are created
+                except subprocess.TimeoutExpired:
+                    print(f"Docking timed out for: {ligand_file}")
+                    sem.release()
                     self.vina_sem.release()
+                    continue
+                finally:
+                    sem.release()
+                    self.vina_sem.release()
+
                 print(f"[{threading.current_thread().name}] Docking {ligand_file}")
+                if GPU_TYPE == "NVIDIA":
+                    parsed_results = self.parse_adgpu_xml(xml_out, receptor_name, ligand_file)
+                elif GPU_TYPE == "AMD":
+                    parsed_results = self.parse_adgpu_xml(gpu_pdbqt, receptor_name, ligand_file) #definetly gonna change this
+                elif GPU_TYPE == "CPU":
+                    parsed_results = self.parse_vina_output_file(vina_out, receptor_name, ligand_file)
 
-
-                # Check for subprocess failure
-                if result.returncode != 0:
-                    print(f"Vina failed for: {ligand_file}")
-                    print(f"STDOUT:\n{result.stdout.strip()}")
-                    print(f"STDERR:\n{result.stderr.strip()}")
-                    continue  # skip to the next ligand
-
-                # Wait until the output file really exists
-                timeout = 5
-                while not os.path.exists(output_file) and timeout > 0:
-                    time.sleep(0.1)
-                    timeout -= 0.1
-
-                if not os.path.exists(output_file):
-                    print(f"Output file missing for: {ligand_file}")
-                    continue
-
-                parsed_results = self.parse_vina_output_file(output_file, receptor_name, ligand_file)
-
+                # parsed_results now unified shape: (tag, affinity, rmsd_lb, rmsd_ub, ligand_file)
                 if not parsed_results:
-                    print(f"No valid docking data in: {output_file}")
+                    print(f"No valid docking data for: {ligand_file}")
                     continue
-
                 buffer.extend(parsed_results)
+
 
                 if len(buffer) >= BATCH_SIZE:
                     self.db_queue.put(buffer.copy())
                     buffer.clear()
- 
-                # Check memory usage
+
+                # memory log
                 memory_info = psutil.Process().memory_info()
                 print(f"Memory usage: {memory_info.rss / (1024 * 1024):.2f} MB")
+
 
                 # Set event if memory usage is above the limit 
                 if memory_info.rss > 2252800000000: #Set your own limit

@@ -48,6 +48,10 @@ def detect_gpu():
     print("No compatible GPU detected. Using CPU mode.")
     return "CPU"
 
+def _normalize_mode(s: str) -> str:
+    s = (s or "").strip().lower()
+    return s if s in ("auto", "gpu", "cpu") else "auto"
+
 
 def download_ligands_from_file(wget_file_path, LIGANDS_DIR):
     if not os.path.exists(wget_file_path):
@@ -115,8 +119,22 @@ def main():
     print("Welcome to the Ultidock Setup")
     print("=" * 50)
 
-    GPU_TYPE = detect_gpu()  # Detect GPU type
-
+    mode = _normalize_mode(input("Select run mode (auto/gpu/cpu) [default: auto]: ") or "auto")
+    if mode == "cpu":
+        print("Forcing CPU mode.")
+        GPU_TYPE = "CPU"
+    elif mode == "gpu":
+        # Try to detect which GPU vendor is present; if none, warn and fall back to CPU
+        detected = detect_gpu()  # returns "NVIDIA", "AMD", or "CPU"
+        if detected in ("NVIDIA", "AMD"):
+            GPU_TYPE = detected
+        else:
+            print("Warning: No compatible GPU detected; continuing in CPU mode.")
+            GPU_TYPE = "CPU"
+    else:
+        # auto
+        GPU_TYPE = detect_gpu()  # returns "NVIDIA", "AMD", or "CPU"
+        
     # Ask for directory paths
     LIGANDS_DIR = ask_for_input("Enter the path for ligand files", os.path.join(CURRENT_DIR, "LIGANDS_DIR"))
     DOCKING_DIR = ask_for_input("Enter the path for docking files", os.path.join(CURRENT_DIR, "DOCKING_DIR"))
