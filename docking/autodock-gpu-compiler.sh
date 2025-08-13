@@ -27,8 +27,65 @@ if [ ! -f "$BINARY" ]; then
     export GPU_INCLUDE_PATH="/usr/local/cuda/include"
     export GPU_LIBRARY_PATH="/usr/local/cuda/lib64"
 
+    # --------- ADDED: auto-detect TARGETS (keeps manual override if you set TARGETS/TARGET_ARCH) ---------
+    detect_nvcc_support_set() {
+      local major minor
+      read major minor < <(nvcc --version | sed -n 's/.*release \([0-9]\+\)\.\([0-9]\+\).*/\1 \2/p')
+      if [[ "$major" -ge 13 ]]; then
+        echo "89 100 101 120"
+      elif [[ "$major" -eq 12 && "$minor" -ge 8 ]]; then
+        echo "89 100 101 120"
+      elif [[ "$major" -eq 12 && "$minor" -ge 6 ]]; then
+        echo "89 100 101"
+      elif [[ "$major" -eq 12 ]]; then
+        echo "80 86 89"
+      else
+        echo "50 52 53 60 61 62 70 72 75 80 86 89"
+      fi
+    }
+    detect_gpu_targets() {
+      if ! command -v nvidia-smi >/dev/null 2>&1; then
+        echo ""
+        return
+      fi
+      nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null \
+        | awk '{gsub(/\./,""); print}' | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+    }
+    # Only set defaults if user hasn’t provided TARGETS/TARGET_ARCH already
+    if [[ -z "${TARGETS:-}" || -z "${TARGET_ARCH:-}" ]]; then
+      _detected="$(detect_gpu_targets)"       # e.g. "89 100 120"
+      _supported="$(detect_nvcc_support_set)" # from nvcc version
+      _choose=""
+      if [[ -n "$_detected" ]]; then
+        for t in $_detected; do
+          if grep -qw "$t" <<<"$_supported"; then _choose+=" $t"; fi
+        done
+      fi
+      if [[ -z "$_choose" ]]; then _choose="$_supported"; fi
+      TARGETS_DEFAULT="$(echo "$_choose" | xargs)"  # trim spaces
+      # prefer the highest for TARGET_ARCH (first item after sorting numerically desc)
+      TARGET_ARCH_DEFAULT="sm_$(for t in $TARGETS_DEFAULT; do echo $t; done | sort -nr | head -n1)"
+      # export only if not preset
+      TARGETS="${TARGETS:-$TARGETS_DEFAULT}"
+      TARGET_ARCH="${TARGET_ARCH:-$TARGET_ARCH_DEFAULT}"
+    fi
+    echo "[INFO] Auto-detected TARGETS: ${TARGETS} (TARGET_ARCH=${TARGET_ARCH})"
+    # --------- end ADDED ---------
+
     echo "[INFO] Running make DEVICE=$DEVICE NUMWI=$NUMWI..."
-    make DEVICE=$DEVICE NUMWI=$NUMWI  ### USE CUDATOOLKIT 11.8, CUDA TOOLKIT 13 IS NOT SUPPORTED YET
+    mkdir -p "${GPU_DIR}/bin"
+    make DEVICE=$DEVICE NUMWI=$NUMWI TARGET_ARCH="${TARGET_ARCH}" TARGETS="${TARGETS}" NVCC="nvcc" CC=gcc CXX=g++   ### USE CUDATOOLKIT 12.8, CUDA TOOLKIT 13 IS NOT SUPPORTED YET
+    #####PLEASE ADJUST THE TARGET_ARCH AND TARGETS AS NEEDED FOR YOUR GPU
+    ####Guidelines for choosing the right target architecture:
+    # - sm_80 for Volta GPUs (e.g., Tesla V100)
+    # - sm_86 for Ampere GPUs (e.g., A100, RTX 3000 series)
+    # - sm_89 for Ada Lovelace GPUs (e.g., RTX 4000 series)
+    # - sm_90 for Hopper GPUs (e.g., H100 variants)
+    # - sm_100/101 for Blackwell GB-series (datacenter)
+    # - sm_120 for consumer Blackwell (e.g., some RTX 50xx)
+    ### you got the idea, just adjust the TARGET_ARCH and TARGETS variables.
+    TODO=$(grep -E 'TARGET_ARCH|TARGETS' Makefile.Cuda)
+    echo "[INFO] Makefile.Cuda settings: $TODO"
 
     if [ -f "$BINARY" ]; then
         echo "[INFO] AutoDock-GPU compilation successful."

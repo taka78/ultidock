@@ -23,7 +23,9 @@ ifeq ($(TENSOR), ON)
 	TARGETS = 80
 endif
 
-CUDA_TARGETS=$(foreach target,$(TARGETS),-gencode arch=compute_$(target),code=sm_$(target))
+# Replace the gencode line with SASS+PTX for each target:
+CUDA_TARGETS=$(foreach t,$(TARGETS),-gencode arch=compute_$(t),code=[sm_$(t),compute_$(t)])
+
 
 ifeq ($(DEVICE), CPU)
 	DEV =-DCPU_DEVICE

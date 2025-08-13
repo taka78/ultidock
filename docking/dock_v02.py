@@ -6,6 +6,7 @@ import queue
 import glob
 import subprocess
 import time
+from pathlib import Path
 import psutil
 import uuid
 import gc
@@ -395,13 +396,18 @@ class ProcessFileThread(threading.Thread):
         macro_mol = macro_mols[0]
         receptor_name = macro_mol.split("/")[-1]
         fld_files = glob.glob(os.path.join(MACRO_MOL_DIR, "*.maps.fld"))
-        fld_file = fld_files[0] if fld_files else None
+        if not fld_files:
+            print("No .maps.fld found in", MACRO_MOL_DIR)
+            return
+        fld_file = fld_files[0]
         try:
             buffer = []
             BATCH_SIZE = 500
             grid_center, grid_size = self.calculate_grid_center_and_size(f"{macro_mol}")
             for ligand_file in self.bunch:
                 print(ligand_file)
+                lig_stem = Path(ligand_file).stem
+                out_stem = Path(DOCKING_DIR) / f"{lig_stem}_{uuid.uuid4().hex[:8]}"
                 output_file = f"{DOCKING_DIR}/{ligand_file[-26:]}_{uuid.uuid4()}.pdbqt" # will that last though?
                 self.vina_sem.acquire()  # Acquire the semaphore before running Vina
                 try:
@@ -411,7 +417,9 @@ class ProcessFileThread(threading.Thread):
                             f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_128wi",
                             "--lfile", f"{ligand_file}",
                             "--ffile", f"{fld_file}",
-                            "--nrun", "20"
+                            "--nrun", "50" ##it's running too fast soo, why not increase?
+                            "--resnam", str(out_stem)    # AD-GPU will create <basename>_out.pdbqt in DOCKING_DIR
+
                             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=MACRO_MOL_DIR, timeout=1200)
                         print(f"[AutoDock-GPU stdout]\n{result.stdout}") #debugging time
                         print(f"[AutoDock-GPU stderr]\n{result.stderr}") #debugging time
