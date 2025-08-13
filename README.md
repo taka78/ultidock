@@ -1,111 +1,136 @@
-<h1 align=\"center\">Ultidock: High-Throughput Docking Pipeline</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Ultidock – GMX Dev Branch (README)</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", sans-serif; line-height: 1.55; color: #0f172a; padding: 24px; max-width: 980px; margin: auto; }
+    h1, h2, h3 { color: #0b1220; }
+    code, pre { background: #0f172a0d; border-radius: 6px; }
+    pre { padding: 12px; overflow-x: auto; }
+    a { color: #0ea5e9; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .note { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #38bdf8; padding: 12px 14px; border-radius: 6px; }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background: #e2e8f0; padding: 2px 6px; border-radius: 4px; }
+    ul { margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
 
-<p align=\"center\">
-  <div style="text-align: center;">
-    <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/taka78/ultidock/dev-beta/traffic-badge.json" alt="GitHub Traffic Badge" />
-</p>
+  <h1>Ultidock – GROMACS Integration Branch (<code>gmx-dev</code>)</h1>
 
-<h2>📖 Overview</h2>
-<p>
-Ultidock is a fully automated and lightweight molecular docking pipeline built around AutoDock Vina. Designed for large-scale virtual screening, it streamlines every stage—from ligand preparation to result analysis—while maintaining flexibility and performance. With integrated SQLite support and a multithreaded architecture, Ultidock is ideal for users aiming to dock thousands of ligands without hassle.
-</p>
+  <p>
+    <strong>Ultidock</strong> is a high-throughput docking and simulation workflow. This branch focuses on
+    reliable automation and future GROMACS integration, with particular attention to modern NVIDIA GPUs.
+  </p>
 
-<h2>✨ Core Features</h2>
-<ul>
-  <li><strong>End-to-End Automation:</strong> Ligand preparation, docking, scoring, and result analysis in one pipeline.</li>
-  <li><strong>Multithreaded Performance:</strong> Utilizes all available CPU cores for fast, parallel docking.</li>
-  <li><strong>Integrated SQLite Database:</strong> Efficient and structured result storage, ideal for high-throughput workflows.</li>
-  <li><strong>Configurable Analysis:</strong> Easily filter and export data based on RMSD, binding energy, or your own criteria.</li>
-  <li><strong>Minimal Setup:</strong> Tweak your workflow with a single <code>config.py</code>—no GUI required.</li>
-</ul>
+  <div class="note">
+    <strong>Key points:</strong>
+    <ul>
+      <li><strong>CUDA Toolkit ≥ 12.8</strong> is required for modern GPUs (e.g., RTX 40/50 series, datacenter parts).</li>
+      <li><strong>All setup</strong> (GPU/driver checks, architecture targets, compilation, directory creation) is handled by <code>run.py</code>.</li>
+      <li><strong>User actions:</strong> place your receptor file in <code>MACRO_MOL_DIR/</code> and replace <code>ligands.wget</code> with your ZINC22 (or preferred database) list.</li>
+    </ul>
+  </div>
 
-<h2>⚙️ Requirements</h2>
-<p>Ultidock is designed to be simple to deploy with only essential dependencies:</p>
-<ul>
-  <li>Python 3.10 or newer</li>
-  <li><a href="https://vina.scripps.edu/">AutoDock Vina</a> (included or preconfigured)</li>
-  <li>SQLite3 (included with Python)</li>
-  <li>Pandas, NumPy etc. </li>
-</ul>
+  <hr/>
 
-<h2>🚀 Quick Start</h2>
+  <h2>1. Features</h2>
+  <ul>
+    <li><strong>Automatic build &amp; environment setup:</strong> <code>run.py</code> detects NVIDIA GPUs and chooses appropriate compilation targets. It compiles AutoDock-GPU and prepares required directories.</li>
+    <li><strong>Deterministic output management:</strong> docking outputs are written directly into <code>DOCKING_DIR/</code> with unique, parse-ready names.</li>
+    <li><strong>Thread-safety by design:</strong> GPU runs are serialized per device to avoid CUDA context races; CPU preparation remains parallel.</li>
+    <li><strong>Extensibility:</strong> planned integration with GROMACS and optional visualization layers (OpenGL/Web) without impacting the core pipeline.</li>
+  </ul>
 
-<h3>1. Clone the repository:</h3>
+  <h2>2. Required Software &amp; Libraries</h2>
+  <h3>2.1 Core</h3>
+  <ul>
+    <li><strong>NVIDIA Driver</strong> (sufficiently recent for CUDA ≥ 12.8)</li>
+    <li><strong>CUDA Toolkit 12.8</strong> (or newer)</li>
+    <li><strong>GNU Toolchain:</strong> <code>gcc</code>/<code>g++</code>, <code>make</code></li>
+    <li><strong>Python 3.8+</strong> &nbsp;packages: <code>numpy</code>, <code>biopython</code>, <code>pandas</code>, <code>tqdm</code></li>
+    <li><strong>AutoDock-GPU</strong> (compiled by <code>run.py</code> into <code>AUTODOCK_GPU_DIR/bin/</code>)</li>
+    <li><strong>AutoDock Vina</strong> (CPU fallback, optional)</li>
+    <li><strong>AutoGrid</strong> (compiled by the accompanying script if needed)</li>
+  </ul>
 
-<pre><code>git clone https://github.com/taka78/ultidock.git
-cd ultidock
+  <h3>2.2 Optional / Future</h3>
+  <ul>
+    <li><strong>GROMACS</strong> (GPU build recommended) for post-docking MD and free-energy analysis</li>
+    <li><strong>OpenGL</strong> development headers for native visualization</li>
+    <li><strong>MPI</strong> if deploying to clusters in later stages</li>
+  </ul>
+
+  <hr/>
+
+  <h2>3. Directory Layout</h2>
+  <pre><code>workdir/
+ ├─ data-analyses
+ ├─ docking
+ └├─ run.py
+  ├─ ligands.wget                # replace with your list (e.g., ZINC22)
+  ├─ MACRO_MOL_DIR/              # place your receptor .pdbqt here
+  ├─ LIGANDS_DIR/                # auto-created; ligands fetched/organized
+  ├─ DOCKING_DIR/                # docking outputs (_out.pdbqt) land here
+  ├─ AUTODOCK_GPU_DIR/           # AutoDock-GPU sources and built binaries
+  └─ RESULTS_DIR/                # summary data, logs, analysis artifacts
 </code></pre>
 
-<h3>2. Adjust the expected analysing standarts for your molecule from <code>analyse_docking_results.py</code>:</h3>
-<pre><code>
-    DEFAULT_AFFINITY = -7.0        # kcal/mol // you should change this according to how much chemically active your macromolecule.
-    DEFAULT_RMSD_LB = 5.0          # Å // you should change this according to how big your macromolecule's docking site is.
-    DEFAULT_RMSD_UB = 10.0         # Å // you should change this according to how big your macromolecule's docking site is.
-    DEFAULT_MIN_MODEL = 2          # integer // you should change this according to how picky you are.
-</code></pre>
+  <hr/>
 
+  <h2>4. Quick Start</h2>
+  <ol>
+    <li>Ensure the NVIDIA driver and CUDA Toolkit <strong>12.8+</strong> are installed.</li>
+    <li>Copy your receptor file (e.g., <code>protein.pdbqt</code>) into <code>MACRO_MOL_DIR/</code>.</li>
+    <li>Replace <code>ligands.wget</code> with a list from <strong>ZINC22</strong> (or your preferred source).</li>
+    <li>Run:
+      <pre><code class="language-bash">/usr/bin/python3 run.py</code></pre>
+    </li>
+  </ol>
 
-<h3>3. Run the pipeline:</h3>
-<pre><code>python3 /path/to/your/ultidock/docking/run.py
-</code></pre>
+  <p><strong>What happens:</strong> <code>run.py</code> will validate the environment, compile AutoDock-GPU (selecting target architectures automatically), prepare directories, download/process ligands, and run docking.</p>
 
+  <hr/>
 
-<h2>🛠 Configuration (<code>config.py</code>)</h2>
-<p>
-Ultidock uses a central configuration file to define all relevant paths and default parameters. When you launch the pipeline, these values are loaded automatically, allowing you to focus on your molecules instead of managing folders.
-</p>
+  <h2>5. Usage Notes</h2>
+  <ul>
+    <li><strong>GPU-CPU Fallback:</strong> If you don't have a supported GPU, parallelized CPU docking will start with Vina.</li>
+    <li><strong>GPU scheduling:</strong> docking tasks are dispatched one-at-a-time per GPU to ensure stability. CPU-side preparation may remain parallel.</li>
+    <li><strong>Output format:</strong> AutoDock-GPU writes <code>&lt;basename&gt;_out.pdbqt</code> under <code>DOCKING_DIR/</code>. Filenames include a unique suffix to avoid collisions in batch runs.</li>
+    <li><strong>Repeatability:</strong> compilation and directory creation are idempotent; rerunning <code>run.py</code> is safe.</li>
+  </ul>
 
-<pre><code>BASE_DIR = '/your/path/to/ultidock'
-DB_PATH = f"{BASE_DIR}/results/ultidock_results.db"
-LIGANDS_DIR = f"{BASE_DIR}/docking/LIGANDS_DIR"
-MACRO_MOL_DIR = f"{BASE_DIR}/docking/MACRO_MOL_DIR"
-DOCKING_DIR = f"{BASE_DIR}/docking"
-VINA_DIR = f"{BASE_DIR}/docking"
-</code></pre>
+  <hr/>
 
-<p>
-Macromolecule zoning and docking regions are predicted automatically by analyzing the geometry of each ligand. The system calculates grid centers and sizes based on ligand spatial distribution, then generates all required <code>.gpf</code> and <code>.glg</code> files for <code>autogrid4</code> behind the scenes—no need to manually define binding sites or run external preparation tools.
-</p>
+  <h2>6. Troubleshooting</h2>
+  <ul>
+    <li><strong>Toolkit mismatch:</strong> if compilation fails with “sm_&lt;arch&gt; not supported”, upgrade to CUDA ≥ 12.8 and re-run <code>run.py</code>.</li>
+    <li><strong>Parallelism errors:</strong> if you observe CUDA initialization assertions, ensure only one docking runs per GPU at any moment. <code>run.py</code> enforces this by design.</li>
+    <li><strong>Paths:</strong> use absolute paths if invoking binaries directly. The pipeline already passes explicit file paths to avoid CWD-related issues.</li>
+  </ul>
 
----
+  <hr/>
 
-<h2>🔍 Results</h2>
-<p>
-All docking outcomes are logged directly into an SQLite database located at <code>results/ultidock_results.db</code>. This structured format allows for fast queries, filtering, and large-scale result aggregation.
-</p>
+  <h2>7. Future Updates</h2>
+  <ul>
+    <li><strong>Multi-GPU scaling:</strong> per-GPU workers with automatic enumeration; multi-node options under evaluation.</li>
+    <li><strong>GROMACS integration:</strong> automated post-docking MD setup and free-energy estimation.</li>
+    <li><strong>Visualization:</strong> optional OpenGL/Desktop viewer and WebGL dashboard for pose inspection.</li>
+    <li><strong>Mac/CPU paths:</strong> streamlined CPU fallback for environments without NVIDIA GPUs.</li>
+  </ul>
 
-<p>
-In addition to database storage, successful docking results are tracked by ligand filename. This makes it easy to manually inspect or reprocess specific ligand–macromolecule pairs. If a file encounters an error or is skipped, it won’t be silently dropped—you’ll know.
-</p>
+  <hr/>
 
-<p>
-For quick access or spreadsheet compatibility, docking summaries are also exported to <code>.csv</code> files alongside the database. This gives you flexibility to review, visualize, or integrate results into your own analysis workflows without needing a database viewer.
-</p>
-
----
-
-<h2>💾 Exporting Results</h2>
-<p>
-To export results to Excel or other formats, you can use the built-in analysis script:
-</p>
-
-<pre><code># Export to Excel (.xlsx)
-python docking/analyse_docking_results.py --out results.xlsx
-</code></pre>
-
-<p>
-You can also modify this script to change filter logic (e.g., affinity thresholds, pose count), or to output in CSV, TSV, or other formats. All exports are based on the data already stored in the SQLite database for reliability.
-</p>
-
-<p>
-You can customize output columns, filter criteria, or data formats with a few edits to the analysis script.
-</p>
-
-<h2>🤝 Contributing</h2>
-<p>Contributions are welcome! Please open an issue or submit a pull request.</p>
-<hr />
-
-<h2>📖 Citation</h2>
+  <h2>8. Change Summary (this branch)</h2>
+  <ul>
+    <li>Auto-detection of GPU architecture and compatible <code>TARGETS</code> during build.</li>
+    <li>Stable output routing to <code>DOCKING_DIR/</code> and unique file naming.</li>
+    <li>Thread-safety and resource control for reliable GPU execution.</li>
+    <li>Documentation aligned to CUDA 12.8+ and automated setup via <code>run.py</code>.</li>
+  </ul>
+  <h2>9. Citation</h2>
   
   <p>If you use <strong>Ultidock</strong> in your research, publication, or automated pipeline, please consider citing it as:</p>
   
@@ -120,7 +145,7 @@ You can customize output columns, filter criteria, or data formats with a few ed
   </p>
   <hr />
 
-<h2>📎 Acknowledgements</h2>
+<h2>10. Acknowledgements</h2>
   <p>
   Ultidock relies on the robust and widely used <a href="http://vina.scripps.edu">AutoDock Vina</a> software for molecular docking. If you use Ultidock, please also cite the original Vina publication:
   </p>
@@ -129,10 +154,19 @@ You can customize output columns, filter criteria, or data formats with a few ed
   Trott, O., & Olson, A. J. (2010). <em>AutoDock Vina: Improving the speed and accuracy of docking with a new scoring function, efficient optimization, and multithreading.</em> Journal of Computational Chemistry, 31(2), 455–461.  
   <a href="https://doi.org/10.1002/jcc.21334">https://doi.org/10.1002/jcc.21334</a>
   </blockquote>
-  
+
+  <blockquote>
+  <p>
+  Diogo Santos-Martins, Leonardo Solis-Vasquez, Andreas F Tillack, Michel F Sanner, Andreas Koch, and Stefano Forli (2021)
+  Accelerating AutoDock4 with GPUs and Gradient-Based Local Search
+  Journal of Chemical Theory and Computation 2021 17 (2), 1060-1073  <p>
+  https://doi.org/10.1021/acs.jctc.0c01006
   <hr />
 
-<p align=\"center\">⭐ If you find Ultidock useful, please star the repository!</p>
+<p align=\"center\">If you find Ultidock useful, please star the repository!</p>
+
+</body>
+</html>
 
 </body>
 </html>
