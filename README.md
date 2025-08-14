@@ -42,6 +42,42 @@
     <li><strong>AutoDock-GPU</strong> (compiled by <code>run.py</code> into <code>AUTODOCK_GPU_DIR/bin/</code>)</li>
     <li><strong>AutoDock Vina</strong> (CPU fallback, optional)</li>
     <li><strong>AutoGrid</strong> (compiled by the accompanying script if needed)</li>
+
+
+  <pre>
+    <code>
+    # Update and install system dependencies
+    sudo apt update && sudo apt install -y \
+        build-essential \
+        gcc \
+        g++ \
+        gfortran \
+        make \
+        unzip \
+        tar \
+        csh \
+        libstdc++-dev \
+        libx11-dev \
+        libncurses-dev \
+        cmake \
+        python3 \
+        python3-pip
+
+    # (Optional) NVIDIA CUDA 12.8 Toolkit
+    # Install only if using NVIDIA GPU and CUDA 12.8
+    # Follow official NVIDIA instructions: https://developer.nvidia.com/cuda-downloads
+
+    # (Optional) AMD ROCm Toolkit
+    # Install only if using AMD GPU
+    # Follow official ROCm instructions: https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html
+
+    # Install Python dependencies
+    pip3 install numpy psutil glob2 tqdm pandas
+    <code>
+  </pre>
+  
+
+
   </ul>
 
   <h3>2.2 Optional / Future</h3>
