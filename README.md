@@ -45,7 +45,7 @@
 
 
   <pre>
-    <code>
+    <code class="language-bash">
     # Update and install system dependencies
     sudo apt update && sudo apt install -y \
         build-essential \
@@ -73,7 +73,7 @@
 
     # Install Python dependencies
     pip3 install numpy psutil glob2 tqdm pandas
-    <code>
+    </code>
   </pre>
   
 
