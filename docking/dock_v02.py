@@ -50,30 +50,40 @@ def list_nvidia_gpus():
         return [0]
 
 GPU_IDS = list_nvidia_gpus()
-GPU_SEMAPHORES = {i: threading.Semaphore(1) for i in GPU_IDS}
+# BoundedSemaphore protects against accidental double-release
+GPU_SLOTS_PER_DEV = int(os.environ.get("GPU_SLOTS_PER_DEV", "1"))
+GPU_SEMAPHORES = {i: threading.BoundedSemaphore(GPU_SLOTS_PER_DEV) for i in GPU_IDS}
 _GPU_RR_LOCK = threading.Lock()
 _GPU_RR = 0
 
 def next_gpu_id():
+    """Round-robin GPU selection; safe even if GPU_IDS == [0] fallback."""
     global _GPU_RR
     with _GPU_RR_LOCK:
+        if not GPU_IDS:
+            # extremely defensive; shouldn't happen because list_nvidia_gpus returns [0] on failure
+            return 0
         gid = GPU_IDS[_GPU_RR % len(GPU_IDS)]
-        _GPU_RR += 1
+        _GPU_RR = (_GPU_RR + 1) % (10_000_000)  # avoid unbounded growth
         return gid
 
 class DockingProcessor:
 
     def __init__(self):
-        _ensure_vina_exec()
         self.FILES = glob.glob(f"{LIGANDS_DIR}/*.pdbqt")
-        self.barrier = Barrier(6)
-        self.event = threading.Event()
+        print(f"[INIT] ligands discovered: {len(self.FILES)} in {LIGANDS_DIR}")
+
+        # NOTE: barrier/event were not used; keeping them None avoids accidental waits later
+        self.barrier = None
+        self.event = None
+
         # Initialize database manager and queue for async writes
         cpu_count = os.cpu_count() or 1
         cpus_per_vina = 2
         max_parallel = max(1, cpu_count // cpus_per_vina)
-        print(f"Allowing up to {max_parallel} concurrent Vina runs")
+        print(f"[INIT] allowing up to {max_parallel} concurrent Vina runs")
         self.vina_sem = Semaphore(max_parallel)
+
         self.db_manager = DockingDatabaseManager(DB_PATH)
         self.db_queue = queue.Queue()
         self.db_thread = threading.Thread(target=self._db_worker, daemon=True)
@@ -103,31 +113,40 @@ class DockingProcessor:
                         self.db_manager.insert_bulk(buffer)
                     self.db_queue.task_done()
                     break
-
                 # Item is valid
+                added = 0
                 if isinstance(item, list):
                     for rec in item:
                         if isinstance(rec, tuple) and len(rec) == 5:
-                            buffer.append(rec)
+                            buffer.append(rec); added += 1
                         else:
-                            print(f"Skipping bad sub-record in list: {rec}")
-                elif isinstance(item, tuple) and len(item) == 4:
-                    buffer.append(item)
+                            print(f"[DB] skipping bad sub-record: {rec}")
+                elif isinstance(item, tuple) and len(item) == 5:
+                    buffer.append(item); added = 1
                 else:
-                    print(f"Skipping malformed record: {item}")
+                    print(f"[DB] skipping malformed record: {item}")
 
-                self.db_queue.task_done()  #Very important!
+                self.db_queue.task_done()  # Very important!
 
                 if len(buffer) >= 500:
-                    print(f"Flushing 500 records to DB")
-                    self.db_manager.insert_bulk(buffer)
-                    buffer.clear()
+                    try:
+                        print(f"[DB] flushing {len(buffer)} records")
+                        self.db_manager.insert_bulk(buffer)
+                        buffer.clear()
+                    except Exception as e:
+                        # don't die; log and continue
+                        print(f"[DB] insert_bulk failed on batch of {len(buffer)}: {e}")
+                        buffer.clear()
 
             except queue.Empty:
                 if buffer:
-                    print(f"Timeout flush: Writing {len(buffer)} records to DB")
-                    self.db_manager.insert_bulk(buffer)
+                    try:
+                        print(f"[DB] timeout flush: writing {len(buffer)} records")
+                        self.db_manager.insert_bulk(buffer)
+                    except Exception as e:
+                        print(f"[DB] timeout flush failed on {len(buffer)} records: {e}")
                     buffer.clear()
+
 
     def memory_monitor(self, threshold):
         while True:
@@ -158,14 +177,17 @@ class DockingProcessor:
             )
             threads.append(thread)
 
-        threshold = 1024  # available memory threshold in bytes
-        while True:
-            if psutil.virtual_memory().available > threshold:
-                break
-            time.sleep(1)
+        # 1 KB threshold is effectively always true; keep but log once
+        threshold = 1024
+        if psutil.virtual_memory().available <= threshold:
+            print("[WARN] extremely low available memory reported; waiting...")
+            while psutil.virtual_memory().available <= threshold:
+                time.sleep(1)
 
         for thread in threads:
             thread.start()
+            print(f"[RUN] launched {len(threads)} worker threads")
+
 
         while completed_threads < len(threads):
             time.sleep(1)
@@ -492,7 +514,7 @@ class ProcessFileThread(threading.Thread):
                 vina_out  = f"{out_stem}.pdbqt"       # Vina CPU output target
 
                 # Per-GPU semaphore (one job per GPU at a time)
-                sem = GPU_SEMAPHORES.get(self.gpu_id, GPU_SEMAPHORES[min(GPU_SEMAPHORES)])
+                sem = GPU_SEMAPHORES.get(self.gpu_id, next(iter(GPU_SEMAPHORES.values())))
 
                 env = os.environ.copy()
                 env["OMP_NUM_THREADS"] = "1"
@@ -500,13 +522,14 @@ class ProcessFileThread(threading.Thread):
                 env["OPENBLAS_NUM_THREADS"] = "1"
                 # If you need hard isolation per thread, uncomment:
                 # env["CUDA_VISIBLE_DEVICES"] = str(self.gpu_id)
-
+                acquired_gpu = False
+                acquired_cpu = False
                 print(ligand_file)
 
-                self.vina_sem.acquire()
-                sem.acquire()
                 try:
                     if GPU_TYPE == "NVIDIA":
+                        sem.acquire()
+                        acquired_gpu = True
                         # --- AutoDock-GPU (XML-first) ---
                         result = subprocess.run(
                             [
@@ -538,6 +561,9 @@ class ProcessFileThread(threading.Thread):
 
                     else:
                         # --- Vina CPU fallback (PDBQT parsing) ---
+                        # CPU/Vina path uses ONLY the CPU limiter
+                        self.vina_sem.acquire()
+                        acquired_cpu = True
                         result = subprocess.run(
                             [
                                 f"{VINA_DIR}/bin/vina",
@@ -562,6 +588,7 @@ class ProcessFileThread(threading.Thread):
                             print(f"STDOUT:\n{result.stdout.strip()}")
                             print(f"STDERR:\n{result.stderr.strip()}")
                             continue
+
                     # Ensure output files are created
                 except subprocess.TimeoutExpired:
                     print(f"Docking timed out for: {ligand_file}")
@@ -569,8 +596,11 @@ class ProcessFileThread(threading.Thread):
                     self.vina_sem.release()
                     continue
                 finally:
-                    sem.release()
-                    self.vina_sem.release()
+                    if acquired_gpu:
+                        sem.release()
+                    if acquired_cpu:
+                        self.vina_sem.release()
+
 
                 print(f"[{threading.current_thread().name}] Docking {ligand_file}")
                 if GPU_TYPE == "NVIDIA":
