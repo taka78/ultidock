@@ -2,6 +2,8 @@ import os
 import subprocess
 import sys
 import shutil
+import stat
+from pathlib import Path
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
@@ -33,7 +35,7 @@ def detect_gpu():
         try:
             subprocess.run(["nvidia-smi"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
             print("NVIDIA GPU detected.")
-            return "NVIDIA"
+            return "CUDA"
         except subprocess.CalledProcessError:
             print("NVIDIA GPU detected but inaccessible.")
 
@@ -41,7 +43,7 @@ def detect_gpu():
         try:
             subprocess.run(["rocm-smi"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
             print("AMD GPU detected.")
-            return "AMD"
+            return "OPENCL"
         except subprocess.CalledProcessError:
             print("AMD GPU detected but inaccessible.")
 
@@ -49,8 +51,44 @@ def detect_gpu():
     return "CPU"
 
 def _normalize_mode(s: str) -> str:
-    s = (s or "").strip().lower()
-    return s if s in ("auto", "gpu", "cpu") else "auto"
+    """
+    Return one of: 'auto' | 'gpu' | 'cpu' | 'opencl' | 'cuda'
+    Matches keywords anywhere in the input (case-insensitive).
+    Priority: last matching keyword wins if multiple appear.
+    """
+    t = (s or "").lower()
+
+    # (keyword -> normalized mode)
+    keywords = [
+        # explicit backends
+        ("opencl", "opencl"),
+        ("opengl", "opencl"),   # common slip
+        ("ocl",    "opencl"),
+        ("rocm",   "opencl"),
+        ("amd",    "opencl"),
+
+        ("cuda",   "cuda"),
+        ("nvidia", "cuda"),
+        (" nv ",   "cuda"),     # crude guard to avoid matching 'env'
+        (" cu ",   "cuda"),
+
+        # generic modes
+        ("cpu",    "cpu"),
+        ("gpu",    "gpu"),
+        ("auto",   "auto"),
+    ]
+
+    last_hit = None
+    last_pos = -1
+    tt = f" {t} "  # pad to make the ' nv ' / ' cu ' checks work
+    for kw, mode in keywords:
+        pos = tt.rfind(kw)  # last occurrence wins
+        if pos != -1 and pos > last_pos:
+            last_pos = pos
+            last_hit = mode
+
+    return last_hit or "auto"
+
 
 
 def download_ligands_from_file(wget_file_path, LIGANDS_DIR):
@@ -81,19 +119,112 @@ def download_ligands_from_file(wget_file_path, LIGANDS_DIR):
     except subprocess.CalledProcessError as e:
         print(f"Error during command execution: {e}")
 
-def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE):
-    if GPU_TYPE in ("NVIDIA", "AMD"):
-        # Ensure AutoDock-GPU is compiled if needed
-        # detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE)
-        compiler_script = os.path.join(SCRIPT_DIR, "autodock-gpu-compiler.sh")
-        print(f"AutoDock-GPU is set up for {GPU_TYPE} GPU.")
-        try:
-            subprocess.run(["bash", compiler_script, AUTODOCK_GPU_DIR], check=True, cwd=AUTODOCK_GPU_DIR)
-        except subprocess.CalledProcessError as e:
-            print("Compiler script failed.")
-            sys.exit(1)
-    else:
+
+def _bin_backend(path: str) -> str | None:
+    """Return 'CUDA' if the binary links to libcuda/libcudart, 'OPENCL' if it links to libOpenCL, else None."""
+    try:
+        out = subprocess.run(["ldd", path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=2)
+        s = out.stdout or ""
+    except Exception:
+        return None
+    if "libOpenCL.so" in s:
+        return "OPENCL"
+    if "libcuda.so" in s or "libcudart.so" in s:
+        return "CUDA"
+    return None
+
+def _find_autodock_gpu_bin(autodock_dir: str, gpu_type: str, numwi: str = "128") -> str | None:
+    """
+    Find a usable AutoDock-GPU binary for the requested backend ('CUDA'|'OPENCL').
+    Accept both generic name (autodock_gpu_<N>wi) and backend-specific names.
+    Verify by checking linked libraries with ldd.
+    """
+    bin_dir = os.path.join(autodock_dir, "bin")
+    numwi = str(numwi).lower()
+    generic = f"autodock_gpu_{numwi}wi"
+
+    # Try the common names first (including the generic one you’re using for OCL too)
+    names = [
+        generic,
+        "autodock_gpu",                # some builds are multi-backend
+        "autodock_gpu_cuda",
+        "autodock_gpu_ocl",
+        "autodock_gpu_opencl",
+        f"autodock_gpu_{numwi}wi_ocl",
+        f"autodock_gpu_ocl_{numwi}wi",
+    ]
+    for name in names:
+        p = os.path.join(bin_dir, name)
+        if not (os.path.isfile(p) and os.access(p, os.X_OK)):
+            continue
+        be = _bin_backend(p)
+        if be is None:
+            # Unknown, but if the name matches the generic target, accept it
+            if os.path.basename(p) == generic:
+                return p
+            continue
+        if be == gpu_type.upper():
+            return p
+    return None
+
+def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI="128"):
+    """
+    Ensures the correct AutoDock-GPU binary exists.
+    - For NVIDIA: expects CUDA build (e.g., autodock_gpu_128wi).
+    - For AMD/OPENCL: expects an OpenCL build (autodock_gpu_ocl* or autodock_gpu).
+    Calls ./autodock-gpu-compiler.sh to build if missing.
+    """
+    gpu_upper = (GPU_TYPE or "CPU").upper()
+    needs_gpu = gpu_upper in ("CUDA", "OPENCL")
+    if not needs_gpu:
         print("AutoDock will run in CPU mode.")
+        return
+
+    # 1) try to find an existing binary
+    found = _find_autodock_gpu_bin(AUTODOCK_GPU_DIR, gpu_upper, NUMWI)
+    if found:
+        print(f"AutoDock-GPU is set up for {GPU_TYPE}: {found}")
+        return
+
+    # 2) build via your compiler script
+    compiler_script = os.path.join(SCRIPT_DIR, "autodock-gpu-compiler.sh")
+    if not os.path.isfile(compiler_script):
+        print(f"Compiler script not found at {compiler_script}")
+        sys.exit(1)
+
+    # pick DEVICE for the script
+    device_env = "CUDA" if gpu_upper == "NVIDIA" else "OPENCL"
+
+    env = os.environ.copy()
+    env["DEVICE"] = device_env
+    env["NUMWI"] = str(NUMWI)
+
+    print(f"[BUILD] AutoDock-GPU binary missing. Compiling for {GPU_TYPE} (DEVICE={device_env}, NUMWI={NUMWI})…")
+    try:
+        # Pass AUTODOCK_GPU_DIR as the script argument (your script expects it)
+        subprocess.run(
+            ["bash", compiler_script, AUTODOCK_GPU_DIR],
+            check=True,
+            cwd=AUTODOCK_GPU_DIR,
+            env=env,
+        )
+    except subprocess.CalledProcessError:
+        print("Compiler script failed.")
+        sys.exit(1)
+
+    # 3) re-check after build
+    found = Path(f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_ocl_{NUMWI}wi") or Path(f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_cuda_{NUMWI}wi")
+
+    if found.exists():
+        print(f"Found AutoDock-GPU binary: {found}")
+    else:
+        print("AutoDock-GPU compilation finished but no binary was found in bin/.")
+        sys.exit(1)
+
+    # make sure it’s executable (should already be, but belt & suspenders)
+    st = os.stat(found)
+    os.chmod(found, st.st_mode | stat.S_IXUSR)
+    print(f"[BUILD] AutoDock-GPU ready: {found}")
 
 '''    # Try compiling AutoDock-GPU if needed
     if GPU_TYPE in ("NVIDIA", "AMD"):
@@ -119,21 +250,11 @@ def main():
     print("Welcome to the Ultidock Setup")
     print("=" * 50)
 
-    mode = _normalize_mode(input("Select run mode (auto/gpu/cpu) [default: auto]: ") or "auto")
-    if mode == "cpu":
-        print("Forcing CPU mode.")
-        GPU_TYPE = "CPU"
-    elif mode == "gpu":
-        # Try to detect which GPU vendor is present; if none, warn and fall back to CPU
-        detected = detect_gpu()  # returns "NVIDIA", "AMD", or "CPU"
-        if detected in ("NVIDIA", "AMD"):
-            GPU_TYPE = detected
-        else:
-            print("Warning: No compatible GPU detected; continuing in CPU mode.")
-            GPU_TYPE = "CPU"
-    else:
-        # auto
-        GPU_TYPE = detect_gpu()  # returns "NVIDIA", "AMD", or "CPU"
+    mode = _normalize_mode(input("Select run mode (GPU = NVidia-CUDA/OpenCL, AMD-OpenCL or CPU or auto) [default: auto]: ") or "auto")
+    if mode in ("opencl", "cuda", "cpu"):
+        GPU_TYPE = mode.upper()          
+    else:  # 'gpu' or 'auto'
+        GPU_TYPE = detect_gpu()          
         
     # Ask for directory paths
     LIGANDS_DIR = ask_for_input("Enter the path for ligand files", os.path.join(CURRENT_DIR, "LIGANDS_DIR"))
@@ -175,6 +296,7 @@ def main():
         config_file.write('RESULTS_DIR = os.path.join(BASE_DIR, "RESULTS_DIR")\n')
         config_file.write('GPU_TYPE = "' + GPU_TYPE + '"\n')
         config_file.write('DB_PATH = os.path.join(RESULTS_DIR, "ultidock_results.db")\n')
+        config_file.write('NUMWI = "128"\n')
 
         print("Configuration saved to config.py and default directories are ensured!")
 
