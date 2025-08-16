@@ -1,100 +1,182 @@
 #!/bin/bash
 
+set -euo pipefail
+
 # Takes the AUTODOCK_GPU_DIR as argument or uses current directory
 GPU_DIR="${1:-$(pwd)}"
 cd "$GPU_DIR" || exit 1
 
 DEVICE="${DEVICE:-CUDA}"       # Default device type
 NUMWI="${NUMWI:-128}"           # Default work items
+MAKE_J="${MAKE_J:-$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)}"
+
 
 ###autodock_gpu_<N>wi refers to the number of OpenCL/CUDA work-items per ligand 
 #(like thread-group size):
 #64wi = 64 threads per ligand
 #128wi = 128 threads per ligand (more parallelism)
 
+upper_device="$(echo "$DEVICE" | tr '[:lower:]' '[:upper:]')"
+device_mode="CUDA"
+if [[ "$upper_device" == "OPENCL" || "$upper_device" == "OCL" || "$upper_device" == "OCLGPU" || "$upper_device" == "AMD" ]]; then
+  device_mode="OCLGPU"
+fi
 
-BINARY="${GPU_DIR}/bin/autodock_gpu_${NUMWI,,}wi"
+# Standard CUDA binary naming
+CUDA_BINARY="${GPU_DIR}/bin/autodock_gpu_${NUMWI,,}wi"
+OCL_BINARY="${GPU_DIR}/bin/autodock_gpu_ocl_${NUMWI,,}wi" ##im not gonna use it but copilot suggested it, so lets keep it for now
 
 ### Step 1: Compile AutoDock-GPU
-if [ ! -f "$BINARY" ]; then
-    echo "[INFO] AutoDock-GPU binary not found. Compiling for $DEVICE..."
+if [[ "$device_mode" == "CUDA" ]]; then
+  if [ ! -f "$CUDA_BINARY" ]; then
+      echo "[INFO] AutoDock-GPU binary not found. Compiling for $DEVICE..."
 
-    if ! command -v nvcc &> /dev/null; then
-        echo "[ERROR] CUDA toolkit not found. Please install it and try again."
-        exit 1
-    fi
+      if ! command -v nvcc &> /dev/null; then
+          echo "[ERROR] CUDA toolkit not found. Please install it and try again."
+          exit 1
+      fi
 
-    export GPU_INCLUDE_PATH="/usr/local/cuda/include"
-    export GPU_LIBRARY_PATH="/usr/local/cuda/lib64"
+      export GPU_INCLUDE_PATH="/usr/local/cuda/include"
+      export GPU_LIBRARY_PATH="/usr/local/cuda/lib64"
 
-    # --------- ADDED: auto-detect TARGETS (keeps manual override if you set TARGETS/TARGET_ARCH) ---------
-    detect_nvcc_support_set() {
-      local major minor
-      read major minor < <(nvcc --version | sed -n 's/.*release \([0-9]\+\)\.\([0-9]\+\).*/\1 \2/p')
-      if [[ "$major" -ge 13 ]]; then
-        echo "89 100 101 120"
-      elif [[ "$major" -eq 12 && "$minor" -ge 8 ]]; then
-        echo "89 100 101 120"
-      elif [[ "$major" -eq 12 && "$minor" -ge 6 ]]; then
-        echo "89 100 101"
-      elif [[ "$major" -eq 12 ]]; then
-        echo "80 86 89"
+      # Auto-detect TARGETS (keeps manual override if you set TARGETS/TARGET_ARCH)
+      detect_nvcc_support_set() {
+        local major minor
+        read major minor < <(nvcc --version | sed -n 's/.*release \([0-9]\+\)\.\([0-9]\+\).*/\1 \2/p')
+        if [[ "$major" -ge 13 ]]; then
+          echo "89 100 101 120"
+        elif [[ "$major" -eq 12 && "$minor" -ge 8 ]]; then
+          echo "89 100 101 120"
+        elif [[ "$major" -eq 12 && "$minor" -ge 6 ]]; then
+          echo "89 100 101"
+        elif [[ "$major" -eq 12 ]]; then
+          echo "80 86 89"
+        else
+          echo "50 52 53 60 61 62 70 72 75 80 86 89"
+        fi
+      }
+      detect_gpu_targets() {
+        if ! command -v nvidia-smi >/dev/null 2>&1; then
+          echo ""
+          return
+        fi
+        nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null \
+          | awk '{gsub(/\./,""); print}' | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+      }
+      # Only set defaults if user hasn’t provided TARGETS/TARGET_ARCH already
+      if [[ -z "${TARGETS:-}" || -z "${TARGET_ARCH:-}" ]]; then
+        _detected="$(detect_gpu_targets)"       # e.g. "89 100 120"
+        _supported="$(detect_nvcc_support_set)" # from nvcc version
+        _choose=""
+        if [[ -n "$_detected" ]]; then
+          for t in $_detected; do
+            if grep -qw "$t" <<<"$_supported"; then _choose+=" $t"; fi
+          done
+        fi
+        if [[ -z "$_choose" ]]; then _choose="$_supported"; fi
+        TARGETS_DEFAULT="$(echo "$_choose" | xargs)"  # trim spaces
+        # prefer the highest for TARGET_ARCH (first item after sorting numerically desc)
+        TARGET_ARCH_DEFAULT="sm_$(for t in $TARGETS_DEFAULT; do echo $t; done | sort -nr | head -n1)"
+        # export only if not preset
+        TARGETS="${TARGETS:-$TARGETS_DEFAULT}"
+        TARGET_ARCH="${TARGET_ARCH:-$TARGET_ARCH_DEFAULT}"
+      fi
+      echo "[INFO] Auto-detected TARGETS: ${TARGETS} (TARGET_ARCH=${TARGET_ARCH})"
+      # --------- end ADDED ---------
+
+      echo "[INFO] Running make DEVICE=$DEVICE NUMWI=$NUMWI..."
+      mkdir -p "${GPU_DIR}/bin"
+      make DEVICE=$DEVICE NUMWI=$NUMWI TARGET_ARCH="${TARGET_ARCH}" TARGETS="${TARGETS}" NVCC="nvcc" CC=gcc CXX=g++   ### USE CUDATOOLKIT 12.8, CUDA TOOLKIT 13 IS NOT SUPPORTED YET
+      #####PLEASE ADJUST THE TARGET_ARCH AND TARGETS AS NEEDED FOR YOUR GPU
+      ####Guidelines for choosing the right target architecture:
+      # - sm_80 for Volta GPUs (e.g., Tesla V100)
+      # - sm_86 for Ampere GPUs (e.g., A100, RTX 3000 series)
+      # - sm_89 for Ada Lovelace GPUs (e.g., RTX 4000 series)
+      # - sm_90 for Hopper GPUs (e.g., H100 variants)
+      # - sm_100/101 for Blackwell GB-series (datacenter)
+      # - sm_120 for consumer Blackwell (e.g., some RTX 50xx)
+      ### you got the idea, just adjust the TARGET_ARCH and TARGETS variables.
+      TODO=$(grep -E 'TARGET_ARCH|TARGETS' Makefile.Cuda)
+      echo "[INFO] Makefile.Cuda settings: $TODO"
+      mv "${GPU_DIR}/bin/autodock_gpu_${NUMWI,,}wi" "${GPU_DIR}/bin/autodock_gpu_cuda_${NUMWI,,}wi"
+
+      if [ -f "$CUDA_BINARY" ]; then
+          echo "[INFO] AutoDock-GPU compilation successful."
       else
-        echo "50 52 53 60 61 62 70 72 75 80 86 89"
+          echo "[ERROR] AutoDock-GPU compilation failed."
+          exit 2
       fi
-    }
-    detect_gpu_targets() {
-      if ! command -v nvidia-smi >/dev/null 2>&1; then
-        echo ""
-        return
-      fi
-      nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null \
-        | awk '{gsub(/\./,""); print}' | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//'
-    }
-    # Only set defaults if user hasn’t provided TARGETS/TARGET_ARCH already
-    if [[ -z "${TARGETS:-}" || -z "${TARGET_ARCH:-}" ]]; then
-      _detected="$(detect_gpu_targets)"       # e.g. "89 100 120"
-      _supported="$(detect_nvcc_support_set)" # from nvcc version
-      _choose=""
-      if [[ -n "$_detected" ]]; then
-        for t in $_detected; do
-          if grep -qw "$t" <<<"$_supported"; then _choose+=" $t"; fi
-        done
-      fi
-      if [[ -z "$_choose" ]]; then _choose="$_supported"; fi
-      TARGETS_DEFAULT="$(echo "$_choose" | xargs)"  # trim spaces
-      # prefer the highest for TARGET_ARCH (first item after sorting numerically desc)
-      TARGET_ARCH_DEFAULT="sm_$(for t in $TARGETS_DEFAULT; do echo $t; done | sort -nr | head -n1)"
-      # export only if not preset
-      TARGETS="${TARGETS:-$TARGETS_DEFAULT}"
-      TARGET_ARCH="${TARGET_ARCH:-$TARGET_ARCH_DEFAULT}"
-    fi
-    echo "[INFO] Auto-detected TARGETS: ${TARGETS} (TARGET_ARCH=${TARGET_ARCH})"
-    # --------- end ADDED ---------
+  else
+      echo "[INFO] AutoDock-GPU binary already compiled."
+  fi
+elif [[ "$device_mode" == "OCLGPU" ]]; then
+  # OpenCL/AMD path
+  echo "[INFO] Building AutoDock-GPU for OpenCL…"
 
-    echo "[INFO] Running make DEVICE=$DEVICE NUMWI=$NUMWI..."
-    mkdir -p "${GPU_DIR}/bin"
-    make DEVICE=$DEVICE NUMWI=$NUMWI TARGET_ARCH="${TARGET_ARCH}" TARGETS="${TARGETS}" NVCC="nvcc" CC=gcc CXX=g++   ### USE CUDATOOLKIT 12.8, CUDA TOOLKIT 13 IS NOT SUPPORTED YET
-    #####PLEASE ADJUST THE TARGET_ARCH AND TARGETS AS NEEDED FOR YOUR GPU
-    ####Guidelines for choosing the right target architecture:
-    # - sm_80 for Volta GPUs (e.g., Tesla V100)
-    # - sm_86 for Ampere GPUs (e.g., A100, RTX 3000 series)
-    # - sm_89 for Ada Lovelace GPUs (e.g., RTX 4000 series)
-    # - sm_90 for Hopper GPUs (e.g., H100 variants)
-    # - sm_100/101 for Blackwell GB-series (datacenter)
-    # - sm_120 for consumer Blackwell (e.g., some RTX 50xx)
-    ### you got the idea, just adjust the TARGET_ARCH and TARGETS variables.
-    TODO=$(grep -E 'TARGET_ARCH|TARGETS' Makefile.Cuda)
-    echo "[INFO] Makefile.Cuda settings: $TODO"
-
-    if [ -f "$BINARY" ]; then
-        echo "[INFO] AutoDock-GPU compilation successful."
+  # Try to auto-fill headers/libs for OpenCL
+  if [ -d /opt/rocm ]; then
+    # ROCm path
+    export GPU_INCLUDE_PATH="${GPU_INCLUDE_PATH:-/opt/rocm/include}"
+    # libOpenCL.so often under /opt/rocm/lib or /opt/rocm/lib64
+    if [ -f /opt/rocm/lib/libOpenCL.so ]; then
+      export GPU_LIBRARY_PATH="${GPU_LIBRARY_PATH:-/opt/rocm/lib}"
     else
-        echo "[ERROR] AutoDock-GPU compilation failed."
-        exit 2
+      export GPU_LIBRARY_PATH="${GPU_LIBRARY_PATH:-/opt/rocm/lib64}"
     fi
-else
-    echo "[INFO] AutoDock-GPU binary already compiled."
+  else
+    # Debian/Ubuntu ocl-icd-opencl-dev
+    export GPU_INCLUDE_PATH="${GPU_INCLUDE_PATH:-/usr/include}"
+    # Try to locate libOpenCL.so
+    if ldconfig -p 2>/dev/null | grep -q 'libOpenCL\.so'; then
+      OCL_LIB_DIR="$(ldconfig -p | awk '/libOpenCL\.so/{print $NF}' | head -n1 | xargs dirname)"
+      export GPU_LIBRARY_PATH="${GPU_LIBRARY_PATH:-$OCL_LIB_DIR}"
+    else
+      export GPU_LIBRARY_PATH="${GPU_LIBRARY_PATH:-/usr/lib/x86_64-linux-gnu}"
+    fi
+  fi
+
+  # Quick sanity for OpenCL toolchain
+  if ! command -v clinfo >/dev/null 2>&1 && \
+     [ ! -f "${GPU_INCLUDE_PATH}/CL/cl.h" ] && \
+     ! ldconfig -p 2>/dev/null | grep -q 'libOpenCL\.so'
+  then
+    cat <<EOF
+[ERROR] OpenCL headers/runtime not detected.
+Install OpenCL ICD & headers. On Debian/Ubuntu:
+  sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev clinfo
+For AMD ROCm, ensure /opt/rocm/* contains OpenCL headers/libs.
+EOF
+    exit 1
+  fi
+
+  # Already-built?
+  OCL_PRESENT=""
+  for name in autodock_gpu_ocl autodock_gpu_opencl autodock_gpu_ocl_${NUMWI}wi autodock_gpu_${NUMWI}wi_ocl autodock_gpu; do
+    if [[ -x "${GPU_DIR}/bin/$name" ]]; then OCL_PRESENT="${GPU_DIR}/bin/$name"; break; fi
+  done
+
+  if [[ -n "$OCL_PRESENT" ]]; then
+    echo "[INFO] OpenCL binary already present: $OCL_PRESENT"
+  else
+    mkdir -p ./bin
+    echo "[INFO] Running make DEVICE=OCLGPU NUMWI=${NUMWI}…"
+    make DEVICE=OCLGPU NUMWI="${NUMWI}" CC=gcc CXX=g++ -j"${MAKE_J}"
+    export GPU_INCLUDE_PATH=/usr/include
+    export GPU_LIBRARY_PATH=/lib/x86_64-linux-gnu
+    # Quiet the CPU env checks (Makefile.OpenCL prints those)
+    export CPU_INCLUDE_PATH=/usr/include
+    export CPU_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu
+    mv "${GPU_DIR}/bin/autodock_gpu_${NUMWI,,}wi" "${GPU_DIR}/bin/autodock_gpu_ocl_${NUMWI,,}wi"
+
+
+    OUT="${GPU_DIR}/bin/autodock_gpu_ocl_${NUMWI,,}wi"
+    if [[ -x "$OUT" ]]; then
+      echo "[INFO] OpenCL binary ready: $OUT"
+    else
+      echo "[ERROR] Build finished but $OUT not found"
+      exit 2
+    fi
+  fi
 fi
 
 ### Step 2: Compile AutoGrid
