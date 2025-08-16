@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import shutil  
 from threading import Barrier
-from config import LIGANDS_DIR, DOCKING_DIR, ANALYSIS_DIR, VINA_DIR, AUTODOCK_GPU_DIR, MACRO_MOL_DIR, DB_PATH, GPU_TYPE, RESULTS_DIR
+from config import LIGANDS_DIR, DOCKING_DIR, ANALYSIS_DIR, VINA_DIR, AUTODOCK_GPU_DIR, MACRO_MOL_DIR, DB_PATH, GPU_TYPE, RESULTS_DIR, AUTODOCK_GPU_DIR, NUMWI
 from db_manager import DockingDatabaseManager
 
 def _ensure_vina_exec():
@@ -30,8 +30,13 @@ def _ensure_vina_exec():
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
-BINARY_PATH = os.path.join(AUTODOCK_GPU_DIR, "bin", "autodock_gpu_128wi")
+BINARY_PATH = os.path.join(AUTODOCK_GPU_DIR, "bin", "autodock_gpu_" + NUMWI + "wi")
 COMPILER_SCRIPT = os.path.join(os.path.dirname(__file__), "autodock-gpu-compiler.sh")
+
+BACKEND = (GPU_TYPE or "CPU").upper()
+IS_CUDA = BACKEND == "CUDA"
+IS_OPENCL = BACKEND == "OPENCL"
+IS_GPU = IS_CUDA or IS_OPENCL
 
 def list_nvidia_gpus():
     """Return a list of GPU indices [0,1,...]. Falls back to [0] if unknown."""
@@ -527,16 +532,48 @@ class ProcessFileThread(threading.Thread):
                 print(ligand_file)
 
                 try:
-                    if GPU_TYPE == "NVIDIA":
+                    if GPU_TYPE == "NVIDIA" or GPU_TYPE == "CUDA":
                         sem.acquire()
                         acquired_gpu = True
                         # --- AutoDock-GPU (XML-first) ---
                         result = subprocess.run(
                             [
-                                f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_128wi",
+                                f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_cuda_{NUMWI}wi",
                                 "--lfile",   str(Path(ligand_file).resolve()),
                                 "--ffile",   str(Path(fld_file).resolve()),
-                                "--nrun",    "50",
+                                "--nrun",    "20",
+                                "--gbest",   "5",            # write <resnam>_out.pdbqt (optional but nice)
+                                "--xmloutput","1",           # ensure XML is produced
+                                "--resnam",  str(out_stem),  # basename; outputs land in DOCKING_DIR
+                                "--devnum",  str(int(self.gpu_id) + 1)  # AD-GPU is 1-indexed
+                            ],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            cwd=MACRO_MOL_DIR,
+                            env=env,
+                            timeout=100
+                        )
+                        print(f"[AutoDock-GPU stdout]\n{result.stdout}")
+                        print(f"[AutoDock-GPU stderr]\n{result.stderr}")
+
+                        if result.returncode != 0:
+                            print(f"Docking failed for: {ligand_file}")
+                            print(f"STDOUT:\n{result.stdout.strip()}")
+                            print(f"STDERR:\n{result.stderr.strip()}")
+                            continue
+                        # Ensure output files are created
+                    
+                    elif GPU_TYPE == "AMD" or GPU_TYPE == "OPENCL":
+                        sem.acquire()
+                        acquired_gpu = True
+                        # --- AutoDock-GPU (XML-first) ---
+                        result = subprocess.run(
+                            [
+                                f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_ocl_{NUMWI}wi",
+                                "--lfile",   str(Path(ligand_file).resolve()),
+                                "--ffile",   str(Path(fld_file).resolve()),
+                                "--nrun",    "20",
                                 "--gbest",   "5",            # write <resnam>_out.pdbqt (optional but nice)
                                 "--xmloutput","1",           # ensure XML is produced
                                 "--resnam",  str(out_stem),  # basename; outputs land in DOCKING_DIR
@@ -601,13 +638,13 @@ class ProcessFileThread(threading.Thread):
                     if acquired_cpu:
                         self.vina_sem.release()
 
-
+                print(GPU_TYPE)
                 print(f"[{threading.current_thread().name}] Docking {ligand_file}")
-                if GPU_TYPE == "NVIDIA":
+                if GPU_TYPE == "NVIDIA" or GPU_TYPE == "CUDA":
                     parsed_results = self.parse_adgpu_xml(xml_out, receptor_name, ligand_file)
-                elif GPU_TYPE == "AMD":
-                    parsed_results = self.parse_adgpu_xml(gpu_pdbqt, receptor_name, ligand_file) #definetly gonna change this
-                elif GPU_TYPE == "CPU":
+                elif GPU_TYPE == "AMD" or GPU_TYPE == "OPENCL":
+                    parsed_results = self.parse_adgpu_xml(xml_out, receptor_name, ligand_file)
+                else:
                     parsed_results = self.parse_vina_output_file(vina_out, receptor_name, ligand_file)
 
                 # parsed_results now unified shape: (tag, affinity, rmsd_lb, rmsd_ub, ligand_file)
@@ -646,8 +683,12 @@ class ProcessFileThread(threading.Thread):
 
 if __name__ == "__main__":
     start_time = time.time()
-    gpf_gen = GPFGenerator()
-    fld_path = gpf_gen.create_gpf(f"{MACRO_MOL_DIR}/4h10_edited-autodock-with-remark.pdbqt")  # returns .fld path
+    if GPU_TYPE == "NVIDIA" or GPU_TYPE == "AMD":
+        gpf_gen = GPFGenerator()
+        for receptor in sorted(glob.glob(os.path.join(MACRO_MOL_DIR, "*.pdbqt"))):
+            gpf_gen.create_gpf(receptor, output_gpf=f"{Path(receptor).stem}.gpf")
+    else:
+        print(f"[WARN] Docking engine is set to {GPU_TYPE}, skipping GPF generation.")
     processor = DockingProcessor()
     processor.run()
     print("Process finished --- %s seconds ---" % (time.time() - start_time))
