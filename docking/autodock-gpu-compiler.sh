@@ -7,7 +7,7 @@ GPU_DIR="${1:-$(pwd)}"
 cd "$GPU_DIR" || exit 1
 
 DEVICE="${DEVICE:-CUDA}"       # Default device type
-NUMWI="${NUMWI:-128}"           # Default work items
+NUMWI="${NUMWI:-256}"           # Default work items
 MAKE_J="${MAKE_J:-$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)}"
 
 
@@ -21,9 +21,9 @@ device_mode="CUDA"
 if [[ "$upper_device" == "OPENCL" || "$upper_device" == "OCL" || "$upper_device" == "OCLGPU" || "$upper_device" == "AMD" ]]; then
   device_mode="OCLGPU"
 fi
-
+echo "[INFO] Using device mode: $device_mode"
 # Standard CUDA binary naming
-CUDA_BINARY="${GPU_DIR}/bin/autodock_gpu_${NUMWI,,}wi"
+CUDA_BINARY="${GPU_DIR}/bin/autodock_gpu_cuda_${NUMWI,,}wi"
 OCL_BINARY="${GPU_DIR}/bin/autodock_gpu_ocl_${NUMWI,,}wi" ##im not gonna use it but copilot suggested it, so lets keep it for now
 
 ### Step 1: Compile AutoDock-GPU
