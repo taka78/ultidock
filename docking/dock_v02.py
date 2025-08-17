@@ -500,10 +500,12 @@ class ProcessFileThread(threading.Thread):
         macro_mol = macro_mols[0]
         receptor_name = macro_mol.split("/")[-1]
         fld_files = glob.glob(os.path.join(MACRO_MOL_DIR, "*.maps.fld"))
-        if not fld_files:
+        if (GPU_TYPE == "CUDA" or GPU_TYPE == "OPENCL") and not fld_files:
             print("No .maps.fld found in", MACRO_MOL_DIR)
             return
-        fld_file = fld_files[0]
+        if fld_files:
+            fld_file = fld_files[0]
+        print(GPU_TYPE)
         try:
             buffer = []
             BATCH_SIZE = 500
@@ -596,7 +598,7 @@ class ProcessFileThread(threading.Thread):
                             continue
                         # Ensure output files are created
 
-                    else:
+                    elif GPU_TYPE == "CPU" or GPU_TYPE == "VINA": # CPU/Vina fallback, i mean, why not?
                         # --- Vina CPU fallback (PDBQT parsing) ---
                         # CPU/Vina path uses ONLY the CPU limiter
                         self.vina_sem.acquire()
@@ -683,7 +685,7 @@ class ProcessFileThread(threading.Thread):
 
 if __name__ == "__main__":
     start_time = time.time()
-    if GPU_TYPE == "NVIDIA" or GPU_TYPE == "AMD":
+    if GPU_TYPE == "NVIDIA" or GPU_TYPE == "AMD" or GPU_TYPE == "OPENCL" or GPU_TYPE == "CUDA":
         gpf_gen = GPFGenerator()
         for receptor in sorted(glob.glob(os.path.join(MACRO_MOL_DIR, "*.pdbqt"))):
             gpf_gen.create_gpf(receptor, output_gpf=f"{Path(receptor).stem}.gpf")
