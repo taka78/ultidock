@@ -640,7 +640,6 @@ class ProcessFileThread(threading.Thread):
                     if acquired_cpu:
                         self.vina_sem.release()
 
-                print(GPU_TYPE)
                 print(f"[{threading.current_thread().name}] Docking {ligand_file}")
                 if GPU_TYPE == "NVIDIA" or GPU_TYPE == "CUDA":
                     parsed_results = self.parse_adgpu_xml(xml_out, receptor_name, ligand_file)
