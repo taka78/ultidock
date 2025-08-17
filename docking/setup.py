@@ -7,6 +7,7 @@ from pathlib import Path
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+NUMWI = "64"  # Default number of work items
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "lib"))
 
@@ -133,7 +134,7 @@ def _bin_backend(path: str) -> str | None:
         return "CUDA"
     return None
 
-def _find_autodock_gpu_bin(autodock_dir: str, gpu_type: str, numwi: str = "128") -> str | None:
+def _find_autodock_gpu_bin(autodock_dir: str, gpu_type: str, numwi) -> str | None:
     """
     Find a usable AutoDock-GPU binary for the requested backend ('CUDA'|'OPENCL').
     Accept both generic name (autodock_gpu_<N>wi) and backend-specific names.
@@ -167,11 +168,11 @@ def _find_autodock_gpu_bin(autodock_dir: str, gpu_type: str, numwi: str = "128")
             return p
     return None
 
-def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI="128"):
+def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI):
     """
     Ensures the correct AutoDock-GPU binary exists.
     - For NVIDIA: expects CUDA build (e.g., autodock_gpu_128wi).
-    - For AMD/OPENCL: expects an OpenCL build (autodock_gpu_ocl* or autodock_gpu).
+    - For AMD/OPENCL: expects an OpenCL build (autodock_gpu_ocl* or autodock_gpu_cuda*).
     Calls ./autodock-gpu-compiler.sh to build if missing.
     """
     gpu_upper = (GPU_TYPE or "CPU").upper()
@@ -193,7 +194,13 @@ def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI="128"):
         sys.exit(1)
 
     # pick DEVICE for the script
-    device_env = "CUDA" if gpu_upper == "NVIDIA" else "OPENCL"
+    if gpu_upper == "NVIDIA" or gpu_upper == "CUDA":
+        device_env = "CUDA"
+    elif gpu_upper == "OPENCL" or gpu_upper == "AMD":
+        device_env = "OPENCL"
+    else:
+        print(f"Unsupported GPU type: {GPU_TYPE}. Only CUDA and OPENCL are supported, cpu mode will be used.")
+        device_env = "CPU"
 
     env = os.environ.copy()
     env["DEVICE"] = device_env
@@ -202,6 +209,7 @@ def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI="128"):
     print(f"[BUILD] AutoDock-GPU binary missing. Compiling for {GPU_TYPE} (DEVICE={device_env}, NUMWI={NUMWI})…")
     try:
         # Pass AUTODOCK_GPU_DIR as the script argument (your script expects it)
+        print(env)
         subprocess.run(
             ["bash", compiler_script, AUTODOCK_GPU_DIR],
             check=True,
@@ -213,7 +221,10 @@ def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI="128"):
         sys.exit(1)
 
     # 3) re-check after build
-    found = Path(f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_ocl_{NUMWI}wi") or Path(f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_cuda_{NUMWI}wi")
+    if device_env == "CUDA":
+        found = Path(f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_cuda_{NUMWI}wi")
+    elif device_env == "OPENCL":
+        found = Path(f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_ocl_{NUMWI}wi")
 
     if found.exists():
         print(f"Found AutoDock-GPU binary: {found}")
@@ -278,7 +289,7 @@ def main():
     create_directory_if_needed(RESULTS_DIR)
 
     # Detect and compile AutoDock-GPU if needed
-    detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE)
+    detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI)
 
     # Save configuration to config.py (only declaring paths; DB file is not created here)
     with open(os.path.join(ROOT_DIR,"docking", "config.py"), 'w') as config_file:
@@ -296,7 +307,7 @@ def main():
         config_file.write('RESULTS_DIR = os.path.join(BASE_DIR, "RESULTS_DIR")\n')
         config_file.write('GPU_TYPE = "' + GPU_TYPE + '"\n')
         config_file.write('DB_PATH = os.path.join(RESULTS_DIR, "ultidock_results.db")\n')
-        config_file.write('NUMWI = "128"\n')
+        config_file.write(f'NUMWI = "{NUMWI}"\n')
 
         print("Configuration saved to config.py and default directories are ensured!")
 
