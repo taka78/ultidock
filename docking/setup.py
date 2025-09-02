@@ -3,6 +3,7 @@ import subprocess
 import sys
 import shutil
 import stat
+import argparse
 from pathlib import Path
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -12,17 +13,43 @@ NUMWI = "64"  # Default number of work items
 sys.path.append(os.path.join(os.path.dirname(__file__), "lib"))
 
 
+### example arguments
+parser = argparse.ArgumentParser(description="Ultidock setup")
+parser.add_argument("--example", action="store_true",
+                    help="Example mode: skip ligand downloads (.wget) and just prepare dirs/config")
+parser.add_argument("--wget", metavar="PATH",
+                    help="Path to a .wget file (overrides prompt)")
+args = parser.parse_args()
+
+
+
 def ask_for_input(prompt, default):
     user_input = input(f"{prompt} [default: {default}]: ")
     return user_input if user_input else default
 
 
-def create_directory_if_needed(directory):
+def create_directory_if_needed(dirname, root="docking"):
+    """
+    Ensure a directory exists inside the docking folder, regardless of cwd.
+    dirname: subdirectory name (string)
+    root: base docking directory (default = "docking")
+    Returns the absolute path to the created/existing directory.
+    """
+    # Get repo root based on this script’s location
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.abspath(os.path.join(script_dir, "..", root))
+
+    # Build full path
+    directory = os.path.join(root_dir, dirname)
+
+    # Create if missing
     if not os.path.exists(directory):
-        os.makedirs(directory)
-        print(f"Directory {directory} created.")
+        os.makedirs(directory, exist_ok=True)
+        print(f"[ok] created {directory}")
     else:
-        print(f"Directory {directory} already exists, continuing without creating it.")
+        print(f"[info] {directory} already exists, continuing.")
+
+    return directory
 
 
 def detect_gpu():
@@ -277,7 +304,11 @@ def main():
     RESULTS_DIR = ask_for_input("Enter the path for results files", os.path.join(CURRENT_DIR, "RESULTS_DIR"))
 
     # Ask for the .wget file location
-    wget_file_path = ask_for_input("Enter the path to the .wget file", os.path.join(CURRENT_DIR, "ligands.wget"))
+    if args.example:
+        wget_file_path = None
+        print("[example] Skipping ligand downloads (.wget).")
+    else:
+        wget_file_path = ask_for_input("Enter the path to the .wget file", os.path.join(CURRENT_DIR, "ligands.wget"))
 
     # Create required directories (including results)
     create_directory_if_needed(LIGANDS_DIR)
@@ -308,11 +339,17 @@ def main():
         config_file.write('GPU_TYPE = "' + GPU_TYPE + '"\n')
         config_file.write('DB_PATH = os.path.join(RESULTS_DIR, "ultidock_results.db")\n')
         config_file.write(f'NUMWI = "{NUMWI}"\n')
-
+        if args.example:
+            config_file.write('EXAMPLE_MODE = True\n')
+        else:
+            config_file.write('EXAMPLE_MODE = False\n')
         print("Configuration saved to config.py and default directories are ensured!")
 
     # Download the ligands using the URLs from the .wget file
-    download_ligands_from_file(wget_file_path, LIGANDS_DIR)
+    if args.example:
+        print("[example] Skipping ligand downloads (.wget).")
+    else:
+        download_ligands_from_file(wget_file_path, LIGANDS_DIR)
 
 
 if __name__ == "__main__":
