@@ -339,6 +339,15 @@ def main():
         config_file.write('GPU_TYPE = "' + GPU_TYPE + '"\n')
         config_file.write('DB_PATH = os.path.join(RESULTS_DIR, "ultidock_results.db")\n')
         config_file.write(f'NUMWI = "{NUMWI}"\n')
+        config_file.write('GRID_MODE = "ligand"      # ligand | residues | centers | blind\n')
+        config_file.write('GRID_SPACING = 0.375\n')
+        config_file.write('GRID_MARGIN = 5.0         # Å\n')
+        config_file.write('GRID_CAP = 50.0           # Å cap per axis for blind mode\n')
+        config_file.write('AUTO_GRID_BIN = "autogrid4"\n')
+        config_file.write('CENTERS_TSV = None        # path or None\n')
+        config_file.write('REF_LIGAND_PDB = None     # path to co-crystal/ref ligand if GRID_MODE="ligand"\n')
+
+
         if args.example:
             config_file.write('EXAMPLE_MODE = True\n')
         else:
