@@ -239,6 +239,10 @@ class DockingProcessor:
 '''
 
 class GPFGenerator:
+    def __init__(self, macromol_dir=None):
+        # default to config’s MACRO_MOL_DIR if not provided
+        self.mdir = macromol_dir or MACRO_MOL_DIR
+
     def calculate_grid_center_and_size(self, receptor_file, padding=10.0):
         ##in the past i was mixing macro molecules and ligands, which is a bad idea
         # This function calculates the geometric center and size of the grid based on the receptor file.
@@ -263,10 +267,59 @@ class GPFGenerator:
         size_x = np.max(x_coords) - np.min(x_coords) + padding
         size_y = np.max(y_coords) - np.min(y_coords) + padding
         size_z = np.max(z_coords) - np.min(z_coords) + padding
+        # DEBUG
+        print("[RECEPTOR] file:", receptor_file)
+        print("[RECEPTOR] bbox min:", (f"{np.min(x_coords):.3f}", f"{np.min(y_coords):.3f}", f"{np.min(z_coords):.3f}"))
+        print("[RECEPTOR] bbox max:", (f"{np.max(x_coords):.3f}", f"{np.max(y_coords):.3f}", f"{np.max(z_coords):.3f}"))
+        print("[RECEPTOR] center (Å):", (f"{center_x:.3f}", f"{center_y:.3f}", f"{center_z:.3f}"))
+        print("[RECEPTOR] raw size+pad (Å):", (f"{size_x:.3f}", f"{size_y:.3f}", f"{size_z:.3f}"))
 
         return (center_x, center_y, center_z), (size_x, size_y, size_z)
 
-    def write_gpf_file(self, receptor_file, center, size, output_gpf, spacing=0.375):
+
+    def _clusters_3d(self, vol, thr):
+        nx, ny, nz = vol.shape
+        seen = np.zeros(vol.shape, dtype=bool)
+        dirs = [(1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1)]
+        clusters = []
+        for x in range(nx):
+            for y in range(ny):
+                for z in range(nz):
+                    if seen[x,y,z] or vol[x,y,z] < thr:
+                        continue
+                    # BFS
+                    q = [(x,y,z)]
+                    seen[x,y,z] = True
+                    vox = []
+                    s = 0.0
+                    while q:
+                        a,b,c = q.pop()
+                        vox.append((a,b,c))
+                        s += vol[a,b,c]
+                        for dx,dy,dz in dirs:
+                            u,v,w = a+dx, b+dy, c+dz
+                            if 0<=u<nx and 0<=v<ny and 0<=w<nz and not seen[u,v,w] and vol[u,v,w] >= thr:
+                                seen[u,v,w] = True
+                                q.append((u,v,w))
+                    clusters.append((s, vox))  # total score & voxels
+        # sort by total score descending
+        clusters.sort(key=lambda t: t[0], reverse=True)
+        return clusters
+
+    def hotspot_center_world_from_cluster(self, voxels, grid_meta):
+        (nx, ny, nz), spacing, center = grid_meta
+        cx, cy, cz = nx//2, ny//2, nz//2
+        # centroid in voxel space
+        vx = sum(v[0] for v in voxels)/len(voxels)
+        vy = sum(v[1] for v in voxels)/len(voxels)
+        vz = sum(v[2] for v in voxels)/len(voxels)
+        dx = (vx - cx) * spacing
+        dy = (vy - cy) * spacing
+        dz = (vz - cz) * spacing
+        return (center[0]+dx, center[1]+dy, center[2]+dz)
+
+
+    def write_gpf_file(self, receptor_file, center, size, output_gpf, spacing=0.375, npts_cap=255):
         ###yup, i realised that generating all maps file in one go is more computationally efficient
         # than parsing all ligands for needed atom types
         # and then generating maps for each ligand separately.
@@ -292,6 +345,21 @@ class GPFGenerator:
             fld_filename = f"{base_name}.maps.fld"
             output_gpf_path = os.path.join(MACRO_MOL_DIR, os.path.basename(output_gpf))
 
+            # DEBUG: print raw inputs
+            print("[GPF] receptor:", receptor_file)
+            print("[GPF] center (Å):", tuple(f"{c:.3f}" for c in center))
+            print("[GPF] requested size (Å):", tuple(f"{s:.3f}" for s in size))
+            print("[GPF] initial spacing (Å/grid):", spacing, "  cap:", npts_cap)
+
+            # fit spacing/npts so each dim ≤ 255 and odd
+            spacing_fit, npts, box_fit = self._fit_spacing_and_npts(size, spacing, npts_cap=npts_cap)
+
+            # DEBUG: print fitted parameters
+            print("[GPF] fitted spacing (Å/grid):", f"{spacing_fit:.6f}")
+            print("[GPF] npts (nx,ny,nz):", npts)
+            print("[GPF] final box (Å):", tuple(f"{b:.3f}" for b in box_fit))
+            print("[GPF] ~grid cells:", npts[0]*npts[1]*npts[2])
+
             with open(output_gpf_path, 'w') as f:
                 f.write(f"npts {npts[0]} {npts[1]} {npts[2]}\n")
                 f.write(f"gridfld {fld_filename}\n")
@@ -312,22 +380,239 @@ class GPFGenerator:
         except Exception as e:
             print(f"[ERROR] Failed to write GPF file: {e}")
             raise
+        return output_gpf_path, os.path.join(self.mdir, fld_filename)
 
     def run_autogrid(self, gpf_path):
+        base = Path(gpf_path).stem
+        fld_path = Path(self.mdir) / f"{base}.maps.fld"
+        if fld_path.exists():
+            print(f"[INFO] Skipping AutoGrid: maps already exist ({fld_path})")
+            return str(fld_path)
+
         log_path = gpf_path.replace(".gpf", ".glg")
+        if os.path.exists(log_path):
+            print(f"[INFO] AutoGrid log already exists: {log_path}")
+            return str(fld_path) if fld_path.exists() else None
+
         try:
             subprocess.run(
-                [f"{AUTODOCK_GPU_DIR}/autogrid/autogrid4", "-p", os.path.basename(gpf_path), "-l", os.path.basename(log_path)],
-                check=True,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=MACRO_MOL_DIR,
-                timeout=1200
+                [f"{AUTODOCK_GPU_DIR}/autogrid/autogrid4",
+                "-p", os.path.basename(gpf_path),
+                "-l", os.path.basename(log_path)],
+                check=True, stderr=subprocess.PIPE, text=True,
+                cwd=self.mdir, timeout=1200
             )
             print(f"[INFO] AutoGrid finished. Log written to: {log_path}")
         except subprocess.CalledProcessError as e:
             print(f"[ERROR] AutoGrid execution failed:\n{e.stderr}")
             raise
+
+        return str(fld_path) if fld_path.exists() else None
+    
+    def _fit_spacing_and_npts(self, size_xyz, spacing, npts_cap=255):
+        """
+        Given requested physical box size (Å) and initial spacing (Å/grid),
+        increase spacing if needed so that npts per dimension ≤ npts_cap
+        and make each npts odd. Returns (spacing, npts_xyz, box_size_xyz).
+        """
+        import math
+        sx, sy, sz = size_xyz
+        # raw grid counts
+        nx = max(1, int(math.ceil(sx / spacing)))
+        ny = max(1, int(math.ceil(sy / spacing)))
+        nz = max(1, int(math.ceil(sz / spacing)))
+
+        # if any exceeds cap, scale spacing up
+        max_n = max(nx, ny, nz)
+        if max_n > npts_cap:
+            scale = float(max_n) / float(npts_cap)
+            spacing *= scale
+            nx = max(1, int(math.ceil(sx / spacing)))
+            ny = max(1, int(math.ceil(sy / spacing)))
+            nz = max(1, int(math.ceil(sz / spacing)))
+
+        # force odd npts
+        if nx % 2 == 0: nx += 1
+        if ny % 2 == 0: ny += 1
+        if nz % 2 == 0: nz += 1
+
+        # recompute physical box extents the grid will actually cover
+        bx = nx * spacing
+        by = ny * spacing
+        bz = nz * spacing
+        return spacing, (nx, ny, nz), (bx, by, bz)
+
+
+
+    def ensure_maps(self, receptor_file: str, spacing: float = 0.5, npts_cap: int = 128, include_metals: bool = False):
+        base = Path(receptor_file).stem
+        fld = Path(self.mdir) / f"{base}.maps.fld"
+        gpf = Path(self.mdir) / f"{base}.gpf"
+        if fld.exists():
+            return str(fld), str(gpf)
+        center, size = self.calculate_grid_center_and_size(receptor_file)
+        gpf_path, _ = self.write_gpf_file(
+            receptor_file, center, size, output_gpf=f"{base}.gpf",
+            spacing=spacing, npts_cap=npts_cap, include_metals=include_metals
+        )
+        self.run_autogrid(gpf_path)
+        return str(fld), str(gpf_path)
+
+    #tiny AutoGrid .map reader (ASCII)
+    def _read_map_ascii(self, map_path: str):
+        """
+        Very tolerant reader for AutoGrid ASCII .map:
+        - extracts npts (nx,ny,nz) and spacing from the paired .gpf if needed
+        - reads all float tokens and reshapes to (nx, ny, nz)
+        """
+        p = Path(map_path)
+        base = p.with_suffix("")  # e.g. 5i6x.OA
+        gpf = p.parent / f"{base.name.split('.')[0]}.gpf"
+
+        nx = ny = nz = None
+        spacing = None
+        origin = None
+
+        # Try to infer grid size from the .map header; fall back to .gpf
+        floats = []
+        with open(map_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                # Many headers start with non-numeric lines; collect floats anyway
+                # We’ll grab numbers; reshape later once we know npts
+                for tok in s.split():
+                    try:
+                        floats.append(float(tok))
+                    except ValueError:
+                        pass
+
+        # If we can’t detect npts from the map itself, parse the GPF (reliable)
+        if gpf.exists():
+            with open(gpf, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if line.startswith("npts"):
+                        _, a, b, c = line.split()
+                        nx, ny, nz = int(a), int(b), int(c)
+                    elif line.startswith("spacing"):
+                        _, sp = line.split()
+                        spacing = float(sp)
+                    elif line.startswith("gridcenter"):
+                        _, cx, cy, cz = line.split()
+                        origin = (float(cx), float(cy), float(cz))
+
+        if nx is None or ny is None or nz is None:
+            raise ValueError(f"Could not determine grid dimensions for {map_path}")
+
+        arr = np.array(floats, dtype=np.float32)
+        if arr.size != nx * ny * nz:
+            # Some map writers include header numbers; try to trim from the end
+            arr = arr[-(nx*ny*nz):]
+        vol = arr.reshape((nx, ny, nz), order="C")
+        return vol, (nx, ny, nz), spacing, origin
+
+    #simple hotspot score from a few maps 
+    def load_hotspot_score(self, receptor_stem: str):
+        """
+        Build a composite hotspot score from just 3 maps:
+        - e.map (electrostatic):   weight -1.0
+        - d.map (desolvation):     weight -0.5
+        - C.map (hydrophobicity):  weight -0.2
+        We z-normalize each map first to balance scales.
+        For C (hydrophobic) we clamp to negative only (favorable).
+        Returns: score (nx,ny,nz), meta = ((nx,ny,nz), spacing, center)
+        """
+        base = Path(self.mdir) / receptor_stem
+        components = [
+            ("e",  -1.0),   # more negative electrostatics → better
+            ("d",  -0.5),   # more negative desolvation → better
+            ("C",  -0.2),   # negative carbon pockets → better
+        ]
+
+        score = None
+        vol_ref = None
+        for t, w in components:
+            p = base.parent / f"{base.name}.{t}.map"
+            if not p.exists():
+                print(f"[WARN] missing map: {p}")
+                continue
+            vol, npts, spacing, origin = self._read_map_ascii(str(p))
+            # Favorable contributions only where it makes sense
+            if t in ("C",):
+                vol = np.minimum(vol, 0.0)
+            # z-normalize per map to equalize dynamic ranges
+            volz = self._z(vol)
+            contrib = w * volz
+            score = contrib if score is None else (score + contrib)
+            vol_ref = (npts, spacing, origin)
+
+        if score is None:
+            raise FileNotFoundError("No usable e/d/C maps found to build hotspot score.")
+        return score, vol_ref
+    # pick top hotspot voxel and convert to world coords
+    def hotspot_center_world(self, score, grid_meta):
+        (nx, ny, nz), spacing, center = grid_meta
+        # score has shape (nx, ny, nz) with center at 'center' in world coords.
+        # Convert voxel index of max score to world position:
+        idx = np.unravel_index(np.argmax(score), score.shape)
+        ix, iy, iz = [int(i) for i in idx]
+
+        # Map index → offset from center (assuming index center at nx//2,…)
+        cx, cy, cz = nx // 2, ny // 2, nz // 2
+        dx = (ix - cx) * spacing
+        dy = (iy - cy) * spacing
+        dz = (iz - cz) * spacing
+        wx = center[0] + dx
+        wy = center[1] + dy
+        wz = center[2] + dz
+        return (wx, wy, wz)
+
+    # ligand bbox (PDBQT) 
+    def ligand_bbox(self, ligand_file: str, pad: float = 2.0):
+        xs, ys, zs = [], [], []
+        with open(ligand_file, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if line.startswith(("ATOM", "HETATM")):
+                    try:
+                        xs.append(float(line[30:38]))
+                        ys.append(float(line[38:46]))
+                        zs.append(float(line[46:54]))
+                    except ValueError:
+                        pass
+        if not xs:
+            # fallback small box
+            return (6.0 + pad, 6.0 + pad, 6.0 + pad)
+        sx = (max(xs) - min(xs)) + pad
+        sy = (max(ys) - min(ys)) + pad
+        sz = (max(zs) - min(zs)) + pad
+        return (sx, sy, sz)
+
+    # propose docking box from hotspot + ligand size
+    def propose_box_for_ligand(self, receptor_file: str, ligand_file: str, fixed_size=(60.0, 60.0, 60.0)):
+        """
+        1) ensure maps, 2) build 3-map hotspot score, 3) pick peak, 4) use fixed box size.
+        Returns: (center_xyz, size_xyz, fld_path)
+        """
+        fld, gpf = self.ensure_maps(receptor_file)
+        stem = Path(receptor_file).stem
+        score, meta = self.load_hotspot_score(stem)
+        center = self.hotspot_center_world(score, meta)
+        size = tuple(float(s) for s in fixed_size)
+        # Debug prints so you can verify numbers easily
+        (nx, ny, nz), spacing, grid_center = meta
+        print(f"[HOTSPOT] grid dims: {nx}x{ny}x{nz}, spacing={spacing}, gridcenter={grid_center}")
+        print(f"[HOTSPOT] chosen center: {center}  size: {size}")
+        print(f"[HOTSPOT] score stats: min={score.min():.3f}  max={score.max():.3f}  mean={score.mean():.3f}  std={score.std():.3f}")
+        print("[BOX] center (Å):", tuple(f"{c:.3f}" for c in center))
+        print("[BOX] size   (Å):", tuple(f"{s:.3f}" for s in size))
+        print("[BOX] fld:", fld)
+        return center, size, fld
+    
+    def _z(self, arr: np.ndarray) -> np.ndarray:
+        m = float(arr.mean())
+        s = float(arr.std()) or 1.0
+        return (arr - m) / s
 
     def create_gpf(self, receptor_file, output_gpf="grid_params.gpf", spacing=0.375):
         center, size = self.calculate_grid_center_and_size(receptor_file)
@@ -372,41 +657,49 @@ class ProcessFileThread(threading.Thread):
         
         return (center_x, center_y, center_z), (size_x, size_y, size_z)
     
-    def parse_vina_output_file(self, filepath, receptor_name,ligand_file):
-    
-        #  Retry a few times to let file system catch up
+    def parse_vina_output_file(self, filepath, receptor_name, ligand_file):
+        # Wait briefly for filesystem
         for _ in range(3):
             if os.path.exists(filepath):
                 break
-            time.sleep(0.05)  # Small delay (50ms) yay
+            time.sleep(0.05)
         else:
             print(f"parse_vina_output_file: File not found after retries: {filepath}")
             return []
+
         results = []
-        current_model = None    
+        current_model = None
         current_affinity = None
         current_rmsd_lb = None
         current_rmsd_ub = None
         current_ligand_id = None
         inside_model_block = False
 
-        with open(filepath, 'r') as fp:
+        def finalize():
+            nonlocal current_model, current_affinity, current_rmsd_lb, current_rmsd_ub, current_ligand_id, inside_model_block
+            if inside_model_block and (current_model is not None) and (current_affinity is not None):
+                lid = current_ligand_id or Path(ligand_file).stem or "ligand"
+                tag = f"{lid}-Model{current_model}-{receptor_name}"
+                results.append((tag, current_affinity, current_rmsd_lb, current_rmsd_ub, ligand_file))
+            # reset
+            current_model = None
+            current_affinity = None
+            current_rmsd_lb = None
+            current_rmsd_ub = None
+            current_ligand_id = None
+            inside_model_block = False
+
+        with open(filepath, "r", encoding="utf-8", errors="ignore") as fp:
             for line in fp:
                 line = line.strip()
 
                 if line.startswith("MODEL"):
-                    # Start new block
-                    if current_model is not None and current_ligand_id and current_affinity is not None:
-                        tag = f"{current_ligand_id}-{receptor_name}-M{current_model}"
-                        results.append((tag, current_affinity, current_rmsd_lb, current_rmsd_ub))
-
-                    # Reset state
+                    # start new model (do not finalize here; we finalize on ENDMDL)
                     inside_model_block = True
                     current_affinity = None
                     current_rmsd_lb = None
                     current_rmsd_ub = None
                     current_ligand_id = None
-
                     try:
                         current_model = int(line.split()[1])
                     except (IndexError, ValueError):
@@ -420,26 +713,20 @@ class ProcessFileThread(threading.Thread):
                             current_rmsd_lb = float(parts[4])
                             current_rmsd_ub = float(parts[5])
                         except ValueError:
-                            continue
+                            pass
 
                 elif line.startswith("REMARK  Name") and inside_model_block:
+                    # Some writers use: "REMARK  Name = LIGAND"
                     parts = line.split()
                     if len(parts) >= 4:
-                        current_ligand_id = parts[3]
+                        current_ligand_id = parts[-1]  # safer than [3]
 
                 elif line.startswith("ENDMDL") and inside_model_block:
-                    # Finalize this model block
-                    if current_model is not None and current_ligand_id and current_affinity is not None:
-                        tag = f"{current_ligand_id}-Model{current_model}-{receptor_name}"
-                        results.append((tag, current_affinity, current_rmsd_lb, current_rmsd_ub, ligand_file))
+                    finalize()
 
-                    # Reset all block data
-                    current_model = None
-                    current_affinity = None
-                    current_rmsd_lb = None
-                    current_rmsd_ub = None
-                    current_ligand_id = None
-                    inside_model_block = False
+        # EOF without ENDMDL: finalize any open block
+        if inside_model_block:
+            finalize()
 
         return results
 
@@ -495,25 +782,21 @@ class ProcessFileThread(threading.Thread):
         # Calculate grid center and size dynamically for each ligand
         macro_mols = glob.glob(f"{MACRO_MOL_DIR}/*.pdbqt")
         if not macro_mols:
-            print("No macro molecule found in", MACRO_MOL_DIR)
-            return
-        macro_mol = macro_mols[0]
-        receptor_name = macro_mol.split("/")[-1]
-        fld_files = glob.glob(os.path.join(MACRO_MOL_DIR, "*.maps.fld"))
-        if (GPU_TYPE == "CUDA" or GPU_TYPE == "OPENCL") and not fld_files:
-            print("No .maps.fld found in", MACRO_MOL_DIR)
-            return
-        if fld_files:
-            fld_file = fld_files[0]
-        print(GPU_TYPE)
+           print("No macro molecule found in", MACRO_MOL_DIR)
+           return
+        macro_mol   = macro_mols[0]
+        receptor_name = os.path.basename(macro_mol)
+
+        # 2) ensure maps via GPFGenerator (no rerun if .maps.fld exists)
+        gpf = GPFGenerator(MACRO_MOL_DIR)
+        fld_file, _gpf_path = gpf.ensure_maps(macro_mol)
         try:
             buffer = []
             BATCH_SIZE = 500
-            grid_center, grid_size = self.calculate_grid_center_and_size(f"{macro_mol}")
             for ligand_file in self.bunch:
                 # ensure output dir exists
+                grid_center, grid_size, _ = gpf.propose_box_for_ligand(macro_mol, ligand_file)
                 Path(DOCKING_DIR).mkdir(parents=True, exist_ok=True)
-
                 lig_stem  = Path(ligand_file).stem
                 out_stem  = Path(DOCKING_DIR) / f"{lig_stem}_{uuid.uuid4().hex[:8]}"
                 gpu_pdbqt = f"{out_stem}_out.pdbqt"   # AD-GPU best pose (if --gbest 1)
@@ -537,13 +820,12 @@ class ProcessFileThread(threading.Thread):
                     if GPU_TYPE == "NVIDIA" or GPU_TYPE == "CUDA":
                         sem.acquire()
                         acquired_gpu = True
-                        # --- AutoDock-GPU (XML-first) ---
                         result = subprocess.run(
                             [
                                 f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_cuda_{NUMWI}wi",
                                 "--lfile",   str(Path(ligand_file).resolve()),
                                 "--ffile",   str(Path(fld_file).resolve()),
-                                "--nrun",    "20",
+                                "--nrun",    "200",
                                 "--gbest",   "5",            # write <resnam>_out.pdbqt (optional but nice)
                                 "--xmloutput","1",           # ensure XML is produced
                                 "--resnam",  str(out_stem),  # basename; outputs land in DOCKING_DIR
@@ -603,6 +885,8 @@ class ProcessFileThread(threading.Thread):
                         # CPU/Vina path uses ONLY the CPU limiter
                         self.vina_sem.acquire()
                         acquired_cpu = True
+                        print("[VINA] center_xyz:", tuple(f"{v:.3f}" for v in grid_center))
+                        print("[VINA] size_xyz:",   tuple(f"{v:.3f}" for v in grid_size))
                         result = subprocess.run(
                             [
                                 f"{VINA_DIR}/bin/vina",
@@ -623,7 +907,7 @@ class ProcessFileThread(threading.Thread):
                             timeout=1200
                         )
                         if result.returncode != 0:
-                            print(f"Vina failed for: {ligand_file}")
+                            print(f"Vina failed")   
                             print(f"STDOUT:\n{result.stdout.strip()}")
                             print(f"STDERR:\n{result.stderr.strip()}")
                             continue
@@ -684,7 +968,7 @@ class ProcessFileThread(threading.Thread):
 
 if __name__ == "__main__":
     start_time = time.time()
-    if GPU_TYPE == "NVIDIA" or GPU_TYPE == "AMD" or GPU_TYPE == "OPENCL" or GPU_TYPE == "CUDA":
+    if (GPU_TYPE == "NVIDIA" or GPU_TYPE == "AMD" or GPU_TYPE == "OPENCL" or GPU_TYPE == "CUDA") and (not os.path.exists(os.path.join(MACRO_MOL_DIR, "*.gpf"))):
         gpf_gen = GPFGenerator()
         for receptor in sorted(glob.glob(os.path.join(MACRO_MOL_DIR, "*.pdbqt"))):
             gpf_gen.create_gpf(receptor, output_gpf=f"{Path(receptor).stem}.gpf")
