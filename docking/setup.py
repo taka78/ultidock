@@ -197,72 +197,70 @@ def _find_autodock_gpu_bin(autodock_dir: str, gpu_type: str, numwi) -> str | Non
 
 def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI):
     """
-    Ensures the correct AutoDock-GPU binary exists.
-    - For NVIDIA: expects CUDA build (e.g., autodock_gpu_128wi).
-    - For AMD/OPENCL: expects an OpenCL build (autodock_gpu_ocl* or autodock_gpu_cuda*).
-    Calls ./autodock-gpu-compiler.sh to build if missing.
+    Always ensure AutoGrid exists. If GPU mode (CUDA/OPENCL), also ensure AutoDock-GPU.
+    In CPU mode we skip GPU binary checks/build and just build/check AutoGrid.
     """
     gpu_upper = (GPU_TYPE or "CPU").upper()
-    needs_gpu = gpu_upper in ("CUDA", "OPENCL")
-    if not needs_gpu:
-        print("AutoDock will run in CPU mode.")
-        return
 
-    # 1) try to find an existing binary
-    found = _find_autodock_gpu_bin(AUTODOCK_GPU_DIR, gpu_upper, NUMWI)
-    if found:
-        print(f"AutoDock-GPU is set up for {GPU_TYPE}: {found}")
-        return
-
-    # 2) build via your compiler script
     compiler_script = os.path.join(SCRIPT_DIR, "autodock-gpu-compiler.sh")
     if not os.path.isfile(compiler_script):
         print(f"Compiler script not found at {compiler_script}")
         sys.exit(1)
 
-    # pick DEVICE for the script
-    if gpu_upper == "NVIDIA" or gpu_upper == "CUDA":
+    # Map to script's DEVICE
+    if gpu_upper in ("NVIDIA", "CUDA"):
         device_env = "CUDA"
-    elif gpu_upper == "OPENCL" or gpu_upper == "AMD":
+    elif gpu_upper in ("OPENCL", "AMD"):
         device_env = "OPENCL"
     else:
-        print(f"Unsupported GPU type: {GPU_TYPE}. Only CUDA and OPENCL are supported, cpu mode will be used.")
         device_env = "CPU"
 
     env = os.environ.copy()
     env["DEVICE"] = device_env
     env["NUMWI"] = str(NUMWI)
 
-    print(f"[BUILD] AutoDock-GPU binary missing. Compiling for {GPU_TYPE} (DEVICE={device_env}, NUMWI={NUMWI})…")
-    try:
-        # Pass AUTODOCK_GPU_DIR as the script argument (your script expects it)
-        print(env)
+    found_bin = None  # <- important: define upfront so we never reference an unbound name
+
+    # If GPU mode, try to reuse or build AutoDock-GPU
+    if device_env in ("CUDA", "OPENCL"):
+        found_bin = _find_autodock_gpu_bin(AUTODOCK_GPU_DIR, device_env, NUMWI)
+        if found_bin:
+            print(f"AutoDock-GPU is set up for {GPU_TYPE}: {found_bin}")
+        else:
+            print(f"[BUILD] Compiling AutoDock-GPU for {GPU_TYPE} (DEVICE={device_env}, NUMWI={NUMWI})…")
+            subprocess.run(
+                ["bash", compiler_script, AUTODOCK_GPU_DIR],
+                check=True, cwd=AUTODOCK_GPU_DIR, env=env
+            )
+            # Re-check after build
+            if device_env == "CUDA":
+                candidate = Path(f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_cuda_{NUMWI}wi")
+            else:  # OPENCL
+                candidate = Path(f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_ocl_{NUMWI}wi")
+            if not candidate.exists():
+                print("AutoDock-GPU compilation finished but no binary was found in bin/.")
+                sys.exit(1)
+            st = os.stat(candidate)
+            os.chmod(candidate, st.st_mode | stat.S_IXUSR)
+            found_bin = str(candidate)
+            print(f"[BUILD] AutoDock-GPU ready: {found_bin}")
+    else:
+        # CPU-only: still run the script so it compiles/checks AutoGrid
+        print("[BUILD] CPU mode: building/checking AutoGrid only…")
         subprocess.run(
             ["bash", compiler_script, AUTODOCK_GPU_DIR],
-            check=True,
-            cwd=AUTODOCK_GPU_DIR,
-            env=env,
+            check=True, cwd=AUTODOCK_GPU_DIR, env=env
         )
-    except subprocess.CalledProcessError:
-        print("Compiler script failed.")
-        sys.exit(1)
 
-    # 3) re-check after build
-    if device_env == "CUDA":
-        found = Path(f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_cuda_{NUMWI}wi")
-    elif device_env == "OPENCL":
-        found = Path(f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_ocl_{NUMWI}wi")
+    # In all modes, verify AutoGrid
+    autogrid_bin = os.path.join(AUTODOCK_GPU_DIR, "autogrid", "autogrid4")
+    if not (os.path.isfile(autogrid_bin) and os.access(autogrid_bin, os.X_OK)):
+        raise RuntimeError(f"AutoGrid not found or not executable at {autogrid_bin}")
+    print(f"[BUILD] AutoGrid ready: {autogrid_bin}")
 
-    if found.exists():
-        print(f"Found AutoDock-GPU binary: {found}")
-    else:
-        print("AutoDock-GPU compilation finished but no binary was found in bin/.")
-        sys.exit(1)
+    # Optional: return paths if you want to use them later
+    return {"autogrid": autogrid_bin, "adgpu": found_bin}
 
-    # make sure it’s executable (should already be, but belt & suspenders)
-    st = os.stat(found)
-    os.chmod(found, st.st_mode | stat.S_IXUSR)
-    print(f"[BUILD] AutoDock-GPU ready: {found}")
 
 '''    # Try compiling AutoDock-GPU if needed
     if GPU_TYPE in ("NVIDIA", "AMD"):
@@ -320,6 +318,7 @@ def main():
     create_directory_if_needed(RESULTS_DIR)
 
     # Detect and compile AutoDock-GPU if needed
+    print(f"Setting up AutoDock-GPU and/or Autogrid in {AUTODOCK_GPU_DIR} for {GPU_TYPE} mode...")
     detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI)
 
     # Save configuration to config.py (only declaring paths; DB file is not created here)
@@ -339,6 +338,24 @@ def main():
         config_file.write('GPU_TYPE = "' + GPU_TYPE + '"\n')
         config_file.write('DB_PATH = os.path.join(RESULTS_DIR, "ultidock_results.db")\n')
         config_file.write(f'NUMWI = "{NUMWI}"\n')
+        config_file.write('GRID_MODE = "centers"      # ligand | residues | centers | blind\n')
+        config_file.write('GRID_SPACING = 0.375\n')
+        config_file.write('GRID_MARGIN = 5.0         # Å\n')
+        config_file.write('GRID_CAP = 30.0           # Å cap per axis for blind mode\n')
+        config_file.write('AUTO_GRID_BIN = os.path.join(AUTODOCK_GPU_DIR, "autogrid", "autogrid4")\n')
+        config_file.write('CENTERS_TSV  = os.path.join(MACRO_MOL_DIR, "centers.tsv")  # path or None\n')
+        config_file.write(f'REF_LIGAND_PDB = None    # path to co-crystal/ref ligand if GRID_MODE="ligand"\n')
+        config_file.write(f'HOTSPOT_NMS_MINSEP_A = 2.0\n')
+        config_file.write(f'R_MIN_CAVITY_A = 20.0   # minimum inscribed sphere radius for cavity acceptance\n')
+        config_file.write(f'SURFACE_SHELL__MIN_A = 2.0  # min/max distance from protein surface for surface pockets\n')
+        config_file.write(f'SURFACE_SHELL__MAX_A = 20.0\n')
+        config_file.write(f'SURFACE_NMS_MINSEP_A = 5        # voxels for non-max suppression of surface pockets\n')
+        config_file.write(f'MAX_CENTER_DIST_A = 10.0         \n')
+        config_file.write(f'CONTACT_SHELL_A = 4.0           # voxels ≤5 Å from surface count as “contact”\n')
+        config_file.write(f'HOTSPOT_BOX_ANGLE = 35       # minimum box side length (Å)\n')
+        config_file.write(f'MIN_SURFACE_FRAC = 0.01        # ~0.2% of box must be near-surface\n')
+        config_file.write(f'AUTOSITES = 6\n')
+
         if args.example:
             config_file.write('EXAMPLE_MODE = True\n')
         else:
