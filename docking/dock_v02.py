@@ -1,6 +1,7 @@
 #dock_v02.py
 import os, stat
 import threading
+import numpy as np
 from threading import Semaphore
 import queue
 import glob
@@ -11,22 +12,20 @@ import psutil
 import uuid
 import gc
 import xml.etree.ElementTree as ET
-import numpy as np
 import shutil  
 from threading import Barrier
-from config import LIGANDS_DIR, DOCKING_DIR, ANALYSIS_DIR, VINA_DIR, AUTODOCK_GPU_DIR, MACRO_MOL_DIR, DB_PATH, GPU_TYPE, RESULTS_DIR, AUTODOCK_GPU_DIR, NUMWI
+from make_grids import (
+    HotspotGPFGenerator,
+    autogenerate_centers_tsv,
+    ensure_grids_multi_centers,
+    ensure_whole_protein_maps,
+)
+from config import (
+    LIGANDS_DIR, DOCKING_DIR, ANALYSIS_DIR, VINA_DIR, AUTODOCK_GPU_DIR, MACRO_MOL_DIR,
+    DB_PATH, GPU_TYPE, RESULTS_DIR, NUMWI, GRID_MODE, GRID_MARGIN, GRID_CAP, CENTERS_TSV, REF_LIGAND_PDB,
+    GRID_SPACING, AUTO_GRID_BIN, AUTOSITES, R_MIN_CAVITY_A
+)
 from db_manager import DockingDatabaseManager
-
-def _ensure_vina_exec():
-    for exe in ("vina", "vina_split"):
-        path = os.path.join(VINA_DIR, "bin", exe)
-        try:
-            st = os.stat(path)
-            # if owner-x isn’t already set, add it (resulting in at least 0o755)
-            if not (st.st_mode & stat.S_IXUSR):
-                os.chmod(path, st.st_mode | stat.S_IXUSR)
-        except FileNotFoundError:
-            print(f"Warning: {exe} not found at {path}")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
@@ -72,11 +71,88 @@ def next_gpu_id():
         _GPU_RR = (_GPU_RR + 1) % (10_000_000)  # avoid unbounded growth
         return gid
 
+def prepare_sites_for_docking(receptor_pdbqt: str, macro_dir: str):
+    """
+    Returns: list[{
+      'site_id': 'S1', 'center': (cx,cy,cz), 'npts': (nx,ny,nz),
+      'spacing': float, 'fld_path': str, 'out_dir': str
+    }]
+    """
+    macro_dir = Path(macro_dir); macro_dir.mkdir(parents=True, exist_ok=True)
+    centers_tsv_path = Path(CENTERS_TSV)
+
+    # If user provided centers.tsv (GRID_MODE == "centers"), just build per-site maps.
+    if (GRID_MODE or "").lower() == "centers" and centers_tsv_path.exists():
+        sites = ensure_grids_multi_centers(
+            receptor_pdbqt=receptor_pdbqt,
+            out_root=str(macro_dir),
+            centers_tsv=str(centers_tsv_path),
+            autogrid4_bin=str(Path(AUTODOCK_GPU_DIR) / "autogrid" / "autogrid4"),
+        )
+        return sites
+
+    # Otherwise, auto-detect with your old algorithm and write centers.tsv, then per-site maps.
+    # Hybrid = internal cavities first, then C/E/D hotspots as fallback.
+    generator = HotspotGPFGenerator(
+        autogrid4_bin=str(Path(AUTODOCK_GPU_DIR) / "autogrid" / "autogrid4")
+    )
+    sites = generator.prepare_centers_and_grids(
+        receptor_pdbqt=receptor_pdbqt,
+        out_root=str(macro_dir),
+        centers_tsv_path=str(centers_tsv_path),
+        mode="hybrid",               # "internal" | "maps" | "hybrid"
+        n_sites=6,                   # or tune
+        whole_spacing=float(GRID_SPACING),
+        whole_cap_ang=float(GRID_CAP),      # 30–100 Å per axis cap for whole maps
+        hotspot_box_ang=18.0,        # per-site half box for maps mode
+        tau_rel=0.58,                # hotspot relative threshold
+        min_sep_A=7.0,               # NMS min separation
+    )
+    return sites
+
 class DockingProcessor:
 
     def __init__(self):
         self.FILES = glob.glob(f"{LIGANDS_DIR}/*.pdbqt")
         print(f"[INIT] ligands discovered: {len(self.FILES)} in {LIGANDS_DIR}")
+
+        # === receptor selection using your variables ===
+        macro_candidates = sorted(glob.glob(os.path.join(MACRO_MOL_DIR, "*.pdbqt")))
+        if not macro_candidates:
+            raise FileNotFoundError(f"No receptor .pdbqt found in {MACRO_MOL_DIR}")
+
+        # keep your naming style
+        self.MACRO_MOL_DIR = MACRO_MOL_DIR
+        self.MACRO_MOL = macro_candidates[0]                  # <— path to receptor file
+        self.RECEPTOR_STEM = Path(self.MACRO_MOL).stem
+
+        # grids land under MACRO_MOL_DIR/<receptor>/grids
+        self.GRID_ROOT = MACRO_MOL_DIR
+        os.makedirs(self.GRID_ROOT, exist_ok=True)
+
+        # optional: only if you ever use residues mode
+        def _RES_PRED(line: str) -> bool:
+            chain = line[21].strip()
+            resi  = line[22:26].strip()
+            resn  = line[17:20].strip()
+            try: idx = int(resi)
+            except: return False
+            # example: orthosteric pocket on chain A; include key residues you trust
+            return (chain == "A" and 120 <= idx <= 145) or (resn in {"HIS","ASP","SER"} and chain == "A")
+
+
+        # Build/ensure whole-protein maps and per-site maps in-place under MACRO_MOL_DIR
+        ref_lig = REF_LIGAND_PDB if (REF_LIGAND_PDB and os.path.exists(REF_LIGAND_PDB) and REF_LIGAND_PDB.lower().endswith(".pdbqt")) else None
+        self.SITES = prepare_sites_for_docking(
+            receptor_pdbqt=self.MACRO_MOL,
+            macro_dir=self.MACRO_MOL_DIR
+        )
+        for s in self.SITES:
+            fld = s["fld_path"]
+            if not os.path.exists(fld):
+                raise FileNotFoundError(f"[preflight] Missing FLD: {fld}\nLog: {os.path.join(s['out_dir'], 'grid.glg')}")
+
+                    # normalize to the same structure used by centers-mode
 
         # NOTE: barrier/event were not used; keeping them None avoids accidental waits later
         self.barrier = None
@@ -180,6 +256,7 @@ class DockingProcessor:
                 self.vina_sem,
                 gpu_id= next_gpu_id() 
             )
+            thread._parent = self   
             threads.append(thread)
 
         # 1 KB threshold is effectively always true; keep but log once
@@ -238,387 +315,6 @@ class DockingProcessor:
         return " ".join(sorted(atom_types))
 '''
 
-class GPFGenerator:
-    def __init__(self, macromol_dir=None):
-        # default to config’s MACRO_MOL_DIR if not provided
-        self.mdir = macromol_dir or MACRO_MOL_DIR
-
-    def calculate_grid_center_and_size(self, receptor_file, padding=10.0):
-        ##in the past i was mixing macro molecules and ligands, which is a bad idea
-        # This function calculates the geometric center and size of the grid based on the receptor file.
-        x_coords, y_coords, z_coords = [], [], []
-        with open(receptor_file, 'r') as f:
-            for line in f:
-                if line.startswith("ATOM") or line.startswith("HETATM"):
-                    try:
-                        x = float(line[30:38])
-                        y = float(line[38:46])
-                        z = float(line[46:54])
-                        x_coords.append(x)
-                        y_coords.append(y)
-                        z_coords.append(z)
-                    except ValueError:
-                        continue
-
-        center_x = np.mean(x_coords)
-        center_y = np.mean(y_coords)
-        center_z = np.mean(z_coords)
-
-        size_x = np.max(x_coords) - np.min(x_coords) + padding
-        size_y = np.max(y_coords) - np.min(y_coords) + padding
-        size_z = np.max(z_coords) - np.min(z_coords) + padding
-        # DEBUG
-        print("[RECEPTOR] file:", receptor_file)
-        print("[RECEPTOR] bbox min:", (f"{np.min(x_coords):.3f}", f"{np.min(y_coords):.3f}", f"{np.min(z_coords):.3f}"))
-        print("[RECEPTOR] bbox max:", (f"{np.max(x_coords):.3f}", f"{np.max(y_coords):.3f}", f"{np.max(z_coords):.3f}"))
-        print("[RECEPTOR] center (Å):", (f"{center_x:.3f}", f"{center_y:.3f}", f"{center_z:.3f}"))
-        print("[RECEPTOR] raw size+pad (Å):", (f"{size_x:.3f}", f"{size_y:.3f}", f"{size_z:.3f}"))
-
-        return (center_x, center_y, center_z), (size_x, size_y, size_z)
-
-
-    def _clusters_3d(self, vol, thr):
-        nx, ny, nz = vol.shape
-        seen = np.zeros(vol.shape, dtype=bool)
-        dirs = [(1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1)]
-        clusters = []
-        for x in range(nx):
-            for y in range(ny):
-                for z in range(nz):
-                    if seen[x,y,z] or vol[x,y,z] < thr:
-                        continue
-                    # BFS
-                    q = [(x,y,z)]
-                    seen[x,y,z] = True
-                    vox = []
-                    s = 0.0
-                    while q:
-                        a,b,c = q.pop()
-                        vox.append((a,b,c))
-                        s += vol[a,b,c]
-                        for dx,dy,dz in dirs:
-                            u,v,w = a+dx, b+dy, c+dz
-                            if 0<=u<nx and 0<=v<ny and 0<=w<nz and not seen[u,v,w] and vol[u,v,w] >= thr:
-                                seen[u,v,w] = True
-                                q.append((u,v,w))
-                    clusters.append((s, vox))  # total score & voxels
-        # sort by total score descending
-        clusters.sort(key=lambda t: t[0], reverse=True)
-        return clusters
-
-    def hotspot_center_world_from_cluster(self, voxels, grid_meta):
-        (nx, ny, nz), spacing, center = grid_meta
-        cx, cy, cz = nx//2, ny//2, nz//2
-        # centroid in voxel space
-        vx = sum(v[0] for v in voxels)/len(voxels)
-        vy = sum(v[1] for v in voxels)/len(voxels)
-        vz = sum(v[2] for v in voxels)/len(voxels)
-        dx = (vx - cx) * spacing
-        dy = (vy - cy) * spacing
-        dz = (vz - cz) * spacing
-        return (center[0]+dx, center[1]+dy, center[2]+dz)
-
-
-    def write_gpf_file(self, receptor_file, center, size, output_gpf, spacing=0.375, npts_cap=255):
-        ###yup, i realised that generating all maps file in one go is more computationally efficient
-        # than parsing all ligands for needed atom types
-        # and then generating maps for each ligand separately.
-        # This is because AutoDock can generate all maps in one go, and then use them
-        # for all ligands separately, as needed. which is much faster than generating maps for each ligand separately.
-        DEFAULT_AUTODOCK_ATOM_TYPES = [
-            "A",  # aliphatic carbon
-            "C",  # aromatic carbon
-            "HD", # hydrogen donor
-            "N",  # nitrogen
-            "NA", # nonpolar nitrogen
-            "OA", # oxygen acceptor
-            "S",  # sulfur
-            "SA", # sulfur acceptor (optional, rarely used)
-            "Cl", "Br", "F", "I", # halogens
-            "Zn", "Mg", "Ca", "Fe", "Mn"  # metals (optional based on use-case)
-        ]
-        try:
-            # Ensure grid point counts are odd
-            npts = [int(dim / spacing) | 1 for dim in size]  # force odd with bitwise OR
-
-            base_name = os.path.splitext(os.path.basename(receptor_file))[0]
-            fld_filename = f"{base_name}.maps.fld"
-            output_gpf_path = os.path.join(MACRO_MOL_DIR, os.path.basename(output_gpf))
-
-            # DEBUG: print raw inputs
-            print("[GPF] receptor:", receptor_file)
-            print("[GPF] center (Å):", tuple(f"{c:.3f}" for c in center))
-            print("[GPF] requested size (Å):", tuple(f"{s:.3f}" for s in size))
-            print("[GPF] initial spacing (Å/grid):", spacing, "  cap:", npts_cap)
-
-            # fit spacing/npts so each dim ≤ 255 and odd
-            spacing_fit, npts, box_fit = self._fit_spacing_and_npts(size, spacing, npts_cap=npts_cap)
-
-            # DEBUG: print fitted parameters
-            print("[GPF] fitted spacing (Å/grid):", f"{spacing_fit:.6f}")
-            print("[GPF] npts (nx,ny,nz):", npts)
-            print("[GPF] final box (Å):", tuple(f"{b:.3f}" for b in box_fit))
-            print("[GPF] ~grid cells:", npts[0]*npts[1]*npts[2])
-
-            with open(output_gpf_path, 'w') as f:
-                f.write(f"npts {npts[0]} {npts[1]} {npts[2]}\n")
-                f.write(f"gridfld {fld_filename}\n")
-                f.write(f"gridcenter {center[0]:.3f} {center[1]:.3f} {center[2]:.3f}\n")
-                f.write(f"spacing {spacing}\n")
-                f.write(f"receptor {os.path.basename(receptor_file)}\n")
-                f.write(f"ligand_types {' '.join(DEFAULT_AUTODOCK_ATOM_TYPES)}\n")
-
-                for atom in DEFAULT_AUTODOCK_ATOM_TYPES:
-                    f.write(f"map {base_name}.{atom}.map\n")
-
-                f.write(f"elecmap {base_name}.e.map\n")
-                f.write(f"dsolvmap {base_name}.d.map\n")
-                f.write("dielectric -0.1465\n")
-
-
-            print(f"[INFO] GPF file written: {output_gpf_path}")
-        except Exception as e:
-            print(f"[ERROR] Failed to write GPF file: {e}")
-            raise
-        return output_gpf_path, os.path.join(self.mdir, fld_filename)
-
-    def run_autogrid(self, gpf_path):
-        base = Path(gpf_path).stem
-        fld_path = Path(self.mdir) / f"{base}.maps.fld"
-        if fld_path.exists():
-            print(f"[INFO] Skipping AutoGrid: maps already exist ({fld_path})")
-            return str(fld_path)
-
-        log_path = gpf_path.replace(".gpf", ".glg")
-        if os.path.exists(log_path):
-            print(f"[INFO] AutoGrid log already exists: {log_path}")
-            return str(fld_path) if fld_path.exists() else None
-
-        try:
-            subprocess.run(
-                [f"{AUTODOCK_GPU_DIR}/autogrid/autogrid4",
-                "-p", os.path.basename(gpf_path),
-                "-l", os.path.basename(log_path)],
-                check=True, stderr=subprocess.PIPE, text=True,
-                cwd=self.mdir, timeout=1200
-            )
-            print(f"[INFO] AutoGrid finished. Log written to: {log_path}")
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] AutoGrid execution failed:\n{e.stderr}")
-            raise
-
-        return str(fld_path) if fld_path.exists() else None
-    
-    def _fit_spacing_and_npts(self, size_xyz, spacing, npts_cap=255):
-        """
-        Given requested physical box size (Å) and initial spacing (Å/grid),
-        increase spacing if needed so that npts per dimension ≤ npts_cap
-        and make each npts odd. Returns (spacing, npts_xyz, box_size_xyz).
-        """
-        import math
-        sx, sy, sz = size_xyz
-        # raw grid counts
-        nx = max(1, int(math.ceil(sx / spacing)))
-        ny = max(1, int(math.ceil(sy / spacing)))
-        nz = max(1, int(math.ceil(sz / spacing)))
-
-        # if any exceeds cap, scale spacing up
-        max_n = max(nx, ny, nz)
-        if max_n > npts_cap:
-            scale = float(max_n) / float(npts_cap)
-            spacing *= scale
-            nx = max(1, int(math.ceil(sx / spacing)))
-            ny = max(1, int(math.ceil(sy / spacing)))
-            nz = max(1, int(math.ceil(sz / spacing)))
-
-        # force odd npts
-        if nx % 2 == 0: nx += 1
-        if ny % 2 == 0: ny += 1
-        if nz % 2 == 0: nz += 1
-
-        # recompute physical box extents the grid will actually cover
-        bx = nx * spacing
-        by = ny * spacing
-        bz = nz * spacing
-        return spacing, (nx, ny, nz), (bx, by, bz)
-
-
-
-    def ensure_maps(self, receptor_file: str, spacing: float = 0.5, npts_cap: int = 128, include_metals: bool = False):
-        base = Path(receptor_file).stem
-        fld = Path(self.mdir) / f"{base}.maps.fld"
-        gpf = Path(self.mdir) / f"{base}.gpf"
-        if fld.exists():
-            return str(fld), str(gpf)
-        center, size = self.calculate_grid_center_and_size(receptor_file)
-        gpf_path, _ = self.write_gpf_file(
-            receptor_file, center, size, output_gpf=f"{base}.gpf",
-            spacing=spacing, npts_cap=npts_cap, include_metals=include_metals
-        )
-        self.run_autogrid(gpf_path)
-        return str(fld), str(gpf_path)
-
-    #tiny AutoGrid .map reader (ASCII)
-    def _read_map_ascii(self, map_path: str):
-        """
-        Very tolerant reader for AutoGrid ASCII .map:
-        - extracts npts (nx,ny,nz) and spacing from the paired .gpf if needed
-        - reads all float tokens and reshapes to (nx, ny, nz)
-        """
-        p = Path(map_path)
-        base = p.with_suffix("")  # e.g. 5i6x.OA
-        gpf = p.parent / f"{base.name.split('.')[0]}.gpf"
-
-        nx = ny = nz = None
-        spacing = None
-        origin = None
-
-        # Try to infer grid size from the .map header; fall back to .gpf
-        floats = []
-        with open(map_path, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                s = line.strip()
-                if not s:
-                    continue
-                # Many headers start with non-numeric lines; collect floats anyway
-                # We’ll grab numbers; reshape later once we know npts
-                for tok in s.split():
-                    try:
-                        floats.append(float(tok))
-                    except ValueError:
-                        pass
-
-        # If we can’t detect npts from the map itself, parse the GPF (reliable)
-        if gpf.exists():
-            with open(gpf, "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    if line.startswith("npts"):
-                        _, a, b, c = line.split()
-                        nx, ny, nz = int(a), int(b), int(c)
-                    elif line.startswith("spacing"):
-                        _, sp = line.split()
-                        spacing = float(sp)
-                    elif line.startswith("gridcenter"):
-                        _, cx, cy, cz = line.split()
-                        origin = (float(cx), float(cy), float(cz))
-
-        if nx is None or ny is None or nz is None:
-            raise ValueError(f"Could not determine grid dimensions for {map_path}")
-
-        arr = np.array(floats, dtype=np.float32)
-        if arr.size != nx * ny * nz:
-            # Some map writers include header numbers; try to trim from the end
-            arr = arr[-(nx*ny*nz):]
-        vol = arr.reshape((nx, ny, nz), order="C")
-        return vol, (nx, ny, nz), spacing, origin
-
-    #simple hotspot score from a few maps 
-    def load_hotspot_score(self, receptor_stem: str):
-        """
-        Build a composite hotspot score from just 3 maps:
-        - e.map (electrostatic):   weight -1.0
-        - d.map (desolvation):     weight -0.5
-        - C.map (hydrophobicity):  weight -0.2
-        We z-normalize each map first to balance scales.
-        For C (hydrophobic) we clamp to negative only (favorable).
-        Returns: score (nx,ny,nz), meta = ((nx,ny,nz), spacing, center)
-        """
-        base = Path(self.mdir) / receptor_stem
-        components = [
-            ("e",  -1.0),   # more negative electrostatics → better
-            ("d",  -0.5),   # more negative desolvation → better
-            ("C",  -0.2),   # negative carbon pockets → better
-        ]
-
-        score = None
-        vol_ref = None
-        for t, w in components:
-            p = base.parent / f"{base.name}.{t}.map"
-            if not p.exists():
-                print(f"[WARN] missing map: {p}")
-                continue
-            vol, npts, spacing, origin = self._read_map_ascii(str(p))
-            # Favorable contributions only where it makes sense
-            if t in ("C",):
-                vol = np.minimum(vol, 0.0)
-            # z-normalize per map to equalize dynamic ranges
-            volz = self._z(vol)
-            contrib = w * volz
-            score = contrib if score is None else (score + contrib)
-            vol_ref = (npts, spacing, origin)
-
-        if score is None:
-            raise FileNotFoundError("No usable e/d/C maps found to build hotspot score.")
-        return score, vol_ref
-    # pick top hotspot voxel and convert to world coords
-    def hotspot_center_world(self, score, grid_meta):
-        (nx, ny, nz), spacing, center = grid_meta
-        # score has shape (nx, ny, nz) with center at 'center' in world coords.
-        # Convert voxel index of max score to world position:
-        idx = np.unravel_index(np.argmax(score), score.shape)
-        ix, iy, iz = [int(i) for i in idx]
-
-        # Map index → offset from center (assuming index center at nx//2,…)
-        cx, cy, cz = nx // 2, ny // 2, nz // 2
-        dx = (ix - cx) * spacing
-        dy = (iy - cy) * spacing
-        dz = (iz - cz) * spacing
-        wx = center[0] + dx
-        wy = center[1] + dy
-        wz = center[2] + dz
-        return (wx, wy, wz)
-
-    # ligand bbox (PDBQT) 
-    def ligand_bbox(self, ligand_file: str, pad: float = 2.0):
-        xs, ys, zs = [], [], []
-        with open(ligand_file, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                if line.startswith(("ATOM", "HETATM")):
-                    try:
-                        xs.append(float(line[30:38]))
-                        ys.append(float(line[38:46]))
-                        zs.append(float(line[46:54]))
-                    except ValueError:
-                        pass
-        if not xs:
-            # fallback small box
-            return (6.0 + pad, 6.0 + pad, 6.0 + pad)
-        sx = (max(xs) - min(xs)) + pad
-        sy = (max(ys) - min(ys)) + pad
-        sz = (max(zs) - min(zs)) + pad
-        return (sx, sy, sz)
-
-    # propose docking box from hotspot + ligand size
-    def propose_box_for_ligand(self, receptor_file: str, ligand_file: str, fixed_size=(60.0, 60.0, 60.0)):
-        """
-        1) ensure maps, 2) build 3-map hotspot score, 3) pick peak, 4) use fixed box size.
-        Returns: (center_xyz, size_xyz, fld_path)
-        """
-        fld, gpf = self.ensure_maps(receptor_file)
-        stem = Path(receptor_file).stem
-        score, meta = self.load_hotspot_score(stem)
-        center = self.hotspot_center_world(score, meta)
-        size = tuple(float(s) for s in fixed_size)
-        # Debug prints so you can verify numbers easily
-        (nx, ny, nz), spacing, grid_center = meta
-        print(f"[HOTSPOT] grid dims: {nx}x{ny}x{nz}, spacing={spacing}, gridcenter={grid_center}")
-        print(f"[HOTSPOT] chosen center: {center}  size: {size}")
-        print(f"[HOTSPOT] score stats: min={score.min():.3f}  max={score.max():.3f}  mean={score.mean():.3f}  std={score.std():.3f}")
-        print("[BOX] center (Å):", tuple(f"{c:.3f}" for c in center))
-        print("[BOX] size   (Å):", tuple(f"{s:.3f}" for s in size))
-        print("[BOX] fld:", fld)
-        return center, size, fld
-    
-    def _z(self, arr: np.ndarray) -> np.ndarray:
-        m = float(arr.mean())
-        s = float(arr.std()) or 1.0
-        return (arr - m) / s
-
-    def create_gpf(self, receptor_file, output_gpf="grid_params.gpf", spacing=0.375):
-        center, size = self.calculate_grid_center_and_size(receptor_file)
-        self.write_gpf_file(receptor_file, center, size, output_gpf, spacing)
-        self.run_autogrid(os.path.join(MACRO_MOL_DIR, os.path.basename(output_gpf)))
-
 
 class ProcessFileThread(threading.Thread):
     
@@ -631,8 +327,9 @@ class ProcessFileThread(threading.Thread):
         self.db_queue = db_queue
         self.vina_sem = vina_sem
         self.gpu_id = gpu_id
+        self.MACRO_MOL_DIR = MACRO_MOL_DIR
 
-
+    '''LEGACY CODE
     # Function to parse ligand's .pdbqt file and extract atomic coordinates
     def calculate_grid_center_and_size(self, ligand_file):
         x_coords, y_coords, z_coords = [], [], []
@@ -656,7 +353,8 @@ class ProcessFileThread(threading.Thread):
         size_z = np.max(z_coords) - np.min(z_coords) + 10
         
         return (center_x, center_y, center_z), (size_x, size_y, size_z)
-    
+    '''
+            
     def parse_vina_output_file(self, filepath, receptor_name, ligand_file):
         # Wait briefly for filesystem
         for _ in range(3):
@@ -780,179 +478,207 @@ class ProcessFileThread(threading.Thread):
 
     def run(self):
         # Calculate grid center and size dynamically for each ligand
-        macro_mols = glob.glob(f"{MACRO_MOL_DIR}/*.pdbqt")
-        if not macro_mols:
-           print("No macro molecule found in", MACRO_MOL_DIR)
-           return
-        macro_mol   = macro_mols[0]
-        receptor_name = os.path.basename(macro_mol)
-
-        # 2) ensure maps via GPFGenerator (no rerun if .maps.fld exists)
-        gpf = GPFGenerator(MACRO_MOL_DIR)
-        fld_file, _gpf_path = gpf.ensure_maps(macro_mol)
+        parent = getattr(self, "_parent", None)
+        if parent is None:
+            print("[WARN] Missing parent reference; cannot access precomputed grids.")
+            return
+        # use sites prepared in DockingProcessor.__init__
+        sites = parent.SITES
+        receptor_name = Path(parent.MACRO_MOL).stem
         try:
             buffer = []
             BATCH_SIZE = 500
             for ligand_file in self.bunch:
                 # ensure output dir exists
-                grid_center, grid_size, _ = gpf.propose_box_for_ligand(macro_mol, ligand_file)
                 Path(DOCKING_DIR).mkdir(parents=True, exist_ok=True)
-                lig_stem  = Path(ligand_file).stem
-                out_stem  = Path(DOCKING_DIR) / f"{lig_stem}_{uuid.uuid4().hex[:8]}"
-                gpu_pdbqt = f"{out_stem}_out.pdbqt"   # AD-GPU best pose (if --gbest 1)
-                xml_out   = f"{out_stem}.xml"     # AD-GPU XML
-                vina_out  = f"{out_stem}.pdbqt"       # Vina CPU output target
+                lig_stem = Path(ligand_file).stem
+                for receptor_path in sorted(Path(MACRO_MOL_DIR).glob("*.pdbqt")):
+                    receptor_pdbqt = str(receptor_path)
+                    sites = prepare_sites_for_docking(receptor_pdbqt, macro_dir=MACRO_MOL_DIR)
+                for site in sites:
+                    cx, cy, cz = site["center"]
+                    nx, ny, nz = site["npts"]
+                    sp = float(site["spacing"])
+                    fld_base = site["fld_path"]                 # <-- pass this to AD-GPU --ffile
 
-                # Per-GPU semaphore (one job per GPU at a time)
-                sem = GPU_SEMAPHORES.get(self.gpu_id, next(iter(GPU_SEMAPHORES.values())))
+                    size_x = (nx - 1) * sp                      # <-- Vina box from npts/spacing
+                    size_y = (ny - 1) * sp
+                    size_z = (nz - 1) * sp
+                    site_id = site["site_id"]
+                    center  = tuple(float(x) for x in site["center"])
+                    spacing = float(site["spacing"])
+                    npts    = np.array(site["npts"], dtype=float)
+                    box_xyz = tuple((npts * spacing).tolist())
+                    fld_file= site["fld_path"]
 
-                env = os.environ.copy()
-                env["OMP_NUM_THREADS"] = "1"
-                env["MKL_NUM_THREADS"] = "1"
-                env["OPENBLAS_NUM_THREADS"] = "1"
-                # If you need hard isolation per thread, uncomment:
-                # env["CUDA_VISIBLE_DEVICES"] = str(self.gpu_id)
-                acquired_gpu = False
-                acquired_cpu = False
-                print(ligand_file)
+                    out_stem  = Path(DOCKING_DIR) / f"{site_id}__{lig_stem}_{uuid.uuid4().hex[:8]}"
+                    gpu_pdbqt = f"{out_stem}_out.pdbqt"
+                    xml_out   = f"{out_stem}.xml"
+                    vina_out  = f"{out_stem}.pdbqt"
 
-                try:
-                    if GPU_TYPE == "NVIDIA" or GPU_TYPE == "CUDA":
-                        sem.acquire()
-                        acquired_gpu = True
-                        result = subprocess.run(
-                            [
-                                f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_cuda_{NUMWI}wi",
-                                "--lfile",   str(Path(ligand_file).resolve()),
-                                "--ffile",   str(Path(fld_file).resolve()),
-                                "--nrun",    "200",
-                                "--gbest",   "5",            # write <resnam>_out.pdbqt (optional but nice)
-                                "--xmloutput","1",           # ensure XML is produced
-                                "--resnam",  str(out_stem),  # basename; outputs land in DOCKING_DIR
-                                "--devnum",  str(int(self.gpu_id) + 1)  # AD-GPU is 1-indexed
-                            ],
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            text=True,
-                            cwd=MACRO_MOL_DIR,
-                            env=env,
-                            timeout=100
-                        )
-                        print(f"[AutoDock-GPU stdout]\n{result.stdout}")
-                        print(f"[AutoDock-GPU stderr]\n{result.stderr}")
+                    # Per-GPU semaphore (one job per GPU at a time)
+                    sem = GPU_SEMAPHORES.get(self.gpu_id, next(iter(GPU_SEMAPHORES.values())))
+                    env = os.environ.copy()
+                    env["OMP_NUM_THREADS"] = "1"
+                    env["MKL_NUM_THREADS"] = "1"
+                    env["OPENBLAS_NUM_THREADS"] = "1"
+                    site_dir = os.path.dirname(fld_file)              # <-- folder with FLD + .map files
+                    fld_base = os.path.basename(fld_file)
+                    print("Using grid:", fld_file)
+                    # If you need hard isolation per thread, uncomment:
+                    # env["CUDA_VISIBLE_DEVICES"] = str(self.gpu_id)
+                    acquired_gpu = False
+                    acquired_cpu = False
+                    print(ligand_file)
 
-                        if result.returncode != 0:
-                            print(f"Docking failed for: {ligand_file}")
-                            print(f"STDOUT:\n{result.stdout.strip()}")
-                            print(f"STDERR:\n{result.stderr.strip()}")
-                            continue
+                    try:
+                        if GPU_TYPE == "NVIDIA" or GPU_TYPE == "CUDA":
+                            sem.acquire()
+                            acquired_gpu = True
+                            result = subprocess.run(
+                                [
+                                    f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_cuda_{NUMWI}wi",
+                                    "--lfile",   str(Path(ligand_file).resolve()),
+                                    "--ffile",   fld_base,
+                                    "--nrun",    "512",
+                                    "--nev",   "5000000",            # no early stopping
+                                    "--gbest",   "5",            # write <resnam>_out.pdbqt (optional but nice)
+                                    "--xmloutput","1",           # ensure XML is produced
+                                    "--resnam",  str(out_stem),  # basename; outputs land in DOCKING_DIR
+                                    "--devnum",  str(int(self.gpu_id) + 1),  # AD-GPU is 1-indexed
+                                    "--lsrat", "80.0",         # increase local search rate
+                                    "--lsmet", "sw",       # use Solis-Wets local search
+                                    "--initswgens", "300",  # More initial poses
+                                    "--stopstd", "0.02",     # Tighter convergence
+                                    "--psize", "300",      # Population size
+                                    "--dang", "30",         # Torsional angle change (degrees)
+                                    "--dmov","1.0",         # Torsional step size (angstroms)
+                                    "--mrat", "5",         # Mutation rate
+                                    "--autostop", "0",        # Disable autostop
+                                    "--lsit", "1000"        # Increase max iterations for local search
+                                ],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True,
+                                cwd=site_dir,
+                                env=env,
+                                timeout=10000
+                            )
+                            print(f"[AutoDock-GPU stdout]\n{result.stdout}")
+                            print(f"[AutoDock-GPU stderr]\n{result.stderr}")
+
+                            if result.returncode != 0:
+                                print(f"Docking failed for: {ligand_file}")
+                                print(f"STDOUT:\n{result.stdout.strip()}")
+                                print(f"STDERR:\n{result.stderr.strip()}")
+                                continue
+                            # Ensure output files are created
+                        
+                        elif GPU_TYPE == "AMD" or GPU_TYPE == "OPENCL":
+                            sem.acquire()
+                            acquired_gpu = True
+                            # --- AutoDock-GPU (XML-first) ---
+                            result = subprocess.run(
+                                [
+                                    f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_ocl_{NUMWI}wi",
+                                    "--lfile",   str(Path(ligand_file).resolve()),
+                                    "--ffile",   fld_base,
+                                    "--nrun",    "512",
+                                    "--gbest",   "5",            # write <resnam>_out.pdbqt (optional but nice)
+                                    "--xmloutput","1",           # ensure XML is produced
+                                    "--resnam",  str(out_stem),  # basename; outputs land in DOCKING_DIR
+                                    "--devnum",  str(int(self.gpu_id) + 1),  # AD-GPU is 1-indexed
+                                    "--lsrat", "50.0",         # increase local search rate
+                                    "--lsmet", "sw"       # use Solis-Wets local search
+                                ],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True,
+                                cwd=site_dir,
+                                env=env,
+                                timeout=10000
+                            )
+                            print(f"[AutoDock-GPU stdout]\n{result.stdout}")
+                            print(f"[AutoDock-GPU stderr]\n{result.stderr}")
+
+                            if result.returncode != 0:
+                                print(f"Docking failed for: {ligand_file}")
+                                print(f"STDOUT:\n{result.stdout.strip()}")
+                                print(f"STDERR:\n{result.stderr.strip()}")
+                                continue
+                            # Ensure output files are created
+
+                        elif GPU_TYPE == "CPU" or GPU_TYPE == "VINA": # CPU/Vina fallback, i mean, why not?
+                            # --- Vina CPU fallback (PDBQT parsing) ---
+                            # CPU/Vina path uses ONLY the CPU limiter
+                            self.vina_sem.acquire()
+                            acquired_cpu = True
+                            print(f"[VINA/{site_id}] center:", tuple(f"{v:.3f}" for v in center),
+                                " size:", tuple(f"{v:.3f}" for v in box_xyz))
+                            result = subprocess.run(
+                                [
+                                    f"{VINA_DIR}/bin/vina",
+                                    "--receptor", str(parent.MACRO_MOL),
+                                    "--ligand",   str(ligand_file),
+                                    "--center_x", f"{cx:.3f}",
+                                    "--center_y", f"{cy:.3f}",
+                                    "--center_z", f"{cz:.3f}",
+                                    "--size_x",   f"{size_x:.3f}",
+                                    "--size_y",   f"{size_y:.3f}",
+                                    "--size_z",   f"{size_z:.3f}",
+                                    "--cpu", "2",
+                                    "--out",      str(vina_out)
+                                ],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True,
+                                timeout=12000
+                            )
+                            if result.returncode != 0:
+                                print(f"Vina failed")   
+                                print(f"STDOUT:\n{result.stdout.strip()}")
+                                print(f"STDERR:\n{result.stderr.strip()}")
+                                continue
+
                         # Ensure output files are created
-                    
-                    elif GPU_TYPE == "AMD" or GPU_TYPE == "OPENCL":
-                        sem.acquire()
-                        acquired_gpu = True
-                        # --- AutoDock-GPU (XML-first) ---
-                        result = subprocess.run(
-                            [
-                                f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_ocl_{NUMWI}wi",
-                                "--lfile",   str(Path(ligand_file).resolve()),
-                                "--ffile",   str(Path(fld_file).resolve()),
-                                "--nrun",    "20",
-                                "--gbest",   "5",            # write <resnam>_out.pdbqt (optional but nice)
-                                "--xmloutput","1",           # ensure XML is produced
-                                "--resnam",  str(out_stem),  # basename; outputs land in DOCKING_DIR
-                                "--devnum",  str(int(self.gpu_id) + 1)  # AD-GPU is 1-indexed
-                            ],
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            text=True,
-                            cwd=MACRO_MOL_DIR,
-                            env=env,
-                            timeout=100
-                        )
-                        print(f"[AutoDock-GPU stdout]\n{result.stdout}")
-                        print(f"[AutoDock-GPU stderr]\n{result.stderr}")
-
-                        if result.returncode != 0:
-                            print(f"Docking failed for: {ligand_file}")
-                            print(f"STDOUT:\n{result.stdout.strip()}")
-                            print(f"STDERR:\n{result.stderr.strip()}")
-                            continue
-                        # Ensure output files are created
-
-                    elif GPU_TYPE == "CPU" or GPU_TYPE == "VINA": # CPU/Vina fallback, i mean, why not?
-                        # --- Vina CPU fallback (PDBQT parsing) ---
-                        # CPU/Vina path uses ONLY the CPU limiter
-                        self.vina_sem.acquire()
-                        acquired_cpu = True
-                        print("[VINA] center_xyz:", tuple(f"{v:.3f}" for v in grid_center))
-                        print("[VINA] size_xyz:",   tuple(f"{v:.3f}" for v in grid_size))
-                        result = subprocess.run(
-                            [
-                                f"{VINA_DIR}/bin/vina",
-                                "--receptor", str(macro_mol),
-                                "--ligand",   str(ligand_file),
-                                "--center_x", str(grid_center[0]),
-                                "--center_y", str(grid_center[1]),
-                                "--center_z", str(grid_center[2]),
-                                "--size_x",   str(grid_size[0]),
-                                "--size_y",   str(grid_size[1]),
-                                "--size_z",   str(grid_size[2]),
-                                "--cpu",      "2",
-                                "--out",      str(vina_out)
-                            ],
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            text=True,
-                            timeout=1200
-                        )
-                        if result.returncode != 0:
-                            print(f"Vina failed")   
-                            print(f"STDOUT:\n{result.stdout.strip()}")
-                            print(f"STDERR:\n{result.stderr.strip()}")
-                            continue
-
-                    # Ensure output files are created
-                except subprocess.TimeoutExpired:
-                    print(f"Docking timed out for: {ligand_file}")
-                    sem.release()
-                    self.vina_sem.release()
-                    continue
-                finally:
-                    if acquired_gpu:
+                    except subprocess.TimeoutExpired:
+                        print(f"Docking timed out for: {ligand_file}")
                         sem.release()
-                    if acquired_cpu:
                         self.vina_sem.release()
+                        continue
+                    finally:
+                        if acquired_gpu:
+                            sem.release()
+                        if acquired_cpu:
+                            self.vina_sem.release()
 
-                print(f"[{threading.current_thread().name}] Docking {ligand_file}")
-                if GPU_TYPE == "NVIDIA" or GPU_TYPE == "CUDA":
-                    parsed_results = self.parse_adgpu_xml(xml_out, receptor_name, ligand_file)
-                elif GPU_TYPE == "AMD" or GPU_TYPE == "OPENCL":
-                    parsed_results = self.parse_adgpu_xml(xml_out, receptor_name, ligand_file)
-                else:
-                    parsed_results = self.parse_vina_output_file(vina_out, receptor_name, ligand_file)
+                    print(f"[{threading.current_thread().name}] Docking {ligand_file}")
+                    if GPU_TYPE in ("NVIDIA", "AMD", "OPENCL", "CUDA"):
+                        parsed_results = self.parse_adgpu_xml(xml_out, receptor_name, ligand_file)
+                    else:
+                        parsed_results = self.parse_vina_output_file(vina_out, receptor_name, ligand_file)
 
-                # parsed_results now unified shape: (tag, affinity, rmsd_lb, rmsd_ub, ligand_file)
-                if not parsed_results:
-                    print(f"No valid docking data for: {ligand_file}")
-                    continue
-                buffer.extend(parsed_results)
-
-
-                if len(buffer) >= BATCH_SIZE:
-                    self.db_queue.put(buffer.copy())
-                    buffer.clear()
-
-                # memory log
-                memory_info = psutil.Process().memory_info()
-                print(f"Memory usage: {memory_info.rss / (1024 * 1024):.2f} MB")
+                    # parsed_results now unified shape: (tag, affinity, rmsd_lb, rmsd_ub, ligand_file)
+                    if not parsed_results:
+                        print(f"No valid docking data for: {ligand_file}")
+                        continue
+                    buffer.extend(parsed_results)
 
 
-                # Set event if memory usage is above the limit 
-                if memory_info.rss > 2252800000000: #Set your own limit
-                    print(f"Memory usage exceeded the limit.")
-                    #self.event.set()
-                    #self.barrier.wait()
+                    if len(buffer) >= BATCH_SIZE:
+                        self.db_queue.put(buffer.copy())
+                        buffer.clear()
+
+                    # memory log
+                    memory_info = psutil.Process().memory_info()
+                    print(f"Memory usage: {memory_info.rss / (1024 * 1024):.2f} MB")
+
+
+                    # Set event if memory usage is above the limit 
+                    if memory_info.rss > 2252800000000: #Set your own limit
+                        print(f"Memory usage exceeded the limit.")
+                        #self.event.set()
+                        #self.barrier.wait()
             if buffer:
                 self.db_queue.put(buffer)
 
@@ -968,12 +694,6 @@ class ProcessFileThread(threading.Thread):
 
 if __name__ == "__main__":
     start_time = time.time()
-    if (GPU_TYPE == "NVIDIA" or GPU_TYPE == "AMD" or GPU_TYPE == "OPENCL" or GPU_TYPE == "CUDA") and (not os.path.exists(os.path.join(MACRO_MOL_DIR, "*.gpf"))):
-        gpf_gen = GPFGenerator()
-        for receptor in sorted(glob.glob(os.path.join(MACRO_MOL_DIR, "*.pdbqt"))):
-            gpf_gen.create_gpf(receptor, output_gpf=f"{Path(receptor).stem}.gpf")
-    else:
-        print(f"[WARN] Docking engine is set to {GPU_TYPE}, skipping GPF generation.")
     processor = DockingProcessor()
     processor.run()
     print("Process finished --- %s seconds ---" % (time.time() - start_time))
