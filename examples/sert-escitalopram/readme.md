@@ -1,0 +1,1 @@
+PubChem [Internet]. Bethesda (MD): National Library of Medicine (US), National Center for Biotechnology Information; 2004-. PubChem Compound Summary for CID 146570, Escitalopram; [cited 2025 Sept. 19]. Available from: https://pubchem.ncbi.nlm.nih.gov/compound/Escitalopram
