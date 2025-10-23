@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import os
 import gzip
-from config import LIGANDS_DIR, DOCKING_DIR, ANALYSIS_DIR, VINA_DIR, EXAMPLE_MODE
+from config import LIGANDS_DIR, DOCKING_DIR, ANALYSIS_DIR, VINA_DIR
 
 class ProcessFileThread(threading.Thread):
     def __init__(self, f, extraction_barrier):
@@ -84,7 +84,4 @@ def main():
         t.join()
 
 if __name__ == "__main__":
-    if EXAMPLE_MODE == True:
-        print("Example mode: Skipping ligand extraction.")
-    else:
         main()
