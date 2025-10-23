@@ -5,6 +5,7 @@ import shutil
 import stat
 import argparse
 from pathlib import Path
+from typing import Iterable, Optional
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
@@ -13,13 +14,75 @@ NUMWI = "64"  # Default number of work items
 sys.path.append(os.path.join(os.path.dirname(__file__), "lib"))
 
 
-### example arguments
-parser = argparse.ArgumentParser(description="Ultidock setup")
-parser.add_argument("--example", action="store_true",
-                    help="Example mode: skip ligand downloads (.wget) and just prepare dirs/config")
-parser.add_argument("--wget", metavar="PATH",
-                    help="Path to a .wget file (overrides prompt)")
-args = parser.parse_args()
+def build_parser() -> argparse.ArgumentParser:
+    """Create the argument parser used by both setup.py and run.py."""
+
+    parser = argparse.ArgumentParser(description="Ultidock setup")
+    parser.add_argument(
+        "--wget",
+        metavar="PATH",
+        help="Path to a .wget file (overrides prompt)",
+    )
+    parser.add_argument(
+        "--skip-wget",
+        action="store_true",
+        help="Skip executing wget commands (ligands must already be present)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["auto", "gpu", "cpu", "cuda", "opencl"],
+        help="Choose the GPU detection mode (default: prompt)",
+    )
+    parser.add_argument(
+        "--ligands-dir",
+        "--LIGANDS_DIR",
+        dest="ligands_dir",
+        help="Directory to store ligand files",
+    )
+    parser.add_argument(
+        "--docking-dir",
+        "--DOCKING_DIR",
+        dest="docking_dir",
+        help="Directory to store docking outputs",
+    )
+    parser.add_argument(
+        "--analysis-dir",
+        "--ANALYSIS_DIR",
+        dest="analysis_dir",
+        help="Directory to store analysis artifacts",
+    )
+    parser.add_argument(
+        "--vina-dir",
+        "--VINA_DIR",
+        dest="vina_dir",
+        help="Directory containing AutoDock Vina binaries",
+    )
+    parser.add_argument(
+        "--autodock-gpu-dir",
+        "--AUTODOCK_GPU_DIR",
+        dest="autodock_gpu_dir",
+        help="Directory containing AutoDock-GPU",
+    )
+    parser.add_argument(
+        "--macro-mol-dir",
+        "--MACRO_MOL_DIR",
+        dest="macro_mol_dir",
+        help="Directory containing receptor PDBQT files",
+    )
+    parser.add_argument(
+        "--results-dir",
+        "--RESULTS_DIR",
+        dest="results_dir",
+        help="Directory to store docking results database",
+    )
+    return parser
+
+
+def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
+    """Parse command-line arguments, optionally from an iterable."""
+
+    parser = build_parser()
+    return parser.parse_args(argv)
 
 
 
@@ -28,28 +91,24 @@ def ask_for_input(prompt, default):
     return user_input if user_input else default
 
 
-def create_directory_if_needed(dirname, root="docking"):
-    """
-    Ensure a directory exists inside the docking folder, regardless of cwd.
-    dirname: subdirectory name (string)
-    root: base docking directory (default = "docking")
-    Returns the absolute path to the created/existing directory.
-    """
-    # Get repo root based on this script’s location
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    root_dir = os.path.abspath(os.path.join(script_dir, "..", root))
+def _normalize_path(value: str) -> Path:
+    """Expand user/home markers and resolve the provided path."""
 
-    # Build full path
-    directory = os.path.join(root_dir, dirname)
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path.resolve()
 
-    # Create if missing
-    if not os.path.exists(directory):
-        os.makedirs(directory, exist_ok=True)
-        print(f"[ok] created {directory}")
-    else:
-        print(f"[info] {directory} already exists, continuing.")
 
-    return directory
+def create_directory_if_needed(path: str | Path) -> str:
+    """Ensure a directory exists exactly where the user requested it."""
+
+    directory = Path(path).expanduser()
+    if not directory.is_absolute():
+        directory = Path.cwd() / directory
+    directory.mkdir(parents=True, exist_ok=True)
+    print(f"[ok] ensured directory {directory}")
+    return str(directory)
 
 
 def detect_gpu():
@@ -160,6 +219,34 @@ def _bin_backend(path: str) -> str | None:
     if "libcuda.so" in s or "libcudart.so" in s:
         return "CUDA"
     return None
+
+
+def _resolve_directory(prompt: str, default_path: Path, cli_value: Optional[str]) -> str:
+    """Resolve a directory path, preferring CLI values over interactive input."""
+
+    if cli_value:
+        target = _normalize_path(cli_value)
+    else:
+        user_value = ask_for_input(prompt, str(default_path))
+        target = _normalize_path(user_value)
+    return create_directory_if_needed(target)
+
+
+def _resolve_wget_path(current_dir: Path, args: argparse.Namespace) -> Optional[str]:
+    if getattr(args, "skip_wget", False):
+        print("[setup] --skip-wget specified; skipping ligand download step.")
+        return None
+
+    if args.wget:
+        return str(_normalize_path(args.wget))
+
+    if not sys.stdin.isatty():
+        print("[setup] Non-interactive session detected; skipping ligand download prompt.")
+        return None
+
+    prompt = "Enter the path to the .wget file"
+    default = current_dir / "ligands.wget"
+    return str(_normalize_path(ask_for_input(prompt, str(default))))
 
 def _find_autodock_gpu_bin(autodock_dir: str, gpu_type: str, numwi) -> str | None:
     """
@@ -280,93 +367,126 @@ def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI):
             print("AutoDock-GPU binary already compiled and executable.")'''
 
 
-def main():
-    CURRENT_DIR = os.path.abspath(os.path.dirname(__file__))
+def run_setup(args: argparse.Namespace) -> dict:
+    CURRENT_DIR = Path(__file__).resolve().parent
     print("=" * 50)
     print("Welcome to the Ultidock Setup")
     print("=" * 50)
 
-    mode = _normalize_mode(input("Select run mode (GPU = NVidia-CUDA/OpenCL, AMD-OpenCL or CPU or auto) [default: auto]: ") or "auto")
-    if mode in ("opencl", "cuda", "cpu"):
-        GPU_TYPE = mode.upper()          
-    else:  # 'gpu' or 'auto'
-        GPU_TYPE = detect_gpu()          
-        
-    # Ask for directory paths
-    LIGANDS_DIR = ask_for_input("Enter the path for ligand files", os.path.join(CURRENT_DIR, "LIGANDS_DIR"))
-    DOCKING_DIR = ask_for_input("Enter the path for docking files", os.path.join(CURRENT_DIR, "DOCKING_DIR"))
-    ANALYSIS_DIR = ask_for_input("Enter the path for analysis files", os.path.join(CURRENT_DIR, "ANALYSIS_DIR"))
-    VINA_DIR = ask_for_input("Enter the path for Autodock Vina", os.path.join(CURRENT_DIR, "VINA_DIR"))
-    AUTODOCK_GPU_DIR = ask_for_input("Enter the path for Autodock-GPU files", os.path.join(CURRENT_DIR, "AUTODOCK_GPU_DIR"))
-    MACRO_MOL_DIR = ask_for_input("Enter the path for macro molecule of your choice", os.path.join(CURRENT_DIR, "MACRO_MOL_DIR"))
-    RESULTS_DIR = ask_for_input("Enter the path for results files", os.path.join(CURRENT_DIR, "RESULTS_DIR"))
-
-    # Ask for the .wget file location
-    if args.example:
-        wget_file_path = None
-        print("[example] Skipping ligand downloads (.wget).")
+    if args.mode:
+        mode = _normalize_mode(args.mode)
     else:
-        wget_file_path = ask_for_input("Enter the path to the .wget file", os.path.join(CURRENT_DIR, "ligands.wget"))
+        user_mode = input(
+            "Select run mode (GPU = NVidia-CUDA/OpenCL, AMD-OpenCL or CPU or auto) [default: auto]: "
+        )
+        mode = _normalize_mode(user_mode or "auto")
 
-    # Create required directories (including results)
-    create_directory_if_needed(LIGANDS_DIR)
-    create_directory_if_needed(DOCKING_DIR)
-    create_directory_if_needed(ANALYSIS_DIR)
-    create_directory_if_needed(VINA_DIR)
-    create_directory_if_needed(AUTODOCK_GPU_DIR)
-    create_directory_if_needed(MACRO_MOL_DIR)
-    create_directory_if_needed(RESULTS_DIR)
+    if mode in ("opencl", "cuda", "cpu"):
+        GPU_TYPE = mode.upper()
+    else:  # 'gpu' or 'auto'
+        GPU_TYPE = detect_gpu()
 
-    # Detect and compile AutoDock-GPU if needed
-    print(f"Setting up AutoDock-GPU and/or Autogrid in {AUTODOCK_GPU_DIR} for {GPU_TYPE} mode...")
-    detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI)
+    ligands_dir = _resolve_directory(
+        "Enter the path for ligand files",
+        CURRENT_DIR / "LIGANDS_DIR",
+        getattr(args, "ligands_dir", None),
+    )
+    docking_dir = _resolve_directory(
+        "Enter the path for docking files",
+        CURRENT_DIR / "DOCKING_DIR",
+        getattr(args, "docking_dir", None),
+    )
+    analysis_dir = _resolve_directory(
+        "Enter the path for analysis files",
+        CURRENT_DIR / "ANALYSIS_DIR",
+        getattr(args, "analysis_dir", None),
+    )
+    vina_dir = _resolve_directory(
+        "Enter the path for Autodock Vina",
+        CURRENT_DIR / "VINA_DIR",
+        getattr(args, "vina_dir", None),
+    )
+    autodock_gpu_dir = _resolve_directory(
+        "Enter the path for Autodock-GPU files",
+        CURRENT_DIR / "AUTODOCK_GPU_DIR",
+        getattr(args, "autodock_gpu_dir", None),
+    )
+    macro_mol_dir = _resolve_directory(
+        "Enter the path for macro molecule of your choice",
+        CURRENT_DIR / "MACRO_MOL_DIR",
+        getattr(args, "macro_mol_dir", None),
+    )
+    results_dir = _resolve_directory(
+        "Enter the path for results files",
+        CURRENT_DIR / "RESULTS_DIR",
+        getattr(args, "results_dir", None),
+    )
 
-    # Save configuration to config.py (only declaring paths; DB file is not created here)
-    with open(os.path.join(ROOT_DIR,"docking", "config.py"), 'w') as config_file:
-        config_file.write('# config.py\n')
-        config_file.write('# Auto-generated config.py\n')
-        config_file.write('import os\n\n')
-        # Use the directory where config.py is located as the base directory.
-        config_file.write('BASE_DIR = os.path.abspath(os.path.dirname(__file__))\n\n')
-        config_file.write('LIGANDS_DIR = os.path.join(BASE_DIR, "LIGANDS_DIR")\n')
-        config_file.write('DOCKING_DIR = os.path.join(BASE_DIR, "DOCKING_DIR")\n')
-        config_file.write('ANALYSIS_DIR = os.path.join(BASE_DIR, "ANALYSIS_DIR")\n')
-        config_file.write('VINA_DIR = os.path.join(BASE_DIR, "VINA_DIR")\n')
-        config_file.write('AUTODOCK_GPU_DIR = os.path.join(BASE_DIR, "AUTODOCK_GPU_DIR")\n')
-        config_file.write('MACRO_MOL_DIR = os.path.join(BASE_DIR, "MACRO_MOL_DIR")\n')
-        config_file.write('RESULTS_DIR = os.path.join(BASE_DIR, "RESULTS_DIR")\n')
-        config_file.write('GPU_TYPE = "' + GPU_TYPE + '"\n')
-        config_file.write('DB_PATH = os.path.join(RESULTS_DIR, "ultidock_results.db")\n')
-        config_file.write(f'NUMWI = "{NUMWI}"\n')
+    wget_file_path = _resolve_wget_path(CURRENT_DIR, args)
+
+    print(f"Setting up AutoDock-GPU and/or Autogrid in {autodock_gpu_dir} for {GPU_TYPE} mode...")
+    detect_and_compile_autodock_gpu(autodock_gpu_dir, GPU_TYPE, NUMWI)
+
+    config_path = Path(ROOT_DIR) / "docking" / "config.py"
+    config_values = {
+        "LIGANDS_DIR": ligands_dir,
+        "DOCKING_DIR": docking_dir,
+        "ANALYSIS_DIR": analysis_dir,
+        "VINA_DIR": vina_dir,
+        "AUTODOCK_GPU_DIR": autodock_gpu_dir,
+        "MACRO_MOL_DIR": macro_mol_dir,
+        "RESULTS_DIR": results_dir,
+        "GPU_TYPE": GPU_TYPE,
+        "DB_PATH": str(Path(results_dir) / "ultidock_results.db"),
+        "NUMWI": NUMWI,
+    }
+
+    with open(config_path, "w", encoding="utf-8") as config_file:
+        config_file.write("# config.py\n")
+        config_file.write("# Auto-generated config.py\n")
+        config_file.write("import os\n\n")
+        config_file.write("BASE_DIR = os.path.abspath(os.path.dirname(__file__))\n\n")
+        for key in (
+            "LIGANDS_DIR",
+            "DOCKING_DIR",
+            "ANALYSIS_DIR",
+            "VINA_DIR",
+            "AUTODOCK_GPU_DIR",
+            "MACRO_MOL_DIR",
+            "RESULTS_DIR",
+        ):
+            config_file.write(f"{key} = {repr(config_values[key])}\n")
+        config_file.write(f"GPU_TYPE = {repr(config_values['GPU_TYPE'])}\n")
+        config_file.write(f"DB_PATH = {repr(config_values['DB_PATH'])}\n")
+        config_file.write(f"NUMWI = {repr(config_values['NUMWI'])}\n")
         config_file.write('GRID_MODE = "centers"      # ligand | residues | centers | blind\n')
         config_file.write('GRID_SPACING = 0.375\n')
         config_file.write('GRID_MARGIN = 5.0         # Å\n')
         config_file.write('GRID_CAP = 30.0           # Å cap per axis for blind mode\n')
         config_file.write('AUTO_GRID_BIN = os.path.join(AUTODOCK_GPU_DIR, "autogrid", "autogrid4")\n')
         config_file.write('CENTERS_TSV  = os.path.join(MACRO_MOL_DIR, "centers.tsv")  # path or None\n')
-        config_file.write(f'REF_LIGAND_PDB = None    # path to co-crystal/ref ligand if GRID_MODE="ligand"\n')
-        config_file.write(f'HOTSPOT_NMS_MINSEP_A = 2.0\n')
-        config_file.write(f'R_MIN_CAVITY_A = 20.0   # minimum inscribed sphere radius for cavity acceptance\n')
-        config_file.write(f'SURFACE_SHELL__MIN_A = 2.0  # min/max distance from protein surface for surface pockets\n')
-        config_file.write(f'SURFACE_SHELL__MAX_A = 20.0\n')
-        config_file.write(f'SURFACE_NMS_MINSEP_A = 5        # voxels for non-max suppression of surface pockets\n')
-        config_file.write(f'MAX_CENTER_DIST_A = 10.0         \n')
-        config_file.write(f'CONTACT_SHELL_A = 4.0           # voxels ≤5 Å from surface count as “contact”\n')
-        config_file.write(f'HOTSPOT_BOX_ANGLE = 35       # minimum box side length (Å)\n')
-        config_file.write(f'MIN_SURFACE_FRAC = 0.01        # ~0.2% of box must be near-surface\n')
-        config_file.write(f'AUTOSITES = 6\n')
+        config_file.write('REF_LIGAND_PDB = None    # path to co-crystal/ref ligand if GRID_MODE="ligand"\n')
+        config_file.write('HOTSPOT_NMS_MINSEP_A = 2.0\n')
+        config_file.write('R_MIN_CAVITY_A = 20.0   # minimum inscribed sphere radius for cavity acceptance\n')
+        config_file.write('SURFACE_SHELL__MIN_A = 2.0  # min/max distance from protein surface for surface pockets\n')
+        config_file.write('SURFACE_SHELL__MAX_A = 20.0\n')
+        config_file.write('SURFACE_NMS_MINSEP_A = 5        # voxels for non-max suppression of surface pockets\n')
+        config_file.write('MAX_CENTER_DIST_A = 10.0         \n')
+        config_file.write('CONTACT_SHELL_A = 4.0           # voxels ≤5 Å from surface count as “contact”\n')
+        config_file.write('HOTSPOT_BOX_ANGLE = 35       # minimum box side length (Å)\n')
+        config_file.write('MIN_SURFACE_FRAC = 0.01        # ~0.2% of box must be near-surface\n')
+        config_file.write('AUTOSITES = 6\n')
+        print(f"Configuration saved to {config_path} and directories were ensured!")
 
-        if args.example:
-            config_file.write('EXAMPLE_MODE = True\n')
-        else:
-            config_file.write('EXAMPLE_MODE = False\n')
-        print("Configuration saved to config.py and default directories are ensured!")
+    if wget_file_path:
+        download_ligands_from_file(wget_file_path, ligands_dir)
 
-    # Download the ligands using the URLs from the .wget file
-    if args.example:
-        print("[example] Skipping ligand downloads (.wget).")
-    else:
-        download_ligands_from_file(wget_file_path, LIGANDS_DIR)
+    return config_values
+
+
+def main(argv: Optional[Iterable[str]] = None) -> dict:
+    args = parse_args(argv)
+    return run_setup(args)
 
 
 if __name__ == "__main__":
