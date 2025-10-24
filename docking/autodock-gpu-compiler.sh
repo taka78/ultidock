@@ -215,104 +215,22 @@ if [ "$autogrid_needs_compile" = true ]; then
     cd "$AUTOGRID_DIR" || exit 4
     echo "[INFO] Compiling AutoGrid..."
     echo "[INFO] Preparing AutoGrid build environment..."
-    AUTOTOOLS_OK=true
-    ACLOCAL_BIN=""
-    CSH_OK=true
-    if command -v aclocal-1.16 >/dev/null 2>&1; then
-        ACLOCAL_BIN="$(command -v aclocal-1.16)"
-    elif command -v aclocal >/dev/null 2>&1; then
-        ACLOCAL_BIN="$(command -v aclocal)"
-    else
-        AUTOTOOLS_OK=false
-        echo "[WARN] 'aclocal' not found; skipping autoreconf regeneration and suppressing automake hooks."
-    fi
-
-    if [ -n "$ACLOCAL_BIN" ]; then
-        export ACLOCAL="$ACLOCAL_BIN"
-    fi
-
-    if ! command -v csh >/dev/null 2>&1; then
-        CSH_OK=false
-        echo "[WARN] 'csh' not found; will pre-generate default_parameters.h without it."
-    fi
-
     if [ ! -f configure ]; then
-        if [ -f configure.ac ] && [ "$AUTOTOOLS_OK" = true ]; then
-            echo "[INFO] Running autoreconf to generate configure script..."
-            autoreconf -i
-        elif [ -f configure~ ]; then
-            echo "[WARN] configure missing; restoring from configure~ backup."
-            cp configure~ configure
-        elif [ "$AUTOTOOLS_OK" = true ] && [ -f configure.in ]; then
-            echo "[INFO] Found legacy configure.in; running autoreconf..."
-            autoreconf -i
-        else
-            echo "[ERROR] configure script missing and no autoreconf sources available."
-            echo "        Please re-fetch the AutoGrid sources or restore configure manually."
-            exit 4
-        fi
-    fi
-
-    if [ ! -x configure ] && [ -f configure ]; then
-        chmod +x configure
+        echo "[INFO] Running autoreconf to generate configure script..."
+        autoreconf -i
     fi
 
     echo "[INFO] Running ./configure..."
+    if [ ! -f configure ]; then
+        echo "[INFO] No configure script found, running autoreconf..."
+        autoreconf -i
+    fi
     ./configure
     echo "[INFO] Cleaning previous build (if any)..."
-    if [ "$AUTOTOOLS_OK" = true ]; then
-        make clean || true
-    else
-        make clean ACLOCAL=: AUTOCONF=: AUTOMAKE=: AUTOHEADER=: || true
-    fi
-
-    if [ "$CSH_OK" = false ]; then
-        python3 - "$AUTOGRID_DIR" <<'PY'
-import sys
-from pathlib import Path
-
-autogrid_dir = Path(sys.argv[1])
-out_file = autogrid_dir / "default_parameters.h"
-srcs = [
-    autogrid_dir / "ad4_shared" / "AD4_parameters.dat",
-    autogrid_dir / "ad4_shared" / "AD4.1_bound.dat",
-]
-
-def load_lines(path: Path) -> list[str]:
-    lines: list[str] = []
-    with open(path, "r", encoding="utf-8", errors="ignore") as fh:
-        for raw in fh:
-            if raw.lstrip().startswith("#"):
-                continue
-            line = raw.rstrip("\n")
-            if not line.strip():
-                continue
-            lines.append(line)
-    return lines
-
-blocks = [
-    ("const char *param_string_4_0[MAX_LINES] = {", load_lines(srcs[0])),
-    ("const char *param_string_4_1[MAX_LINES] = {", load_lines(srcs[1])),
-]
-
-with open(out_file, "w", encoding="utf-8") as out:
-    for header, entries in blocks:
-        out.write(f"{header}\n")
-        for entry in entries:
-            out.write(f"\"{entry}\\n\", \n")
-        out.write(" };\n")
-    out.write("// EOF\n")
-PY
-        # ensure the header timestamp is newer than its dependencies so make skips the csh rule
-        touch "$AUTOGRID_DIR/default_parameters.h"
-        echo "[INFO] default_parameters.h generated via Python fallback."
-    fi
-    echo "[INFO] Running make..."
-    if [ "$AUTOTOOLS_OK" = true ]; then
-        make -j$(nproc)
-    else
-        make -j$(nproc) ACLOCAL=: AUTOCONF=: AUTOMAKE=: AUTOHEADER=:
-    fi
+    make clean || true
+        echo "[INFO] Running make..."
+    make -j$(nproc)
+  
 
     if [ -x "$AUTOGRID_BINARY" ]; then
         echo "[INFO] AutoGrid compilation successful."
