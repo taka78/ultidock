@@ -6,8 +6,19 @@ set -euo pipefail
 GPU_DIR="${1:-$(pwd)}"
 cd "$GPU_DIR" || exit 1
 
-DEVICE="${DEVICE:-CUDA}"       # Default device type
-NUMWI="${NUMWI:-256}"           # Default work items
+# Allow overrides via positional parameters as well as environment.
+#   $2 -> DEVICE, $3 -> NUMWI, $4 -> friendly GPU label (for logging)
+if [[ $# -ge 2 && -n "${2}" ]]; then
+  DEVICE="$2"
+fi
+if [[ $# -ge 3 && -n "${3}" ]]; then
+  NUMWI="$3"
+fi
+GPU_LABEL="${4:-${GPU_TYPE:-${DEVICE:-CUDA}}}"
+
+basename="${BASENAME:-adgpu_analysis}"
+DEVICE="${DEVICE:-${GPU_BACKEND:-CUDA}}"  # Default device type
+NUMWI="${NUMWI:-128}"   
 MAKE_J="${MAKE_J:-$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)}"
 
 
@@ -21,10 +32,12 @@ device_mode="CUDA"
 if [[ "$upper_device" == "OPENCL" || "$upper_device" == "OCL" || "$upper_device" == "OCLGPU" || "$upper_device" == "AMD" ]]; then
   device_mode="OCLGPU"
 fi
-echo "[INFO] Using device mode: $device_mode"
+echo "[INFO] Using device mode: $device_mode (requested: ${GPU_LABEL})"
 # Standard CUDA binary naming
-CUDA_BINARY="${GPU_DIR}/bin/autodock_gpu_cuda_${NUMWI,,}wi"
-OCL_BINARY="${GPU_DIR}/bin/autodock_gpu_ocl_${NUMWI,,}wi" ##im not gonna use it but copilot suggested it, so lets keep it for now
+NUMWI_CANON="${NUMWI,,}"
+CUDA_BINARY="${GPU_DIR}/bin/autodock_gpu_cuda_${NUMWI_CANON}wi"
+OCL_BINARY="${GPU_DIR}/bin/autodock_gpu_ocl_${NUMWI_CANON}wi" ##im not gonna use it but copilot suggested it, so lets keep it for now
+GENERIC_BINARY="${GPU_DIR}/bin/autodock_gpu_${NUMWI_CANON}wi"
 
 
 if [[ "${DEVICE^^}" == "CPU" ]]; then
@@ -83,6 +96,7 @@ else
           TARGET_ARCH_DEFAULT="sm_$(for t in $TARGETS_DEFAULT; do echo $t; done | sort -nr | head -n1)"
           # export only if not preset
           TARGETS="${TARGETS:-$TARGETS_DEFAULT}"
+          echo "TARGETS: ${TARGETS}"
           TARGET_ARCH="${TARGET_ARCH:-$TARGET_ARCH_DEFAULT}"
         fi
         echo "[INFO] Auto-detected TARGETS: ${TARGETS} (TARGET_ARCH=${TARGET_ARCH})"
@@ -90,7 +104,7 @@ else
 
         echo "[INFO] Running make DEVICE=$DEVICE NUMWI=$NUMWI..."
         mkdir -p "${GPU_DIR}/bin"
-        make DEVICE=$DEVICE NUMWI=$NUMWI TARGET_ARCH="${TARGET_ARCH}" TARGETS="${TARGETS}" NVCC="nvcc" CC=gcc CXX=g++   ### USE CUDATOOLKIT 12.8, CUDA TOOLKIT 13 IS NOT SUPPORTED YET
+        make DEVICE=$DEVICE NUMWI=$NUMWI TARGET_ARCH="${TARGET_ARCH}" TARGETS="${TARGETS}" CC=gcc-12 CXX=g++-12 CC=gcc-12 -j"${MAKE_J}"   ### USE CUDATOOLKIT 12.8, CUDA TOOLKIT 13 IS NOT SUPPORTED YET
         #####PLEASE ADJUST THE TARGET_ARCH AND TARGETS AS NEEDED FOR YOUR GPU
         ####Guidelines for choosing the right target architecture:
         # - sm_80 for Volta GPUs (e.g., Tesla V100)
@@ -102,7 +116,12 @@ else
         ### you got the idea, just adjust the TARGET_ARCH and TARGETS variables.
         TODO=$(grep -E 'TARGET_ARCH|TARGETS' Makefile.Cuda)
         echo "[INFO] Makefile.Cuda settings: $TODO"
-        mv "${GPU_DIR}/bin/autodock_gpu_${NUMWI,,}wi" "${GPU_DIR}/bin/autodock_gpu_cuda_${NUMWI,,}wi"
+        if [[ -f "${GENERIC_BINARY}" && ! -f "${CUDA_BINARY}" ]]; then
+            mv "${GENERIC_BINARY}" "${CUDA_BINARY}"
+        fi
+        if [[ ! -e "${GENERIC_BINARY}" ]]; then
+            ln -sf "$(basename "${CUDA_BINARY}")" "${GENERIC_BINARY}"
+        fi
 
         if [ -f "$CUDA_BINARY" ]; then
             echo "[INFO] AutoDock-GPU compilation successful."
@@ -164,13 +183,18 @@ EOF
     else
       mkdir -p ./bin
       echo "[INFO] Running make DEVICE=OCLGPU NUMWI=${NUMWI}…"
-      make DEVICE=OCLGPU NUMWI="${NUMWI}" CC=gcc CXX=g++ -j"${MAKE_J}"
+      make DEVICE=OCLGPU NUMWI="${NUMWI}" CC=gcc-12 CXX=g++-12 -j"${MAKE_J}"
       export GPU_INCLUDE_PATH=/usr/include
       export GPU_LIBRARY_PATH=/lib/x86_64-linux-gnu
       # Quiet the CPU env checks (Makefile.OpenCL prints those)
       export CPU_INCLUDE_PATH=/usr/include
       export CPU_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu
-      mv "${GPU_DIR}/bin/autodock_gpu_${NUMWI,,}wi" "${GPU_DIR}/bin/autodock_gpu_ocl_${NUMWI,,}wi"
+      if [[ -f "${GENERIC_BINARY}" && ! -f "${OCL_BINARY}" ]]; then
+        mv "${GENERIC_BINARY}" "${OCL_BINARY}"
+      fi
+      if [[ ! -e "${GENERIC_BINARY}" ]]; then
+        ln -sf "$(basename "${OCL_BINARY}")" "${GENERIC_BINARY}"
+      fi
 
 
       OUT="${GPU_DIR}/bin/autodock_gpu_ocl_${NUMWI,,}wi"
@@ -228,9 +252,8 @@ if [ "$autogrid_needs_compile" = true ]; then
     ./configure
     echo "[INFO] Cleaning previous build (if any)..."
     make clean || true
-        echo "[INFO] Running make..."
+    echo "[INFO] Running make..."
     make -j$(nproc)
-  
 
     if [ -x "$AUTOGRID_BINARY" ]; then
         echo "[INFO] AutoGrid compilation successful."

@@ -9,7 +9,7 @@ from typing import Iterable, Optional
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
-NUMWI = "64"  # Default number of work items
+NUMWI = "128"  # Default number of work items
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "lib"))
 
@@ -305,6 +305,8 @@ def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI):
     env = os.environ.copy()
     env["DEVICE"] = device_env
     env["NUMWI"] = str(NUMWI)
+    env["GPU_TYPE"] = GPU_TYPE or device_env
+    env["GPU_BACKEND"] = device_env
 
     found_bin = None  # <- important: define upfront so we never reference an unbound name
 
@@ -316,20 +318,25 @@ def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI):
         else:
             print(f"[BUILD] Compiling AutoDock-GPU for {GPU_TYPE} (DEVICE={device_env}, NUMWI={NUMWI})…")
             subprocess.run(
-                ["bash", compiler_script, AUTODOCK_GPU_DIR],
-                check=True, cwd=AUTODOCK_GPU_DIR, env=env
+                [
+                    "bash",
+                    compiler_script,
+                    AUTODOCK_GPU_DIR,
+                    device_env,
+                    str(NUMWI),
+                    GPU_TYPE or device_env,
+                ],
+                check=True,
+                cwd=AUTODOCK_GPU_DIR,
+                env=env,
             )
-            # Re-check after build
-            if device_env == "CUDA":
-                candidate = Path(f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_cuda_{NUMWI}wi")
-            else:  # OPENCL
-                candidate = Path(f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_ocl_{NUMWI}wi")
-            if not candidate.exists():
+            # Re-check after build using the finder so we accept legacy names too
+            found_bin = _find_autodock_gpu_bin(AUTODOCK_GPU_DIR, device_env, NUMWI)
+            if not found_bin:
                 print("AutoDock-GPU compilation finished but no binary was found in bin/.")
                 sys.exit(1)
-            st = os.stat(candidate)
-            os.chmod(candidate, st.st_mode | stat.S_IXUSR)
-            found_bin = str(candidate)
+            st = os.stat(found_bin)
+            os.chmod(found_bin, st.st_mode | stat.S_IXUSR)
             print(f"[BUILD] AutoDock-GPU ready: {found_bin}")
     else:
         # CPU-only: still run the script so it compiles/checks AutoGrid
