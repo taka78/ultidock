@@ -13,6 +13,7 @@ import uuid
 import gc
 import xml.etree.ElementTree as ET
 import shutil
+import re
 from threading import Barrier
 from contextlib import nullcontext
 from make_grids import (
@@ -76,6 +77,22 @@ def _get_gpu_semaphore(gpu_id: int):
     if not GPU_SEMAPHORES:
         return None
     return GPU_SEMAPHORES.get(gpu_id) or next(iter(GPU_SEMAPHORES.values()))
+
+def extract_binding_site_from_name(path_like):
+    """Return the binding site identifier (e.g. '1') inferred from a file name."""
+    if not path_like:
+        return None
+
+    try:
+        stem = Path(path_like).stem
+    except Exception:
+        stem = str(path_like)
+
+    match = re.search(r'(?:^|__)S?(\d+)(?:__|$)', stem, re.IGNORECASE)
+    if match:
+        return match.group(1)
+
+    return None
 
 def prepare_sites_for_docking(receptor_pdbqt: str, macro_dir: str):
     """
@@ -234,11 +251,11 @@ class DockingProcessor:
                 added = 0
                 if isinstance(item, list):
                     for rec in item:
-                        if isinstance(rec, tuple) and len(rec) == 5:
+                        if isinstance(rec, tuple) and len(rec) == 6:
                             buffer.append(rec); added += 1
                         else:
                             print(f"[DB] skipping bad sub-record: {rec}")
-                elif isinstance(item, tuple) and len(item) == 5:
+                elif isinstance(item, tuple) and len(item) == 6:
                     buffer.append(item); added = 1
                 else:
                     print(f"[DB] skipping malformed record: {item}")
@@ -409,13 +426,15 @@ class ProcessFileThread(threading.Thread):
         current_rmsd_ub = None
         current_ligand_id = None
         inside_model_block = False
+        binding_site = extract_binding_site_from_name(filepath)
+
 
         def finalize():
             nonlocal current_model, current_affinity, current_rmsd_lb, current_rmsd_ub, current_ligand_id, inside_model_block
             if inside_model_block and (current_model is not None) and (current_affinity is not None):
                 lid = current_ligand_id or Path(ligand_file).stem or "ligand"
                 tag = f"{lid}-Model{current_model}-{receptor_name}"
-                results.append((tag, current_affinity, current_rmsd_lb, current_rmsd_ub, ligand_file))
+                results.append((tag, current_affinity, current_rmsd_lb, current_rmsd_ub, ligand_file, binding_site))
             # reset
             current_model = None
             current_affinity = None
@@ -469,7 +488,7 @@ class ProcessFileThread(threading.Thread):
     def parse_adgpu_xml(self, xml_path, receptor_name, ligand_file_fallback):
         """
         Parse AutoDock-GPU XML and return a list of tuples:
-        (tag, affinity, rmsd_lb, rmsd_ub, ligand_file)
+        (tag, affinity, rmsd_lb, rmsd_ub, ligand_file, binding_site)
         tag format: <ligand_id>-Model<run_id>-<receptor_name>
         """
         results = []
@@ -480,6 +499,7 @@ class ProcessFileThread(threading.Thread):
             # ligand id from <ligand> element (fallback to provided path)
             ligand_path = root.findtext("ligand") or ligand_file_fallback
             ligand_id = Path(ligand_path).stem
+            binding_site = extract_binding_site_from_name(xml_path)
 
             runs = root.find("runs")
             if runs is None:
@@ -505,7 +525,7 @@ class ProcessFileThread(threading.Thread):
 
                 tag = f"{ligand_id}-Model{run_id}-{receptor_name}"
                 # AD-GPU XML doesn't include RMSD values
-                results.append((tag, affinity, None, None, ligand_file_fallback))
+                results.append((tag, affinity, None, None, ligand_file_fallback, binding_site))
 
         except Exception as e:
             print(f"[XML-parse] Failed on {xml_path}: {e}")
@@ -570,12 +590,13 @@ class ProcessFileThread(threading.Thread):
                                 # Use a context manager so semaphore acquisition/release stays
                                 # balanced even when the semaphore map is empty.
                                 with ctx:
+                                    print(ligand_file)
                                     result = subprocess.run(
                                         [
                                             f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_cuda_{NUMWI}wi",
                                             "--lfile",   str(Path(ligand_file).resolve()),
                                             "--ffile",   fld_base,
-                                            "--nrun",    "512",
+                                            "--nrun",    "64",
                                             "--nev",     "5000000",
                                             "--gbest",   "5",
                                             "--xmloutput", "1",
@@ -612,8 +633,8 @@ class ProcessFileThread(threading.Thread):
                                             f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_ocl_{NUMWI}wi",
                                             "--lfile",   str(Path(ligand_file).resolve()),
                                             "--ffile",   fld_base,
-                                            "--nrun",    "512",
-                                            "--gbest",   "5",
+                                            "--nrun",    "64",
+                                            "--gbest",   "10",
                                             "--xmloutput", "1",
                                             "--resnam",  str(out_stem),
                                             "--devnum",  str(int(self.gpu_id) + 1),

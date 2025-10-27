@@ -1121,7 +1121,7 @@ def main():
     ap.add_argument("--k-box", type=float, default=10.0, help="box half-size multiplier × r_peak")
     ap.add_argument("--max-sites", type=int, default=8)
     ap.add_argument("--inflate", type=float, default=0.25, help="inflate atom radii by this many Å when voxelizing (0.0–0.5 typical)")
-    ap.add_argument("--mode", choices=["internal", "maps", "hybrid"], default="internal", help="internal=EDT cavities; maps=C/E/D peaks; hybrid=internal then fallback to maps")
+    ap.add_argument("--mode", choices=["internal", "maps", "hybrid"], default="hybrid", help="internal=EDT cavities; maps=C/E/D peaks; hybrid=internal then fallback to maps")
     ap.add_argument("--tau-rel", type=float, default=0.52, help="relative peak threshold for maps mode (0.58–0.62 typical)")
     ap.add_argument("--half-size", type=float, default=12.0, help="box half-size (Å) for maps mode")
     args = ap.parse_args()
