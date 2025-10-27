@@ -26,7 +26,7 @@ def main() -> None:
         raise FileNotFoundError("Missing ligand file escitalopram-e.pdbqt")
 
     workspace_paths = stage_inputs(EXAMPLE_DIR, receptor, [ligand])
-    run_pipeline(workspace_paths, mode="cpu")
+    run_pipeline(workspace_paths, mode="gpu")
 
 
 if __name__ == "__main__":

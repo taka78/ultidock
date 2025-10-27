@@ -1,0 +1,12 @@
+{
+  "name": "Example - SERT Escitalopram",
+  "description": "CPU demonstration dataset with escitalopram.",
+  "mode": "gpu",
+  "receptor": "5i6x_edited.pdbqt",
+  "ligands": [
+    {
+      "name": "escitalopram",
+      "source": "escitalopram-e.pdbqt"
+    }
+  ]
+}

@@ -32,7 +32,7 @@ def main() -> None:
             raise FileNotFoundError(f"Missing ligand file: {ligand.name}")
 
     workspace_paths = stage_inputs(EXAMPLE_DIR, receptor, ligands)
-    run_pipeline(workspace_paths, mode="cpu")
+    run_pipeline(workspace_paths, mode="gpu")
 
 
 if __name__ == "__main__":

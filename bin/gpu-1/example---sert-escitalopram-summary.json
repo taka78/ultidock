@@ -1,0 +1,38 @@
+{
+  "dataset": "Example - SERT Escitalopram",
+  "mode": "gpu",
+  "run_command": [
+    "python3",
+    "run.py",
+    "--mode",
+    "gpu",
+    "--LIGANDS_DIR",
+    "/home/taka/development/ultidock-gmx/docking/LIGANDS_DIR",
+    "--DOCKING_DIR",
+    "/home/taka/development/ultidock-gmx/docking/DOCKING_DIR",
+    "--ANALYSIS_DIR",
+    "/home/taka/development/ultidock-gmx/docking/ANALYSIS_DIR",
+    "--VINA_DIR",
+    "/home/taka/development/ultidock-gmx/docking/VINA_DIR",
+    "--AUTODOCK_GPU_DIR",
+    "/home/taka/development/ultidock-gmx/docking/AUTODOCK_GPU_DIR",
+    "--MACRO_MOL_DIR",
+    "/home/taka/development/ultidock-gmx/docking/MACRO_MOL_DIR",
+    "--RESULTS_DIR",
+    "/home/taka/development/ultidock-gmx/docking/RESULTS_DIR"
+  ],
+  "returncode": 0,
+  "wall_time_s": 259.66431971099973,
+  "peak_rss_mb": 502.29296875,
+  "cpu_user_s": null,
+  "cpu_system_s": null,
+  "db_metrics": {
+    "path": "/home/taka/development/ultidock-gmx/docking/RESULTS_DIR/ultidock_results.db",
+    "records": 9984,
+    "affinity_min": -10.0,
+    "affinity_max": -4.14,
+    "affinity_avg": -6.87996594551282
+  },
+  "log_path": "/home/taka/development/ultidock-gmx/docking/RESULTS_DIR/example---sert-escitalopram-pipeline.log",
+  "accuracy_records": []
+}

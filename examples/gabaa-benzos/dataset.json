@@ -1,0 +1,20 @@
+{
+  "name": "Example - GABAA Benzodiazepines",
+  "description": "CPU demonstration dataset with three ligands mirroring the gabaa-benzos runner.",
+  "mode": "gpu",
+  "receptor": "4COF_edited.pdbqt",
+  "ligands": [
+    {
+      "name": "Aspirine",
+      "source": "aspirine-e.pdbqt"
+    },
+    {
+      "name": "Ibuprofen",
+      "source": "ibuprofen-e.pdbqt"
+    },
+    {
+      "name": "Morphine",
+      "source": "morphine-e.pdbqt"
+    }
+  ]
+}
