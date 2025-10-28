@@ -51,6 +51,7 @@ Install the build toolchain and helper utilities once:
 
 ```bash
 sudo apt update && sudo apt install -y \
+  automake autoconf libtool m4 perl pkg-config\
   build-essential gcc g++ gfortran make cmake \
   unzip tar csh wget git \
   libstdc++-dev libx11-dev libncurses-dev \
