@@ -145,7 +145,7 @@ def load_dataset(path: Path) -> BenchmarkDataset:
 def stage_workspace(dataset: BenchmarkDataset) -> Dict[str, Path]:
     """Clean docking/ and copy the dataset's receptor/ligands into place."""
 
-    subprocess.run(["python3", "clean.py", "-y", "--all"], check=True, cwd=DOCKING_ROOT)
+    #subprocess.run(["python3", "clean.py", "-y", "--all"], check=True, cwd=DOCKING_ROOT) ##for benchmarking, we want to keep previous builds
 
     paths = {
         "macro": DOCKING_ROOT / "MACRO_MOL_DIR",
