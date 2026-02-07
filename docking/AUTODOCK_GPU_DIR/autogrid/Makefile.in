@@ -1457,7 +1457,7 @@ main.o : $(srcdir)/ad4_shared/autocomm.h
 
 default_parameters.h : $(srcdir)/ad4_shared/paramdat2h.csh  $(srcdir)/ad4_shared/AD4_parameters.dat $(srcdir)/ad4_shared/AD4.1_bound.dat
 	rm -f $@
-	csh $(srcdir)/ad4_shared/paramdat2h.csh $(srcdir)/ad4_shared/AD4_parameters.dat  $(srcdir)/ad4_shared/AD4.1_bound.dat > $@
+	tcsh $(srcdir)/ad4_shared/paramdat2h.csh $(srcdir)/ad4_shared/AD4_parameters.dat  $(srcdir)/ad4_shared/AD4.1_bound.dat > $@
 
 # 2007-04-30 MP & GMM: this line is necessary to be able to compile read_parameter_library.o
 read_parameter_library.o : default_parameters.h
