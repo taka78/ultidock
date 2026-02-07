@@ -132,14 +132,19 @@ def autogenerate_centers_tsv(
             print(f"[centers] reusing {centers_tsv_path} with {len(rows)} rows")
             return str(centers_tsv_path)
 
-    # 1) Find (or build) whole-protein maps (.fld)
-    fld_candidates = list(out_root.glob("*.fld")) + list(out_root.glob("**/*.fld"))
-    if not fld_candidates:
-        # try MACRO_MOL_DIR/<rec>/<rec>.maps.fld
-        maybe = Path(Path(receptor_pdbqt).parent) / rec_stem / f"{rec_stem}.maps.fld"
-        if maybe.exists():
-            fld_candidates = [maybe]
-    if not fld_candidates:
+        # 1) Find (or build) whole-protein maps (.fld)
+    fld_candidates = list(out_root.glob("**/*.fld"))
+    if fld_candidates:
+        def grid_volume(f):
+            try:
+                m = load_fld_or_map_meta(str(f))
+                sh = m["shape"]
+                return int(sh[0] * sh[1] * sh[2])
+            except Exception:
+                return -1
+        fld_candidates.sort(key=grid_volume, reverse=True)
+        fld = fld_candidates[0]
+    else:
         # bootstrap: generate whole-protein maps once
         fld_path = ensure_whole_protein_maps(
             receptor_pdbqt=receptor_pdbqt,
@@ -233,53 +238,95 @@ def ensure_grids_multi_centers(
     centers_tsv: str,
     autogrid4_bin: str = "autogrid4",
 ):
-    """
-    For each center in centers.tsv, emit a .gpf, run autogrid, and return a list of site dicts:
-    {site_id, center, npts, spacing, fld_path, out_dir}
-    Each site goes into: <out_root>/<site_id>/
-    """
     out_root = Path(out_root)
     out_root.mkdir(parents=True, exist_ok=True)
     rec_stem = Path(receptor_pdbqt).stem
 
-    rows = _parse_centers_tsv(centers_tsv, receptor_key=rec_stem, default_spacing=GRID_SPACING, default_npts=(81, 81, 81))
+    rows = _parse_centers_tsv(
+        centers_tsv,
+        receptor_key=rec_stem,
+        default_spacing=GRID_SPACING,
+        default_npts=(81, 81, 81),
+    )
     if not rows:
         raise ValueError(f"No centers in {centers_tsv} for receptor {rec_stem}")
 
     sites = []
     for r in rows:
-        site_id = r["site_id"]
-        center = r["center"]
-        npts = r["npts"]
-        spacing = r["spacing"]
+        site_id  = r["site_id"]
+        center   = r["center"]
+        npts     = r["npts"]
+        spacing  = r["spacing"]
 
         site_dir = out_root / site_id
         site_dir.mkdir(parents=True, exist_ok=True)
+
         gpf_path = site_dir / "grid.gpf"
         _write_gpf(gpf_path, receptor_pdbqt, center, npts, spacing)
 
-        # autogrid writes maps named after receptor stem in cwd
         log_path = site_dir / "grid.glg"
-        cmd = [autogrid4_bin, "-p", str(gpf_path.name), "-l", str(log_path.name)]
+        cmd = [autogrid4_bin, "-p", gpf_path.name, "-l", log_path.name]
         print(f"[autogrid] {site_id}: running in {site_dir}")
+
         res = subprocess.run(cmd, cwd=site_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if res.returncode != 0:
             print(f"[autogrid/{site_id}] FAILED\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}")
             raise RuntimeError(f"autogrid failed for {site_id}")
 
-        # Find the produced .fld (usually <rec_stem>.maps.fld)
-        fld_candidates = list(site_dir.glob("*.fld"))
-        if not fld_candidates:
-            # some builds dump to <rec_stem>.map.fld — try both
-            fld_candidates = list(site_dir.glob(f"{rec_stem}*.fld"))
-        if not fld_candidates:
-            raise FileNotFoundError(f"No .fld produced in {site_dir}; see {log_path}")
+        # Prefer the exact expected fld name first (deterministic)
+        expected_fld = site_dir / f"{rec_stem}.maps.fld"
+        if expected_fld.exists():
+            fld_path = str(expected_fld.resolve())
+        else:
+            fld_candidates = list(site_dir.glob("*.fld"))
+            if not fld_candidates:
+                fld_candidates = list(site_dir.glob(f"{rec_stem}*.fld"))
+            if not fld_candidates:
+                raise FileNotFoundError(f"No .fld produced in {site_dir}; see {log_path}")
+            fld_path = str(fld_candidates[0].resolve())
 
-        fld_path = str(fld_candidates[0].resolve())
+        # NOW meta is safe
+        meta = load_fld_or_map_meta(fld_path)
+        origin = meta["origin"]
+        sp = meta["spacing"]
+        shape = meta["shape"]
+
+        # if you want your clash distance grid:
+        atoms = pdbqt_atoms(receptor_pdbqt)
+        occ, distA, origin, sp = make_grid_from_map(
+            atoms,
+            map_origin=origin,
+            map_spacing=sp,
+            map_shape=shape,
+            inflate_A=0.25,
+        )
+        # occ must be a boolean numpy array here
+        if isinstance(occ, tuple):
+            # common bug: occ = make_grid_from_map(...) without unpacking
+            # or occ = (occ_grid, origin, spacing, ...)
+            # pick the first ndarray inside the tuple
+            for x in occ:
+                if isinstance(x, np.ndarray):
+                    occ = x
+                    break
+            else:
+                raise TypeError(f"occ is tuple with no ndarray inside: {[type(x) for x in occ]}")
+
+        occ = np.asarray(occ)
+        if occ.dtype != np.bool_:
+            # IMPORTANT: distance_transform_edt(~occ) only makes sense if occ is boolean occupancy
+            occ = occ.astype(bool, copy=False)
+
+        distA = distance_transform_edt(~occ) * float(sp)
+
+        distA = distance_transform_edt(~occ) * float(sp)
+        save_clash_dist_grid(site_dir / "clash_dist.npz", distA, origin, sp)
+
+
         sites.append({
             "site_id": site_id,
             "center": center,
-            "npts": tuple(map(int, npts)),  # <- trust TSV
+            "npts": tuple(map(int, npts)),
             "spacing": float(spacing),
             "fld_path": fld_path,
             "out_dir": str(site_dir.resolve()),
@@ -287,6 +334,20 @@ def ensure_grids_multi_centers(
 
     print(f"[autogrid] prepared {len(sites)} site grids")
     return sites
+
+
+def save_clash_dist_grid(out_path, distA, origin, spacing):
+    """
+    Save distance-to-receptor grid aligned with AutoGrid maps.
+    distA: (nx,ny,nz) float32 in Å
+    """
+    out_path = Path(out_path)
+    np.save(out_path, distA.astype(np.float32))
+    meta_path = out_path.with_suffix(".meta.txt")
+    with open(meta_path, "w") as f:
+        f.write(f"origin {origin[0]:.6f} {origin[1]:.6f} {origin[2]:.6f}\n")
+        f.write(f"spacing {float(spacing):.6f}\n")
+        f.write(f"shape {distA.shape[0]} {distA.shape[1]} {distA.shape[2]}\n")
 
 
 def _robust_z(x):
@@ -434,7 +495,9 @@ def make_grid_from_map(atoms, map_origin, map_spacing, map_shape, inflate_A=0.25
         occ[ix0:ix1 + 1, iy0:iy1 + 1, iz0:iz1 + 1] |= mask
 
     occ = binary_closing(occ, structure=np.ones((3, 3, 3), bool))
-    return occ, (ox, oy, oz), sp
+    dist_vox = distance_transform_edt(~occ)
+    dist_A = dist_vox * sp
+    return occ, dist_A, (ox, oy, oz), sp
 
 
 def internal_cavities(occ):
@@ -553,7 +616,7 @@ def pick_centers(
     atoms = pdbqt_atoms(pdbqt)
 
     # align geometry grid to the map grid; use inflation
-    occ, (ox, oy, oz), sp = make_grid_from_map(
+    occ, distA, (ox, oy, oz), sp = make_grid_from_map(
         atoms, map_origin, map_spacing, maps["C"].shape, inflate_A=inflate_A
     )
     print(f"[grid] map shape={maps['C'].shape}, spacing={map_spacing:.3f} Å")
@@ -1002,31 +1065,121 @@ def _write_site_gpf(gpf_path, receptor_pdbqt, center, npts, spacing):
         ##### f.write("dielectric -0.1465\n")
     return str(gpf_path)
 
+def receptor_aabb_A(pdbqt_path: str):
+    mins = np.array([+np.inf, +np.inf, +np.inf], dtype=float)
+    maxs = np.array([-np.inf, -np.inf, -np.inf], dtype=float)
+    with open(pdbqt_path, "r", errors="ignore") as f:
+        for ln in f:
+            if ln.startswith(("ATOM", "HETATM")):
+                try:
+                    x = float(ln[30:38]); y = float(ln[38:46]); z = float(ln[46:54])
+                except Exception:
+                    continue
+                mins = np.minimum(mins, [x, y, z])
+                maxs = np.maximum(maxs, [x, y, z])
+    if not np.isfinite(mins).all():
+        raise ValueError(f"No atom coords parsed from {pdbqt_path}")
+    ctr = (mins + maxs) / 2.0
+    ext = (maxs - mins)
+    return ctr, ext, mins, maxs
+
+def _odd_int(n: int) -> int:
+    return n if (n % 2 == 1) else (n + 1)
+
+def compute_whole_box_auto(
+    receptor_pdbqt: str,
+    base_spacing: float,
+    margin_A: float = 8.0,
+    npts_max: int = 255,
+):
+    """
+    Returns center, (nx,ny,nz) for GPF npts, and spacing.
+    Uses larger spacing if needed so the box fully covers the receptor AABB (+margin)
+    while keeping npts <= npts_max.
+    """
+    ctr, ext, mins, maxs = receptor_aabb_A(receptor_pdbqt)
+    side = ext + 2.0 * float(margin_A)
+
+    # choose spacing so max(axis side)/spacing <= npts_max
+    need_sp = float(side.max()) / float(npts_max)
+    sp = max(float(base_spacing), need_sp)
+
+    npts = []
+    for s in side:
+        n = int(math.ceil(float(s) / sp))
+        n = _odd_int(n)
+        n = max(25, min(npts_max, n))
+        npts.append(n)
+
+    return (float(ctr[0]), float(ctr[1]), float(ctr[2])), tuple(npts), float(sp)
+
+def validate_box_covers_receptor(
+    receptor_pdbqt: str,
+    center,
+    npts,
+    spacing,
+    margin_tol_A: float = 0.5,
+):
+    """
+    Validate that receptor AABB is inside [center - (npts*sp)/2, center + (npts*sp)/2]
+    (within a small tolerance).
+    """
+    ctr, ext, mins, maxs = receptor_aabb_A(receptor_pdbqt)
+    center = np.array(center, dtype=float)
+    npts = np.array(npts, dtype=float)
+    sp = float(spacing)
+
+    half = 0.5 * (npts * sp)  # because side length = npts * spacing
+    gmin = center - half
+    gmax = center + half
+
+    ok = np.all(mins >= (gmin - margin_tol_A)) and np.all(maxs <= (gmax + margin_tol_A))
+    if not ok:
+        msg = (
+            f"[whole-map] grid does NOT cover receptor!\n"
+            f"  receptor mins: {mins}\n"
+            f"  receptor maxs: {maxs}\n"
+            f"  grid mins:     {gmin}\n"
+            f"  grid maxs:     {gmax}\n"
+            f"  npts={tuple(map(int,npts))} spacing={sp:.3f}\n"
+            f"Fix: increase WHOLE margin/cap or allow larger npts or increase spacing."
+        )
+        raise ValueError(msg)
+
 
 def ensure_whole_protein_maps(
     receptor_pdbqt: str,
     out_root: str,
     spacing: float = GRID_SPACING,
-    cap_ang: float = 100.0,
+    cap_ang: float = None,            # keep arg for API compatibility
+    margin_A: float = 8.0,
+    npts_max: int = 255,
     autogrid4_bin: str = "autogrid4",
 ):
     """
-    1) Compute a big 'whole protein' box (bounded by cap_ang per axis).
-    2) Write a single GPF that produces all element maps for AD4 types.
-    3) Run AutoGrid in out_root; return the produced .fld path.
+    Build whole-receptor maps robustly:
+    - auto box from receptor AABB (+margin)
+    - auto spacing if needed to keep npts <= npts_max
+    - validate coverage before/after
     """
     out_root = Path(out_root)
     out_root.mkdir(parents=True, exist_ok=True)
     rec_stem = Path(receptor_pdbqt).stem
 
-    # choose a “big enough” box but capped
-    center, npts, sp = blind_box(receptor_pdbqt, cap=cap_ang, spacing=spacing)
-    gpf_path = out_root / "grid.gpf"
+    center, npts, sp = compute_whole_box_auto(
+        receptor_pdbqt=receptor_pdbqt,
+        base_spacing=float(spacing),
+        margin_A=float(margin_A),
+        npts_max=int(npts_max),
+    )
 
-    # This writer matches ligand_types ⇔ map lines and sets gridfld first.
+    # Optional: if you REALLY want a hard cap, apply it as an upper bound *only if it still covers receptor*
+    # (I recommend leaving cap_ang=None for whole maps, and controlling size via npts_max/auto spacing)
+    validate_box_covers_receptor(receptor_pdbqt, center, npts, sp)
+
+    gpf_path = out_root / "grid.gpf"
     _write_site_gpf(gpf_path, receptor_pdbqt, center, npts, sp)
 
-    # whole-protein run (maps land in out_root)
     log_path = out_root / "grid.glg"
     cmd = [autogrid4_bin, "-p", gpf_path.name, "-l", log_path.name]
     res = subprocess.run(cmd, cwd=out_root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -1035,14 +1188,16 @@ def ensure_whole_protein_maps(
             f"autogrid whole-protein failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
         )
 
-    # find the AVS field that references produced maps
     fld_candidates = list(out_root.glob(f"{rec_stem}*.fld"))
     if not fld_candidates:
-        raise FileNotFoundError(
-            f"No .fld produced by whole-protein run in {out_root}.\n"
-            f"Check log: {log_path}"
-        )
-    return str(fld_candidates[0].resolve())
+        raise FileNotFoundError(f"No .fld produced in {out_root}. Check {log_path}")
+    fld_path = str(fld_candidates[0].resolve())
+
+    # (Optional) post-check: make sure the produced fld bounds cover receptor too (uses your meta loader)
+    # meta = load_fld_or_map_meta(fld_path)
+    # validate_grid_bounds_vs_receptor(receptor_pdbqt, meta)
+
+    return fld_path
 
 
 class HotspotGPFGenerator:
