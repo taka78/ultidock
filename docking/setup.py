@@ -469,7 +469,7 @@ def run_setup(args: argparse.Namespace) -> dict:
         config_file.write('GRID_MODE = "centers"      # ligand | residues | centers | blind\n')
         config_file.write('GRID_SPACING = 0.375\n')
         config_file.write('GRID_MARGIN = 5.0         # Å\n')
-        config_file.write('GRID_CAP = 30.0           # Å cap per axis for blind mode\n')
+        config_file.write('GRID_CAP = 150.0           # Å cap per axis for blind mode\n')
         config_file.write('AUTO_GRID_BIN = os.path.join(AUTODOCK_GPU_DIR, "autogrid", "autogrid4")\n')
         config_file.write('CENTERS_TSV  = os.path.join(MACRO_MOL_DIR, "centers.tsv")  # path or None\n')
         config_file.write('REF_LIGAND_PDB = None    # path to co-crystal/ref ligand if GRID_MODE="ligand"\n')
