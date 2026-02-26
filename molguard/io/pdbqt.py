@@ -277,13 +277,15 @@ def pdbqt_normalize(path: Path, out_path: Path) -> None:
       - Serial numbers preserved
       - Atom order preserved (no reordering)
       - ROOT / BRANCH / ENDBRANCH / TORSDOF lines passed through verbatim
-      - Line count preserved (splitlines → join one-to-one)
+      - Line count preserved (splitlines -> join one-to-one)
       - LF-only line endings on output
       - ASCII encoding enforced
 
     Raises LintError if pdbqt_check() finds any errors.
     Raises FixedFmtError (propagated) if a reformatted value overflows.
     """
+    # Lint first so we never write a partially-reformatted file. A half-fixed
+    # PDBQT is worse than the original because it looks clean but still breaks.
     report = pdbqt_check(path)
     if not report.ok:
         msg = (
@@ -489,6 +491,9 @@ def canonicalize_receptor(
         )
 
     # ── 4. Deterministic sort ─────────────────────────────────────────────────
+    # Deterministic sort: pure chemistry key, no dependence on input serial order.
+    # This is what makes the output byte-identical regardless of how the upstream
+    # tool chose to number atoms.
     atoms.sort(key=_atom_sort_key)
 
     # ── 5. Renumber serials ───────────────────────────────────────────────────

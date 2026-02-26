@@ -69,8 +69,7 @@ sudo apt update && sudo apt install -y \
 
 ### Python Environment
 
-Ultidock requires Python **3.x+**. Creating a virtual environment keeps the
-workflow isolated:
+Ultidock requires Python **3.10+**. A virtual environment is recommended:
 
 ```bash
 python3 -m venv .venv
@@ -78,13 +77,16 @@ source .venv/bin/activate
 pip install --upgrade pip
 ```
 
-Install the required Python packages:
+Install all required packages and the `ultidock` CLI in one step:
 
 ```bash
-pip install numpy biopython psutil tqdm pandas
+pip install -r requirements.txt
+pip install -e .
 ```
 
-`pandas` is optional but enables the post-run analysis script.
+This installs numpy, scipy, psutil, matplotlib, pandas and the `molguard`
+I/O hardening layer (exposed as the `ultidock` command).
+`pandas` and `matplotlib` are used only by the post-run analysis stage.
 
 ---
 
@@ -92,6 +94,18 @@ pip install numpy biopython psutil tqdm pandas
 
 ```
 ultidock/
+├─ pyproject.toml            # Package manifest; defines the `ultidock` CLI entry-point
+├─ requirements.txt          # Runtime dependencies (numpy, scipy, click, ...)
+├─ requirements-dev.txt      # Development/test dependencies
+├─ SETUP.md                  # Step-by-step new-user guide
+├─ molguard/                 # I/O hardening + validation layer
+│  ├─ io/
+│  │  ├─ fixedfmt.py         # Fixed-width, locale-safe float formatter
+│  │  └─ pdbqt.py            # PDBQT linter, normalizer, receptor canonicalizer
+│  ├─ grids/
+│  │  └─ check.py            # AutoGrid .fld / .map sanity checker
+│  ├─ cli.py                 # `ultidock` command-line interface
+│  └─ tests/                 # Unit and regression tests (pytest)
 ├─ docking/
 │  ├─ run.py                 # Main entry point for the entire pipeline
 │  ├─ setup.py               # Idempotent environment + dependency setup
@@ -104,7 +118,7 @@ ultidock/
 │  ├─ LIGANDS_DIR/           # Archived ligands and split PDBQT files
 │  ├─ DOCKING_DIR/           # AutoDock-GPU/Vina output poses
 │  ├─ AUTODOCK_GPU_DIR/      # Compiled AutoDock-GPU + AutoGrid binaries
-│  ├─ VINA_DIR/              # Optional AutoDock Vina binaries
+│  ├─ VINA_DIR/              # AutoDock Vina binaries
 │  ├─ ANALYSIS_DIR/          # Intermediate scoring/aggregation artifacts
 │  └─ RESULTS_DIR/           # Final CSV/JSON summaries
 ├─ examples/                 # Self-contained example runners
@@ -190,6 +204,11 @@ Repeat steps 3–8 for each new batch to ensure deterministic runs.
 | `python3 docking/dock_v02.py [options]` | Executes the docking stage against prepared ligands and receptors. Used internally by `run.py`. |
 | `python3 docking/extract.py` | Wrapper around AutoDock Vina's `vina_split` for splitting ligand archives and optional filtering. |
 | `python3 docking/clean.py -y --all` | Removes compiled binaries, cached grids, downloads, and generated configs. Use before starting a fresh run. |
+| `ultidock pdbqt check <file>` | Lint a receptor or ligand PDBQT for AutoDock column-format issues (exponent notation, missing decimals, bad atom types). |
+| `ultidock pdbqt normalize <file> -o <out>` | Rewrite all numeric columns in a ligand PDBQT through the fixed-width formatter. Torsion tree is left untouched. |
+| `ultidock pdbqt canonicalize-receptor <file> -o <out>` | Sort, renumber, and reformat a receptor PDBQT deterministically. Returns a SHA-256 digest for reproducibility checks. |
+| `ultidock grids check <maps.fld>` | Validate AutoGrid output: checks for all-zero maps, NaN/Inf energies, missing files, and atom-type mismatches. |
+| `ultidock doctor` | Print tool locations and versions. Distinguishes between binaries not compiled yet (source present) and not found at all. |
 
 ### Key `run.py` Flags
 
@@ -299,7 +318,19 @@ scripts.
    - Metadata (grid centers, hotspots, cavity statistics) is persisted for MD
      seeding and reproducibility.
 
-4. **Analysis (`analyse_docking_results.py`)**
+4. **I/O Hardening (`molguard`)**
+   - Fixed-width float formatter (`fixedfmt.py`) ensures every number written to
+     AutoGrid/AutoDock files respects the Fortran-style column widths those tools
+     parse — no exponent notation, no missing decimals, no locale drift.
+   - PDBQT linter and normalizer catches column-format bugs before they reach
+     AutoGrid, with fail-slow error collection and a regression test suite.
+   - Receptor canonicalizer produces deterministic, byte-identical files across
+     machines given the same input, simplifying reproducibility audits.
+   - Grid map checker validates AutoGrid output immediately after each run:
+     all-zero maps, NaN/Inf energies, and missing files are caught with
+     actionable error messages pointing to the `.glg` log.
+
+5. **Analysis (`analyse_docking_results.py`)**
    - Optional stage that aggregates top poses, binding energies, and summary
      statistics. If `pandas` is unavailable the pipeline logs a warning and
      continues so production runs are never blocked by optional tooling.
@@ -311,6 +342,9 @@ scripts.
   compilation to final scoring, eliminating manual multi-step checklists.
 - **Directory-first design:** explicit, user-configurable directories keep
   receptors, ligands, grids, and results isolated and reproducible.
+- **Deterministic I/O:** the `molguard` layer guarantees that the same input
+  always produces byte-identical PDBQT and grid files regardless of machine or
+  locale, enabling reliable comparative studies.
 - **Example-driven:** the `examples/` directory demonstrates full CPU and GPU
   runs, including workspace reset, staging, and pipeline invocation.
 - **Resilient defaults:** built-in fallbacks for missing optional dependencies
@@ -377,6 +411,17 @@ Use these scripts as blueprints for your own automation or CI workflows.
   - Ensure CUDA 12.8+ is installed and `nvcc --version` reports the expected
     toolkit. Re-run `python3 docking/clean.py -y --all` followed by
     `python3 docking/run.py --mode gpu`.
+
+- **`ultidock doctor` shows `[WARN] not compiled` for AutoGrid or AutoDock-GPU**
+  - The source tree is present but the binaries have not been built yet.
+    Run `cd docking && python setup.py` to compile them. After a successful
+    build, `doctor` will report `[OK]` with the resolved binary path.
+
+- **`ultidock pdbqt check` reports `NO_DECIMAL` or `EXPONENT` errors**
+  - These indicate the PDBQT file was written by a tool that does not respect
+    AutoDock column widths (e.g., some OpenBabel versions or AMBER converters).
+    Run `ultidock pdbqt normalize <file> -o <fixed.pdbqt>` to reformat the
+    numeric columns before docking.
 
 - **Optional analysis skipped**
   - If you see `ModuleNotFoundError: pandas`, install it with

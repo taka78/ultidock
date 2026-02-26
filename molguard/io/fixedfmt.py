@@ -66,20 +66,24 @@ def fmt_fixed(
         of the field (i.e., it does not fit in width chars with `decimals` decimals).
     """
     # ── 1. Reject non-finite ──────────────────────────────────────────────────
+    # Python float() can silently produce nan/inf from certain inputs; we catch
+    # them here before they reach the file and confuse Fortran parsers downstream.
     if not math.isfinite(value):
         raise FixedFmtError(
             f"{field_name}={value!r} is not finite — refusing to write to file"
         )
 
     # ── 2. Normalise negative zero (IEEE 754: -0.0 == 0.0 but formats differ) ─
+    # f"{-0.0:8.3f}" produces "  -0.000" which is technically wrong for a charge
+    # of zero and triggers spurious diff noise between runs.
     if value == 0.0:
-        value = 0.0  # abs() would work too; addition clears the sign bit cleanly
+        value = 0.0  # re-assign to strip the sign bit cleanly
 
     # ── 3. Overflow guard ─────────────────────────────────────────────────────
-    # Maximum digits available for the integer part:
-    #   width - decimals - 1 (for the '.') - 1 (for a possible '-' sign)
-    # We use the conservative form so positive numbers also fit without sign.
-    max_abs = 10 ** (width - decimals - 1)  # e.g. width=8,dec=3 → max_abs=9999.9
+    # AutoGrid uses a fixed field width; if the integer part overflows it, the
+    # column boundary shifts and everything to the right is misread silently.
+    # We raise here so the caller knows exactly which field and value caused it.
+    max_abs = 10 ** (width - decimals - 1)
     if abs(value) >= max_abs:
         raise FixedFmtError(
             f"{field_name}={value} overflows width={width} with decimals={decimals} "
