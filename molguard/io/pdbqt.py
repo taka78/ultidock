@@ -173,6 +173,11 @@ _COORD_FIELDS: list[tuple[str, slice]] = [
     ("charge",     slice(70, 76)),
 ]
 
+# B-factor threshold above which the field fills completely (no leading space),
+# causing whitespace-tokenizing parsers to merge occ+bfac into one token.
+_BFACTOR_WARN_LIMIT = 99.99
+
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Part B — Ligand check & normalize (torsion tree untouched)
@@ -212,6 +217,24 @@ def pdbqt_check(path: Path) -> LintReport:
         # ── Numeric fields ─────────────────────────────────────────────────────
         for col_name, sl in _COORD_FIELDS:
             _check_numeric_field(report, i, line, col_name, sl)
+
+        # ── B-factor overflow warning ──────────────────────────────────────────
+        # B-factor > 99.99 fills all 6 chars of the field with no leading space.
+        # Autogrid4's whitespace tokenizer then merges occ+bfac into one token,
+        # shifting everything right and causing spurious "bad x,y,z" errors.
+        # pdbqt_normalize / canonicalize_receptor will clamp this automatically.
+        if len(line) >= 66:
+            bfac_raw = line[60:66].strip()
+            try:
+                if bfac_raw and float(bfac_raw) > _BFACTOR_WARN_LIMIT:
+                    report.warnings.append(LintIssue(
+                        i, "b_factor", bfac_raw, "BFAC_OVERFLOW",
+                        f"B-factor {bfac_raw} > 99.99 fills the 6-char field with no leading "
+                        "space; autogrid4 may misparse adjacent occupancy+bfac as one token. "
+                        "Fix with: ultidock pdbqt canonicalize-receptor <file> -o <file>",
+                    ))
+            except ValueError:
+                pass  # already caught by _check_numeric_field
 
         # ── AD atom type (must not be blank) ──────────────────────────────────
         atom_type = line[77:79].strip() if len(line) >= 79 else ""

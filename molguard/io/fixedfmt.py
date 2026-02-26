@@ -123,10 +123,25 @@ def fmt_occupancy(value: float) -> str:
     return fmt_fixed(value, width=6, decimals=2, field_name="occupancy")
 
 
+# B-factor max that still leaves a leading space in a 6.2f field.
+# 100.00 would fill all 6 chars with no space, causing autogrid4's whitespace
+# tokenizer to merge occ+bfac into one token and shift subsequent fields.
+# Any value > 99.99 is clamped — AutoDock never uses the B-factor numerically.
+BFACTOR_MAX = 99.99
+
+
 def fmt_bfactor(value: float) -> str:
     """ATOM B-factor column (cols 61-66): 6 chars, 2 decimals.
-    Example output: '  0.00'"""
-    return fmt_fixed(value, width=6, decimals=2, field_name="bfactor")
+
+    Values > 99.99 are clamped to 99.99 so the field always starts with at
+    least one space.  This prevents autogrid4's whitespace-delimited parser
+    from merging the B-factor and occupancy fields into a single token.
+
+    Example output: '  0.00'  ' 50.17'  ' 99.99'
+    """
+    clamped = min(abs(value) if math.isfinite(value) else 0.0, BFACTOR_MAX)
+    return fmt_fixed(clamped, width=6, decimals=2, field_name="bfactor")
+
 
 
 def fmt_gpf_spacing(value: float) -> str:
