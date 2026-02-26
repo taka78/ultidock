@@ -204,6 +204,8 @@ Repeat steps 3–8 for each new batch to ensure deterministic runs.
 | `python3 docking/dock_v02.py [options]` | Executes the docking stage against prepared ligands and receptors. Used internally by `run.py`. |
 | `python3 docking/extract.py` | Wrapper around AutoDock Vina's `vina_split` for splitting ligand archives and optional filtering. |
 | `python3 docking/clean.py -y --all` | Removes compiled binaries, cached grids, downloads, and generated configs. Use before starting a fresh run. |
+| `ultidock run [options]` | Run the full docking pipeline from anywhere in the repo (no need to `cd docking/`). Forwards all flags to `docking/run.py`. |
+| `ultidock clean [-y] [--all]` | Reset compiled binaries and outputs. Forwards all flags to `docking/clean.py`. |
 | `ultidock pdbqt check <file>` | Lint a receptor or ligand PDBQT for AutoDock column-format issues (exponent notation, missing decimals, bad atom types). |
 | `ultidock pdbqt normalize <file> -o <out>` | Rewrite all numeric columns in a ligand PDBQT through the fixed-width formatter. Torsion tree is left untouched. |
 | `ultidock pdbqt canonicalize-receptor <file> -o <out>` | Sort, renumber, and reformat a receptor PDBQT deterministically. Returns a SHA-256 digest for reproducibility checks. |

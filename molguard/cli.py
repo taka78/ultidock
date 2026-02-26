@@ -4,6 +4,8 @@ molguard.cli
 Command-line interface for Ultidock I/O hardening tools.
 
 Commands:
+    ultidock run                        run the full docking pipeline
+    ultidock clean                      reset compiled binaries and outputs
     ultidock pdbqt check                <file.pdbqt>
     ultidock pdbqt normalize            <file.pdbqt> -o <out.pdbqt>
     ultidock pdbqt canonicalize-receptor <file.pdbqt> -o <out.pdbqt>
@@ -258,3 +260,78 @@ def doctor_cmd() -> None:
             click.echo(f"  [WARN]  {label:30s} not compiled  (source: {src_dir})", err=True)
         else:
             click.echo(f"  [FAIL]  {label:30s} not found", err=True)
+
+
+# ── Pipeline wrappers ─────────────────────────────────────────────────────────
+# These commands exist purely for convenience: they locate the docking/ directory
+# and delegate to the existing run.py / clean.py scripts from the correct cwd,
+# so users don't have to remember to cd into docking/ first.
+
+def _docking_dir() -> Path:
+    """Return the absolute path to the docking/ directory inside the repo root."""
+    d = _repo_root() / "docking"
+    if not d.is_dir():
+        click.echo(
+            "[FAIL] Could not find a 'docking/' directory under the repo root "
+            f"({_repo_root()}). Are you running from inside the ultidock repo?",
+            err=True,
+        )
+        raise SystemExit(1)
+    return d
+
+
+@cli.command("run", context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
+@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+def run_cmd(extra_args: tuple[str, ...]) -> None:
+    """Run the full Ultidock docking pipeline.
+
+    All arguments are forwarded directly to docking/run.py.
+
+    Examples:
+
+      ultidock run --mode gpu
+
+      ultidock run --mode cpu --skip-wget
+
+      ultidock run --skip-setup --skip-extract
+
+    This is equivalent to running 'cd docking && python run.py [args]' but
+    without needing to change directory manually.
+    """
+    import subprocess
+
+    docking = _docking_dir()
+    # run.py uses SCRIPT_DIR = Path(__file__).resolve().parent, so cwd must be
+    # docking/ for the relative config.py write and sibling imports to work.
+    result = subprocess.run(
+        [sys.executable, "run.py", *extra_args],
+        cwd=docking,
+    )
+    sys.exit(result.returncode)
+
+
+@cli.command("clean", context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
+@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+def clean_cmd(extra_args: tuple[str, ...]) -> None:
+    """Reset compiled binaries and docking outputs.
+
+    All arguments are forwarded directly to docking/clean.py.
+
+    Examples:
+
+      ultidock clean           # safe defaults (asks for confirmation)
+
+      ultidock clean -y        # non-interactive; keeps ligand archives
+
+      ultidock clean -y --all  # wipe everything including compiled binaries
+
+    This is equivalent to running 'cd docking && python clean.py [args]'.
+    """
+    import subprocess
+
+    docking = _docking_dir()
+    result = subprocess.run(
+        [sys.executable, "clean.py", *extra_args],
+        cwd=docking,
+    )
+    sys.exit(result.returncode)
