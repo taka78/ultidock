@@ -111,6 +111,105 @@ def create_directory_if_needed(path: str | Path) -> str:
     return str(directory)
 
 
+def check_and_fix_receptors(macro_mol_dir: str | Path) -> None:
+    """
+    Scan every .pdbqt file in macro_mol_dir, run pdbqt_check on each,
+    print a grouped summary of issues, then ask the user whether to
+    auto-fix the problematic files with canonicalize_receptor.
+
+    Requires molguard (pip install -e . from repo root).
+    Silently skips if molguard is not importable (e.g. bare environment).
+    """
+    try:
+        from molguard.io.pdbqt import LintError, canonicalize_receptor, pdbqt_check
+    except ImportError:
+        print("[warn] molguard not found -- skipping receptor PDBQT check.")
+        print("       Install with: pip install -e . (from repo root)")
+        return
+
+    mol_dir = Path(macro_mol_dir)
+    pdbqt_files = sorted(mol_dir.rglob("*.pdbqt"))
+
+    if not pdbqt_files:
+        print(f"[info] No PDBQT files found in {mol_dir} -- nothing to check.")
+        return
+
+    print(f"\n=== Receptor PDBQT check ({len(pdbqt_files)} file(s) in {mol_dir}) ===")
+
+    # Collect results: list of (path, report)
+    issues: list[tuple[Path, object]] = []
+    clean: list[Path] = []
+
+    for pdbqt in pdbqt_files:
+        report = pdbqt_check(pdbqt)
+        if report.ok and not report.warnings:
+            clean.append(pdbqt)
+        else:
+            issues.append((pdbqt, report))
+
+    # Summary header
+    print(f"  Clean  : {len(clean)} file(s)")
+    print(f"  Issues : {len(issues)} file(s)")
+
+    if not issues:
+        print("  All receptor files passed the PDBQT check.")
+        return
+
+    # Print per-file issue details
+    print()
+    for pdbqt, report in issues:
+        rel = pdbqt.relative_to(mol_dir) if pdbqt.is_relative_to(mol_dir) else pdbqt.name
+        print(f"  [{rel}]")
+        for e in report.errors:
+            print(f"    ERROR   line {e.line_no:4d} [{e.column}] {e.code}: {e.message}")
+        for w in report.warnings:
+            print(f"    WARNING line {w.line_no:4d} [{w.column}] {w.code}: {w.message}")
+        if report.errors:
+            print(f"    -> {len(report.errors)} error(s), {len(report.warnings)} warning(s)")
+        else:
+            print(f"    -> 0 errors, {len(report.warnings)} warning(s) only")
+    print()
+
+    # Ask the user whether to auto-fix the problematic files
+    try:
+        answer = input(
+            f"Auto-fix {len(issues)} file(s) with receptor canonicalization? "
+            "This rewrites numeric columns and sorts atoms deterministically.\n"
+            "WARNING: the original files will be overwritten in-place.\n"
+            "[y/N]: "
+        ).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        # Non-interactive environment (CI, piped stdin) -- skip without crashing
+        print("[info] Non-interactive mode -- skipping auto-fix.")
+        return
+
+    if answer not in ("y", "yes"):
+        print("[info] Skipped. You can fix individual files later with:")
+        print("       ultidock pdbqt canonicalize-receptor <file> -o <file>")
+        return
+
+    fixed = 0
+    failed = 0
+    for pdbqt, report in issues:
+        # Only attempt canonicalization on files with errors
+        # (warnings-only files are already parseable by AutoGrid)
+        if not report.errors:
+            print(f"  [skip] {pdbqt.name} -- warnings only, no structural fix needed")
+            continue
+        try:
+            digest = canonicalize_receptor(pdbqt, pdbqt, timestamp="SETUP")
+            print(f"  [fixed] {pdbqt.name}  sha256={digest[:12]}...")
+            fixed += 1
+        except (LintError, Exception) as exc:
+            print(f"  [FAIL]  {pdbqt.name}  could not fix: {exc}")
+            failed += 1
+
+    print(f"\n  Fixed: {fixed}  Failed: {failed}")
+    if failed:
+        print("  [warn] Some files could not be fixed automatically.")
+        print("         Check them with: ultidock pdbqt check <file>")
+
+
 def detect_gpu():
     """Detect the GPU type (NVIDIA, AMD, or CPU fallback)."""
     
@@ -487,6 +586,10 @@ def run_setup(args: argparse.Namespace) -> dict:
 
     if wget_file_path:
         download_ligands_from_file(wget_file_path, ligands_dir)
+
+    # Check receptor files in MACRO_MOL_DIR for AutoDock column-format issues.
+    # This runs after the config is written so macro_mol_dir is confirmed.
+    check_and_fix_receptors(macro_mol_dir)
 
     return config_values
 
