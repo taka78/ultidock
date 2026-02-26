@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "molguard"
+version = "1.1.1dev"
+requires-python = ">=3.10"
+description = "GPU-accelerated molecular docking pipeline with deterministic I/O"
+dependencies = [
+    # I/O hardening CLI
+    "click>=8.1",
+    # Scientific core (also required by docking/ scripts)
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "psutil>=5.9",
+    # Data analysis — optional but expected in full pipeline
+    "matplotlib>=3.7",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "hypothesis>=6.82",
+    "ruff>=0.1",
+    "mypy>=1.5",
+]
+
+[project.scripts]
+ultidock = "molguard.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["molguard*"]
+
+[tool.pytest.ini_options]
+testpaths = ["molguard/tests"]
+addopts   = "-v --tb=short"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
+ignore_missing_imports = true
+
