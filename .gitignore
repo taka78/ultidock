@@ -26,6 +26,10 @@ build/
 docking/*.pdbqt
 docking/config.py
 
+# Runtime/test data — never commit receptor or ligand files in working dirs
+docking/MACRO_MOL_DIR/*
+docking/LIGANDS_DIR/*
+
 # But keep these explicitly trackedresults/*.pdbqt
 # Ignore everything under results/
 
