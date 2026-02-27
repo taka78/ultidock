@@ -387,6 +387,20 @@ def detect_maps_hotspots(C, E, D, origin, spacing, tau_rel=0.52, min_sep_A=5.0, 
     # pocket-ish mask
     mask = (Dn > 0.35) & (Cn > -0.5)
 
+    # ── Border exclusion ────────────────────────────────────────────────────────
+    # AutoGrid map values at the outermost voxels are boundary artifacts (the
+    # Fortran solver clamps or extrapolates at the grid edge).  Without this mask
+    # the score Fm is often maximal at the z-max face, placing all hotspots at the
+    # receptor ceiling instead of inside real pockets.
+    BORDER = 5  # voxels to exclude on every face
+    border_mask = np.zeros(F.shape, dtype=bool)
+    border_mask[
+        BORDER:-BORDER,
+        BORDER:-BORDER,
+        BORDER:-BORDER,
+    ] = True
+    mask = mask & border_mask
+
     # apply mask by filling -inf outside; this keeps shapes aligned
     Fm = np.full_like(F, -np.inf, dtype=np.float32)
     Fm[mask] = F[mask]
@@ -429,6 +443,12 @@ def detect_maps_hotspots(C, E, D, origin, spacing, tau_rel=0.52, min_sep_A=5.0, 
             if n % 2 == 0:
                 n += 1
             n = max(60, min(255, n))
+            # Estimate r_peak from the local D-map value (desolvation correlates
+            # with pocket depth). D is scaled 0→1 so r_peak_est = sc_D * half gives
+            # a physically meaningful radius rather than a constant placeholder.
+            i_p, j_p, k_p = ijk
+            d_local = float(Dn[i_p, j_p, k_p])
+            r_peak_est = max(1.0, d_local * half * 0.5)
             sites.append(dict(
                 site_id=f"S{len(kept_xyz)}",
                 cx=float(wp[0]),
@@ -436,7 +456,7 @@ def detect_maps_hotspots(C, E, D, origin, spacing, tau_rel=0.52, min_sep_A=5.0, 
                 cz=float(wp[2]),
                 nx=n, ny=n, nz=n,
                 spacing=sp,
-                r_peak=half / 4.0,  # placeholder for maps-mode
+                r_peak=r_peak_est,
                 F=float(sc)
             ))
             if len(sites) == int(max_sites):

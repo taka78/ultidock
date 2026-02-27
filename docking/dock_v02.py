@@ -123,7 +123,7 @@ def prepare_sites_for_docking(receptor_pdbqt: str, macro_dir: str):
                 default_spacing=float(GRID_SPACING),
                 blind_cap=float(GRID_CAP),
                 autogrid4_bin=str(autogrid_bin),
-                hotspot_box_ang=18.0,
+                hotspot_box_ang=float(HOTSPOT_BOX_ANGLE),  # use config value, not a hardcoded 18.0
                 mode="hybrid",
             )
         sites = ensure_grids_multi_centers(

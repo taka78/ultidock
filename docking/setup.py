@@ -191,14 +191,18 @@ def check_and_fix_receptors(macro_mol_dir: str | Path) -> None:
     fixed = 0
     failed = 0
     for pdbqt, report in issues:
-        # Only attempt canonicalization on files with errors
-        # (warnings-only files are already parseable by AutoGrid)
-        if not report.errors:
-            print(f"  [skip] {pdbqt.name} -- warnings only, no structural fix needed")
+        # Canonicalize if there are errors OR any BFAC_OVERFLOW warnings.
+        # BFAC_OVERFLOW is a warning (not an error) because the bytes are valid,
+        # but autogrid4's whitespace-token parser still misparsed the line —
+        # so we must reformat even when there are no other structural errors.
+        has_bfac_overflow = any(w.code == "BFAC_OVERFLOW" for w in report.warnings)
+        if not report.errors and not has_bfac_overflow:
+            print(f"  [skip] {pdbqt.name} -- warnings only, no fix needed")
             continue
+        reason = "errors" if report.errors else "BFAC_OVERFLOW"
         try:
             digest = canonicalize_receptor(pdbqt, pdbqt, timestamp="SETUP")
-            print(f"  [fixed] {pdbqt.name}  sha256={digest[:12]}...")
+            print(f"  [fixed] {pdbqt.name}  ({reason})  sha256={digest[:12]}...")
             fixed += 1
         except (LintError, Exception) as exc:
             print(f"  [FAIL]  {pdbqt.name}  could not fix: {exc}")
@@ -573,7 +577,7 @@ def run_setup(args: argparse.Namespace) -> dict:
         config_file.write('CENTERS_TSV  = os.path.join(MACRO_MOL_DIR, "centers.tsv")  # path or None\n')
         config_file.write('REF_LIGAND_PDB = None    # path to co-crystal/ref ligand if GRID_MODE="ligand"\n')
         config_file.write('HOTSPOT_NMS_MINSEP_A = 2.0\n')
-        config_file.write('R_MIN_CAVITY_A = 20.0   # minimum inscribed sphere radius for cavity acceptance\n')
+        config_file.write('R_MIN_CAVITY_A = 3.0    # minimum inscribed-sphere radius (Å) for cavity acceptance\n')
         config_file.write('SURFACE_SHELL__MIN_A = 2.0  # min/max distance from protein surface for surface pockets\n')
         config_file.write('SURFACE_SHELL__MAX_A = 20.0\n')
         config_file.write('SURFACE_NMS_MINSEP_A = 5        # voxels for non-max suppression of surface pockets\n')
