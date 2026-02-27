@@ -187,18 +187,22 @@ def autogenerate_centers_tsv(
     if mode in ("maps", "hybrid") and len(sites) == 0:
         print("[centers] using maps-mode hotspots")
         sites = detect_maps_hotspots(
-            C, E, D, origin, spacing, tau_rel=0.52, min_sep_A=5.0, max_sites=n_sites, half_size_A=hotspot_box_ang
+            C, E, D, origin, spacing,
+            tau_rel=0.52, min_sep_A=5.0, max_sites=n_sites,
+            half_size_A=hotspot_box_ang,
+            receptor_pdbqt=receptor_pdbqt,  # enables true EDT r_peak
         )
 
     # 4) Loosen and retry maps if still empty
     if len(sites) == 0:
         print("[centers] no sites found; retrying maps-mode with looser params")
-        # We already ensured whole-protein maps above; reuse meta/maps
         sites = detect_maps_hotspots(
-            C, E, D, origin, spacing, tau_rel=0.52,  # looser
+            C, E, D, origin, spacing,
+            tau_rel=0.45,  # looser threshold
             min_sep_A=5.0,
             max_sites=n_sites,
             half_size_A=hotspot_box_ang,
+            receptor_pdbqt=receptor_pdbqt,  # enables true EDT r_peak
         )
 
     # 5) Final fallback: blind box around the protein, so pipeline never dies
@@ -363,8 +367,27 @@ def _sigmoid_stable(x):
     return 1.0 / (1.0 + np.exp(-x))
 
 
-def detect_maps_hotspots(C, E, D, origin, spacing, tau_rel=0.52, min_sep_A=5.0, max_sites=6, half_size_A=18.0):
-    """Surface-pocket finder from C/E/D maps with stable math and matched masks."""
+def detect_maps_hotspots(
+    C, E, D, origin, spacing,
+    tau_rel=0.52,
+    min_sep_A=5.0,
+    max_sites=6,
+    half_size_A=18.0,
+    receptor_pdbqt=None,        # if supplied, EDT r_peak is computed from true geometry
+):
+    """
+    Surface-pocket finder from C/E/D maps with stable math and matched masks.
+
+    Parameters
+    ----------
+    receptor_pdbqt : str | Path | None
+        If provided, the receptor occupancy grid is built (aligned to the C/E/D maps)
+        and distance_transform_edt is run once.  Each accepted peak voxel is then
+        assigned the true geometric r_peak = EDT value at that voxel (= distance from
+        the peak centre to the nearest protein atom surface, in Å).  This makes
+        r_peak comparable to the value produced by the internal-cavity mode.
+        If None, falls back to a D-map proxy: r_peak = max(1.0, Dn_local * half * 0.5).
+    """
     C = np.asarray(C, dtype=np.float32)
     E = np.asarray(E, dtype=np.float32)
     D = np.asarray(D, dtype=np.float32)
@@ -419,11 +442,26 @@ def detect_maps_hotspots(C, E, D, origin, spacing, tau_rel=0.52, min_sep_A=5.0, 
     if not np.any(peakmask):
         return []
 
-    peaks = np.argwhere(peakmask)  # N x 3
+    peaks = np.argwhere(peakmask)  # N x 3: each row is (x-idx, y-idx, z-idx)
     scores = Fm[peakmask].astype(np.float32)  # length N
     order = np.argsort(-scores, kind="stable")
     peaks = peaks[order]
     scores = scores[order]
+
+    # ── Receptor EDT for true geometric r_peak ────────────────────────────────
+    # Build once, sample per accepted peak.  The EDT value at voxel (i,j,k) is
+    # exactly the radius of the largest inscribed sphere at that point —
+    # the same quantity computed by pick_centers (internal EDT mode).
+    edt_grid = None
+    if receptor_pdbqt is not None:
+        try:
+            atoms = pdbqt_atoms(receptor_pdbqt)
+            occ, _, _, _sp = make_grid_from_map(
+                atoms, origin, spacing, C.shape, inflate_A=0.0
+            )
+            edt_grid = distance_transform_edt(~occ) * float(spacing)  # Å
+        except Exception as exc:
+            print(f"[maps/r_peak] EDT failed, using D-proxy fallback: {exc}")
 
     # NMS in Å
     ox, oy, oz = origin
@@ -443,12 +481,13 @@ def detect_maps_hotspots(C, E, D, origin, spacing, tau_rel=0.52, min_sep_A=5.0, 
             if n % 2 == 0:
                 n += 1
             n = max(60, min(255, n))
-            # Estimate r_peak from the local D-map value (desolvation correlates
-            # with pocket depth). D is scaled 0→1 so r_peak_est = sc_D * half gives
-            # a physically meaningful radius rather than a constant placeholder.
+            # r_peak: true geometric EDT value if available, D-proxy otherwise
             i_p, j_p, k_p = ijk
-            d_local = float(Dn[i_p, j_p, k_p])
-            r_peak_est = max(1.0, d_local * half * 0.5)
+            if edt_grid is not None:
+                r_peak = float(edt_grid[i_p, j_p, k_p])
+            else:
+                d_local = float(Dn[i_p, j_p, k_p])
+                r_peak = max(1.0, d_local * half * 0.5)
             sites.append(dict(
                 site_id=f"S{len(kept_xyz)}",
                 cx=float(wp[0]),
@@ -456,7 +495,7 @@ def detect_maps_hotspots(C, E, D, origin, spacing, tau_rel=0.52, min_sep_A=5.0, 
                 cz=float(wp[2]),
                 nx=n, ny=n, nz=n,
                 spacing=sp,
-                r_peak=r_peak_est,
+                r_peak=r_peak,
                 F=float(sc)
             ))
             if len(sites) == int(max_sites):
