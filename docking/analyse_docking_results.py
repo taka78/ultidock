@@ -42,7 +42,7 @@ try:
         DEFAULT_MIN_MODEL,
     )
 except ImportError:
-    DEFAULT_AFFINITY = -6.0        # kcal/mol // you should change this according to how much chemically active your macromolecule.
+    DEFAULT_AFFINITY = -7.0        # kcal/mol // you should change this according to how much chemically active your macromolecule.
     DEFAULT_RMSD_LB = 3.0         # Å // you should change this according to how big your macromolecule's docking site is.
     DEFAULT_RMSD_UB = 8.0         # Å // you should change this according to how big your macromolecule's docking site is.
     DEFAULT_MIN_MODEL = 2          # integer // you should change this according to how picky you are.
