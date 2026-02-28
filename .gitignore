@@ -24,7 +24,6 @@ build/
 .idea/
 # Ignore all docking outputs
 docking/*.pdbqt
-docking/config.py
 
 # Runtime/test data — never commit receptor or ligand files in working dirs
 docking/MACRO_MOL_DIR/*
@@ -82,3 +81,4 @@ docking/AUTODOCK_GPU_DIR/autogrid/Makefile
 !docking/autodock-gpu-compiler.sh
 docking/AUTODOCK_GPU_DIR/autogrid/autom4te.cache/
 docking/AUTODOCK_GPU_DIR/test_cuda
+docking/config.py
