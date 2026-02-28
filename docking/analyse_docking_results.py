@@ -103,18 +103,12 @@ def main():
       FROM docking_results
       WHERE
         "binding_affinity (kcal/mol)" < ?
-        AND "rmsd_lb (Å)" < ?
-        AND "rmsd_ub (Å)" < ?
-    ), dupes AS (
-      SELECT zinc_id
-      FROM filtered
-      GROUP BY zinc_id
-      HAVING COUNT(*) > 1
+        AND ("rmsd_lb (Å)" IS NULL OR "rmsd_lb (Å)" < ?)
+        AND ("rmsd_ub (Å)" IS NULL OR "rmsd_ub (Å)" < ?)
     )
     SELECT *
     FROM filtered
-    WHERE zinc_id IN (SELECT zinc_id FROM dupes)
-      AND model > ?
+    WHERE model > ?
     ORDER BY affinity;
     """
 
