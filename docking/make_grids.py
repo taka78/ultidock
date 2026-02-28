@@ -174,7 +174,7 @@ def autogenerate_centers_tsv(
                 map_origin=origin,
                 map_spacing=spacing,
                 voxel_spacing=0.375,
-                r_min=R_MIN_CAVITY_A,  # more permissive than 1.8
+                r_min=None,  # computed adaptively from EDT distribution
                 min_sep_A=5.0,
                 k_box=4.0,
                 max_sites=n_sites,
@@ -660,13 +660,63 @@ def voxel_to_world(ijk, origin, sp):
     return origin[0] + ijk[0] * sp, origin[1] + ijk[1] * sp, origin[2] + ijk[2] * sp
 
 
+def adaptive_r_min_cavity(
+    occ: np.ndarray,
+    spacing: float,
+    *,
+    percentile: float = 85.0,
+    floor_A: float = 1.5,
+    ceil_A: float = 6.0,
+) -> float:
+    """
+    Compute a pocket-size threshold from the protein's own EDT distribution.
+
+    Instead of a global R_MIN_CAVITY_A constant, this looks at the actual
+    distance-transform values inside the protein's free space and picks the
+    ``percentile``-th percentile.  The intuition:
+
+    - Most free-space voxels are near the protein surface (small EDT).
+    - Real binding pockets are the minority with large EDT values.
+    - Setting r_min at the 85th percentile means we only accept cavities
+      that are larger than 85% of all free-space voxels — i.e., genuine
+      pockets, not surface crevices.
+
+    The result is clamped to [floor_A, ceil_A] to stay physically sane:
+    - floor_A = 1.5 Å: smallest useful cavity (just bigger than a water molecule)
+    - ceil_A  = 6.0 Å: a 12 Å diameter sphere; anything larger is a rare channel
+
+    Parameters
+    ----------
+    occ       : boolean occupancy grid (True = protein atom present)
+    spacing   : voxel spacing in Å
+    percentile: which percentile of the free-space EDT to use as threshold
+    floor_A   : minimum r_min in Å (hard lower bound)
+    ceil_A    : maximum r_min in Å (hard upper bound)
+
+    Returns
+    -------
+    r_min_A : float, in Å
+    """
+    from scipy.ndimage import distance_transform_edt
+    edt_vox = distance_transform_edt(~occ)          # distance in voxels
+    free_edt = edt_vox[~occ].ravel()                # EDT values at free voxels only
+    if free_edt.size == 0:
+        return floor_A
+    r_min_A = float(np.percentile(free_edt, percentile)) * float(spacing)
+    r_min_A = float(np.clip(r_min_A, floor_A, ceil_A))
+    print(f"[r_min] adaptive: p{percentile:.0f} EDT = {r_min_A:.2f} Å  "
+          f"(range {float(free_edt.min()*spacing):.2f}–{float(free_edt.max()*spacing):.2f} Å, "
+          f"clamped to [{floor_A}, {ceil_A}])")
+    return r_min_A
+
+
 def pick_centers(
     pdbqt,
     maps,
     map_origin,
     map_spacing,
     voxel_spacing=0.375,
-    r_min=R_MIN_CAVITY_A,
+    r_min=None,              # None → computed adaptively from the EDT distribution
     min_sep_A=5.0,
     k_box=4.0,
     max_sites=6,
@@ -681,8 +731,15 @@ def pick_centers(
     print(f"[grid] map shape={maps['C'].shape}, spacing={map_spacing:.3f} Å")
     print(f"[grid] occ voxels={int(occ.sum())}, free voxels={int((~occ).sum())}")
 
+    # Adaptive r_min: derive from the protein's own EDT distribution so we
+    # never need to tune a global constant across different receptor sizes.
+    if r_min is None:
+        r_min = adaptive_r_min_cavity(occ, sp)
+    else:
+        print(f"[r_min] using explicit r_min={r_min:.2f} Å (override)")
+
     dist, cc, ncc = internal_cavities(occ)
-    print(f"[cav] internal components={ncc}, max_r_peak_vox={float(dist.max()):.2f} (Å)={float(dist.max() * sp):.2f}")
+    print(f"[cav] internal components={ncc}, max_r_peak_vox={float(dist.max()):.2f} (Å)={float(dist.max() * sp):.2f}, r_min={r_min:.2f} Å")
 
     candidates = []
     for lab in range(1, ncc + 1):
@@ -1370,7 +1427,7 @@ def main():
         sites = pick_centers(
             args.receptor_pdbqt, maps,
             map_origin=origin, map_spacing=spacing,
-            voxel_spacing=0.5, r_min=R_MIN_CAVITY_A,  # <-- enforce 20 Å minimum cavity radius
+            voxel_spacing=0.5, r_min=None,  # adaptive: derived from each receptor's own EDT
             min_sep_A=7.0, k_box=4.0, max_sites=args.max_sites, inflate_A=0.0,
         )
         if len(sites) == 0:

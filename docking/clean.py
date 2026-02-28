@@ -81,24 +81,6 @@ def _load_config():
 CFG = _load_config()
 
 
-def clean_config(*, dry: bool):
-    # optional: require sentinel in docking/ root for extra safety
-    if not _has_sentinel(DOCKING_DIR_DEFAULT):
-        print("[SKIP] config: missing sentinel in docking/ — nothing deleted.")
-        return
-
-    if not _ensure_inside_repo(CONFIG_FILE):
-        print("[SKIP] config: path outside repo guard.")
-        return
-
-    if CONFIG_FILE.exists() or CONFIG_FILE.is_symlink():
-        _safe_delete(CONFIG_FILE, dry=dry)
-    else:
-        print("[INFO] config.py not found; nothing to do.")
-
-    # also remove compiled bytecode to avoid stale imports
-    _glob_delete(DOCKING_DIR_DEFAULT / "__pycache__", ["config.*.pyc"], dry=dry, only_files=True)
-
 
 def _safe_delete(path: Path, *, dry: bool):
     # Absolute guard: never remove protected names
@@ -250,8 +232,6 @@ def main():
     if args.db:      clean_db(dry=dry)
     if args.ligands: clean_ligands(dry=dry)
     if args.config:  clean_config(dry=dry)
-
-    clean_config(dry=dry)  # always clean config.py
 
     if dry:
         print("\n(DRY RUN) Nothing deleted. Re-run with -y to apply.")
