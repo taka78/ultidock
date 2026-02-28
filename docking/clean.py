@@ -179,8 +179,21 @@ def clean_config(*, dry: bool):
 
 def clean_maps(*, dry: bool):
     mm = CFG["MACRO_MOL_DIR"]
-    # generated maps + grid params/logs (keep receptor *.pdbqt)
-    _glob_delete(mm, ["*.map*", "*.fld", "*.gpf", "*.glg"], dry=dry)
+    if not mm.exists():
+        return
+    # Delete everything in MACRO_MOL_DIR that is NOT a receptor .pdbqt.
+    # Generated outputs include:
+    #   - per-receptor subdirs  (e.g. 5i6x_edited/ with S1/ … S6/ inside)
+    #   - clash distance grids  (clash_dist.npz.npy, clash_dist.meta.txt)
+    #   - hotspot centres       (centers.tsv)
+    #   - autogrid products     (*.map, *.fld, *.gpf, *.glg)
+    # All of these sit inside mm as children; we walk one level and skip .pdbqt.
+    for child in sorted(mm.iterdir()):
+        if child.suffix.lower() == ".pdbqt":
+            print(f"[KEEP] receptor: {child.name}")
+            continue
+        _safe_delete(child, dry=dry)
+
 
 def clean_pycache(*, dry: bool):
     _glob_delete(SCRIPT_DIR, ["__pycache__"], dry=dry)
