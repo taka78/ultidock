@@ -6,7 +6,22 @@ from pathlib import Path
 from scipy.ndimage import gaussian_filter, maximum_filter
 import mmap
 from grid_box import blind_box
-from config import AUTODOCK_GPU_DIR, DOCKING_DIR, RESULTS_DIR, NUMWI, LIGANDS_DIR, CENTERS_TSV, GRID_MODE, GRID_SPACING, GRID_MARGIN, GRID_CAP, R_MIN_CAVITY_A, HOTSPOT_BOX_ANGLE
+from config import (
+    AUTODOCK_GPU_DIR,
+    DOCKING_DIR,
+    RESULTS_DIR,
+    NUMWI,
+    LIGANDS_DIR,
+    CENTERS_TSV,
+    GRID_MODE,
+    GRID_SPACING,
+    GRID_MARGIN,
+    GRID_CAP,
+    R_MIN_CAVITY_A,
+    HOTSPOT_BOX_ANGLE,
+    HOTSPOT_NMS_MINSEP_A,
+    AUTOSITES,
+)
 
 spacing = float(GRID_SPACING)
 
@@ -103,14 +118,18 @@ def autogenerate_centers_tsv(
     receptor_pdbqt: str,
     out_root: str,
     centers_tsv_path: str,
-    n_sites: int = 6,
+    n_sites: int = AUTOSITES,
     default_npts=(81, 81, 81),
     default_spacing: float = GRID_SPACING,
-    blind_cap: float = 50.0,
+    blind_cap: float = GRID_CAP,
     autogrid4_bin: str = "autogrid4",
-    hotspot_box_ang: float = 35.0,
+    hotspot_box_ang: float = HOTSPOT_BOX_ANGLE,
     hotspot_sigma_A: float = 1.0,  # (kept for API compatibility; not used directly below)
     hotspot_bury_z: float = 0.35,  # (ditto)
+    tau_rel: float = 0.52,
+    min_sep_A: float = HOTSPOT_NMS_MINSEP_A,
+    k_box: float = 4.0,
+    r_min: float | None = R_MIN_CAVITY_A,
     mode: str = "hybrid",
 ):
     """
@@ -174,9 +193,9 @@ def autogenerate_centers_tsv(
                 map_origin=origin,
                 map_spacing=spacing,
                 voxel_spacing=0.375,
-                r_min=None,  # computed adaptively from EDT distribution
-                min_sep_A=5.0,
-                k_box=4.0,
+                r_min=(float(r_min) if r_min is not None else None),
+                min_sep_A=float(min_sep_A),
+                k_box=float(k_box),
                 max_sites=n_sites,
                 inflate_A=0.0,
             )
@@ -188,8 +207,10 @@ def autogenerate_centers_tsv(
         print("[centers] using maps-mode hotspots")
         sites = detect_maps_hotspots(
             C, E, D, origin, spacing,
-            tau_rel=0.52, min_sep_A=5.0, max_sites=n_sites,
-            half_size_A=hotspot_box_ang,
+            tau_rel=float(tau_rel),
+            min_sep_A=float(min_sep_A),
+            max_sites=n_sites,
+            half_size_A=float(hotspot_box_ang),
             receptor_pdbqt=receptor_pdbqt,  # enables true EDT r_peak
         )
 
@@ -198,10 +219,10 @@ def autogenerate_centers_tsv(
         print("[centers] no sites found; retrying maps-mode with looser params")
         sites = detect_maps_hotspots(
             C, E, D, origin, spacing,
-            tau_rel=0.45,  # looser threshold
-            min_sep_A=5.0,
+            tau_rel=max(0.0, float(tau_rel) - 0.07),  # looser threshold
+            min_sep_A=float(min_sep_A),
             max_sites=n_sites,
-            half_size_A=hotspot_box_ang,
+            half_size_A=float(hotspot_box_ang),
             receptor_pdbqt=receptor_pdbqt,  # enables true EDT r_peak
         )
 
@@ -370,9 +391,9 @@ def _sigmoid_stable(x):
 def detect_maps_hotspots(
     C, E, D, origin, spacing,
     tau_rel=0.52,
-    min_sep_A=5.0,
-    max_sites=6,
-    half_size_A=18.0,
+    min_sep_A=HOTSPOT_NMS_MINSEP_A,
+    max_sites=AUTOSITES,
+    half_size_A=HOTSPOT_BOX_ANGLE,
     receptor_pdbqt=None,        # if supplied, EDT r_peak is computed from true geometry
 ):
     """
@@ -1034,8 +1055,8 @@ def ensure_grids(
     centers_file: str = None,  # unused here; kept for signature compatibility
     residues_predicate=None,  # function(line)->bool for residues mode
     spacing: float = GRID_SPACING,
-    margin: float = 5.0,
-    cap: float = 50.0,
+    margin: float = GRID_MARGIN,
+    cap: float = GRID_CAP,
     autogrid4_bin: str = "autogrid4",
 ):
     """
@@ -1095,6 +1116,7 @@ def ensure_grids(
         raise FileNotFoundError(f"No .fld produced in {out_dir_p}; see {log}")
     fld_path = str(fld_candidates[0].resolve())
     return {
+        "site_id": "S1",
         "center": (float(center[0]), float(center[1]), float(center[2])),
         "npts": (int(npts[0]), int(npts[1]), int(npts[2])),
         "spacing": float(spacing),
@@ -1333,12 +1355,14 @@ class HotspotGPFGenerator:
         out_root: str,
         centers_tsv_path: str,
         mode: str = "hybrid",  # "internal" | "maps" | "hybrid"
-        n_sites: int = 6,
+        n_sites: int = AUTOSITES,
         whole_spacing: float = GRID_SPACING,
-        whole_cap_ang: float = 100.0,
-        hotspot_box_ang: float = 35.0,
+        whole_cap_ang: float = GRID_CAP,
+        hotspot_box_ang: float = HOTSPOT_BOX_ANGLE,
         tau_rel: float = 0.60,
-        min_sep_A: float = 7.0,
+        min_sep_A: float = HOTSPOT_NMS_MINSEP_A,
+        r_min: float | None = R_MIN_CAVITY_A,
+        k_box: float = 4.0,
     ):
         """
         Returns: a list of site dicts (site_id, center, npts, spacing, fld_path, out_dir)
@@ -1368,6 +1392,10 @@ class HotspotGPFGenerator:
             hotspot_box_ang=hotspot_box_ang,
             hotspot_sigma_A=1.0,
             hotspot_bury_z=0.35,
+            tau_rel=tau_rel,
+            min_sep_A=min_sep_A,
+            k_box=k_box,
+            r_min=r_min,
             mode=mode,
         )
 

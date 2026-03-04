@@ -20,12 +20,13 @@ from make_grids import (
     HotspotGPFGenerator,
     autogenerate_centers_tsv,
     ensure_grids_multi_centers,
+    ensure_grids,
     ensure_whole_protein_maps,
 )
 from config import (
     LIGANDS_DIR, DOCKING_DIR, ANALYSIS_DIR, VINA_DIR, AUTODOCK_GPU_DIR, MACRO_MOL_DIR,
     DB_PATH, GPU_TYPE, RESULTS_DIR, NUMWI, GRID_MODE, GRID_MARGIN, GRID_CAP, CENTERS_TSV, REF_LIGAND_PDB,
-    GRID_SPACING, AUTO_GRID_BIN, AUTOSITES, R_MIN_CAVITY_A, HOTSPOT_BOX_ANGLE
+    GRID_SPACING, AUTOSITES, R_MIN_CAVITY_A, HOTSPOT_BOX_ANGLE, HOTSPOT_NMS_MINSEP_A
 )
 from db_manager import DockingDatabaseManager
 
@@ -123,7 +124,9 @@ def prepare_sites_for_docking(receptor_pdbqt: str, macro_dir: str):
                 default_spacing=float(GRID_SPACING),
                 blind_cap=float(GRID_CAP),
                 autogrid4_bin=str(autogrid_bin),
-                hotspot_box_ang=float(HOTSPOT_BOX_ANGLE),  # use config value, not a hardcoded 18.0
+                hotspot_box_ang=float(HOTSPOT_BOX_ANGLE),
+                min_sep_A=float(HOTSPOT_NMS_MINSEP_A),
+                r_min=float(R_MIN_CAVITY_A) if R_MIN_CAVITY_A is not None else None,
                 mode="hybrid",
             )
         sites = ensure_grids_multi_centers(
@@ -132,6 +135,18 @@ def prepare_sites_for_docking(receptor_pdbqt: str, macro_dir: str):
             centers_tsv=str(centers_tsv_path),
             autogrid4_bin=str(autogrid_bin),
         )
+    elif grid_mode in {"ligand", "residues", "blind"}:
+        single_site = ensure_grids(
+            receptor_pdbqt=receptor_pdbqt,
+            out_dir=str(macro_dir / "S1"),
+            mode=grid_mode,
+            ref_ligand=REF_LIGAND_PDB,
+            spacing=float(GRID_SPACING),
+            margin=float(GRID_MARGIN),
+            cap=float(GRID_CAP),
+            autogrid4_bin=str(autogrid_bin),
+        )
+        sites = [single_site]
     else:
         # Otherwise, auto-detect with the hotspot generator and write centers.tsv,
         # then build per-site maps for every detected pocket.
@@ -144,9 +159,10 @@ def prepare_sites_for_docking(receptor_pdbqt: str, macro_dir: str):
             n_sites=int(AUTOSITES) if AUTOSITES else 6,
             whole_spacing=float(GRID_SPACING),
             whole_cap_ang=float(GRID_CAP),
-            hotspot_box_ang=18.0,
+            hotspot_box_ang=float(HOTSPOT_BOX_ANGLE),
             tau_rel=0.58,
-            min_sep_A=7.0,
+            min_sep_A=float(HOTSPOT_NMS_MINSEP_A),
+            r_min=float(R_MIN_CAVITY_A) if R_MIN_CAVITY_A is not None else None,
         )
 
     if not list(macro_dir.glob("*.fld")):
