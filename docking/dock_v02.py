@@ -28,6 +28,7 @@ from config import (
     DB_PATH, GPU_TYPE, RESULTS_DIR, NUMWI, GRID_MODE, GRID_MARGIN, GRID_CAP, CENTERS_TSV, REF_LIGAND_PDB,
     GRID_SPACING, AUTOSITES, R_MIN_CAVITY_A, HOTSPOT_BOX_ANGLE, HOTSPOT_NMS_MINSEP_A
 )
+import config as _config
 from db_manager import DockingDatabaseManager
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -39,6 +40,10 @@ BACKEND = (GPU_TYPE or "CPU").upper()
 IS_CUDA = BACKEND == "CUDA"
 IS_OPENCL = BACKEND == "OPENCL"
 IS_GPU = IS_CUDA or IS_OPENCL
+VINA_CPU = int(getattr(_config, "VINA_CPU", 2))
+VINA_SEED = getattr(_config, "VINA_SEED", None)
+VINA_EXHAUSTIVENESS = int(getattr(_config, "VINA_EXHAUSTIVENESS", 8))
+VINA_NUM_MODES = int(getattr(_config, "VINA_NUM_MODES", 9))
 
 def list_nvidia_gpus():
     """Return a list of GPU indices [0,1,...]. Falls back to [0] if unknown."""
@@ -695,9 +700,12 @@ class ProcessFileThread(threading.Thread):
                                             "--size_x",   f"{size_x:.3f}",
                                             "--size_y",   f"{size_y:.3f}",
                                             "--size_z",   f"{size_z:.3f}",
-                                            "--cpu",      "2",
+                                            "--cpu",      str(VINA_CPU),
+                                            "--exhaustiveness", str(VINA_EXHAUSTIVENESS),
+                                            "--num_modes", str(VINA_NUM_MODES),
                                             "--out",      str(vina_out),
-                                        ],
+                                        ]
+                                        + (["--seed", str(VINA_SEED)] if VINA_SEED is not None else []),
                                         stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE,
                                         text=True,

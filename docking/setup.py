@@ -10,6 +10,16 @@ from typing import Iterable, Optional
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 NUMWI = "128"  # Default number of work items
+CURRENT_DIR = Path(SCRIPT_DIR)
+DEFAULT_LIGANDS_DIR = str((CURRENT_DIR / "LIGANDS_DIR").resolve())
+DEFAULT_DOCKING_DIR = str((CURRENT_DIR / "DOCKING_DIR").resolve())
+DEFAULT_ANALYSIS_DIR = str((CURRENT_DIR / "ANALYSIS_DIR").resolve())
+DEFAULT_VINA_DIR = str((CURRENT_DIR / "VINA_DIR").resolve())
+DEFAULT_AUTODOCK_GPU_DIR = str((CURRENT_DIR / "AUTODOCK_GPU_DIR").resolve())
+DEFAULT_MACRO_MOL_DIR = str((CURRENT_DIR / "MACRO_MOL_DIR").resolve())
+DEFAULT_RESULTS_DIR = str((CURRENT_DIR / "RESULTS_DIR").resolve())
+DEFAULT_CENTERS_TSV = str((CURRENT_DIR / "MACRO_MOL_DIR" / "centers.tsv").resolve())
+DEFAULT_WGET_PATH = str((CURRENT_DIR / "ligands.wget").resolve())
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "lib"))
 
@@ -21,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--wget",
         metavar="PATH",
+        default=DEFAULT_WGET_PATH,
         help="Path to a .wget file (overrides prompt)",
     )
     parser.add_argument(
@@ -31,49 +42,124 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mode",
         choices=["auto", "gpu", "cpu", "cuda", "opencl"],
-        help="Choose the GPU detection mode (default: prompt)",
+        default="auto",
+        help="Choose the GPU detection mode",
     )
     parser.add_argument(
         "--ligands-dir",
         "--LIGANDS_DIR",
         dest="ligands_dir",
+        default=DEFAULT_LIGANDS_DIR,
         help="Directory to store ligand files",
     )
     parser.add_argument(
         "--docking-dir",
         "--DOCKING_DIR",
         dest="docking_dir",
+        default=DEFAULT_DOCKING_DIR,
         help="Directory to store docking outputs",
     )
     parser.add_argument(
         "--analysis-dir",
         "--ANALYSIS_DIR",
         dest="analysis_dir",
+        default=DEFAULT_ANALYSIS_DIR,
         help="Directory to store analysis artifacts",
     )
     parser.add_argument(
         "--vina-dir",
         "--VINA_DIR",
         dest="vina_dir",
+        default=DEFAULT_VINA_DIR,
         help="Directory containing AutoDock Vina binaries",
     )
     parser.add_argument(
         "--autodock-gpu-dir",
         "--AUTODOCK_GPU_DIR",
         dest="autodock_gpu_dir",
+        default=DEFAULT_AUTODOCK_GPU_DIR,
         help="Directory containing AutoDock-GPU",
     )
     parser.add_argument(
         "--macro-mol-dir",
         "--MACRO_MOL_DIR",
         dest="macro_mol_dir",
+        default=DEFAULT_MACRO_MOL_DIR,
         help="Directory containing receptor PDBQT files",
     )
     parser.add_argument(
         "--results-dir",
         "--RESULTS_DIR",
         dest="results_dir",
+        default=DEFAULT_RESULTS_DIR,
         help="Directory to store docking results database",
+    )
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Benchmark mode: skip wget prompt unless explicitly provided and persist benchmark-oriented config values.",
+    )
+    parser.add_argument(
+        "--grid-mode",
+        choices=["ligand", "residues", "centers", "blind"],
+        default="centers",
+        help="Grid generation mode written to config.py.",
+    )
+    parser.add_argument(
+        "--grid-spacing",
+        type=float,
+        default=0.375,
+        help="Grid spacing written to config.py.",
+    )
+    parser.add_argument(
+        "--grid-margin",
+        type=float,
+        default=5.0,
+        help="Grid margin written to config.py.",
+    )
+    parser.add_argument(
+        "--grid-cap",
+        type=float,
+        default=150.0,
+        help="Grid cap written to config.py.",
+    )
+    parser.add_argument(
+        "--centers-tsv",
+        default=DEFAULT_CENTERS_TSV,
+        help="Path to a centers.tsv file written to config.py.",
+    )
+    parser.add_argument(
+        "--ref-ligand-pdb",
+        help='Reference ligand path for GRID_MODE="ligand".',
+    )
+    parser.add_argument(
+        "--autosites",
+        type=int,
+        default=6,
+        help="Number of automatically generated sites written to config.py.",
+    )
+    parser.add_argument(
+        "--vina-cpu",
+        type=int,
+        default=2,
+        help="CPU count passed to Vina in CPU mode.",
+    )
+    parser.add_argument(
+        "--vina-seed",
+        type=int,
+        help="Seed passed to Vina in CPU mode.",
+    )
+    parser.add_argument(
+        "--vina-exhaustiveness",
+        type=int,
+        default=8,
+        help="Exhaustiveness passed to Vina in CPU mode.",
+    )
+    parser.add_argument(
+        "--vina-num-modes",
+        type=int,
+        default=9,
+        help="num_modes passed to Vina in CPU mode.",
     )
     return parser
 
@@ -343,13 +429,15 @@ def _resolve_wget_path(current_dir: Path, args: argparse.Namespace) -> Optional[
     if args.wget:
         return str(_normalize_path(args.wget))
 
+    if getattr(args, "benchmark", False):
+        print("[setup] Benchmark mode: skipping ligand download prompt.")
+        return None
+
     if not sys.stdin.isatty():
         print("[setup] Non-interactive session detected; skipping ligand download prompt.")
         return None
 
-    prompt = "Enter the path to the .wget file"
-    default = current_dir / "ligands.wget"
-    return str(_normalize_path(ask_for_input(prompt, str(default))))
+    return str(_normalize_path(DEFAULT_WGET_PATH))
 
 def _find_autodock_gpu_bin(autodock_dir: str, gpu_type: str, numwi) -> str | None:
     """
@@ -478,18 +566,11 @@ def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI):
 
 
 def run_setup(args: argparse.Namespace) -> dict:
-    CURRENT_DIR = Path(__file__).resolve().parent
     print("=" * 50)
     print("Welcome to the Ultidock Setup")
     print("=" * 50)
 
-    if args.mode:
-        mode = _normalize_mode(args.mode)
-    else:
-        user_mode = input(
-            "Select run mode (GPU = NVidia-CUDA/OpenCL, AMD-OpenCL or CPU or auto) [default: auto]: "
-        )
-        mode = _normalize_mode(user_mode or "auto")
+    mode = _normalize_mode(args.mode)
 
     if mode in ("opencl", "cuda", "cpu"):
         GPU_TYPE = mode.upper()
@@ -549,6 +630,26 @@ def run_setup(args: argparse.Namespace) -> dict:
         "GPU_TYPE": GPU_TYPE,
         "DB_PATH": str(Path(results_dir) / "ultidock_results.db"),
         "NUMWI": NUMWI,
+        "GRID_MODE": args.grid_mode,
+        "GRID_SPACING": args.grid_spacing,
+        "GRID_MARGIN": args.grid_margin,
+        "GRID_CAP": args.grid_cap,
+        "CENTERS_TSV": (
+            str(_normalize_path(args.centers_tsv))
+            if args.centers_tsv
+            else str(Path(macro_mol_dir) / "centers.tsv")
+        ),
+        "REF_LIGAND_PDB": (
+            str(_normalize_path(args.ref_ligand_pdb))
+            if args.ref_ligand_pdb
+            else None
+        ),
+        "AUTOSITES": args.autosites,
+        "VINA_CPU": args.vina_cpu,
+        "VINA_SEED": args.vina_seed,
+        "VINA_EXHAUSTIVENESS": args.vina_exhaustiveness,
+        "VINA_NUM_MODES": args.vina_num_modes,
+        "BENCHMARK_MODE": bool(args.benchmark),
     }
 
     with open(config_path, "w", encoding="utf-8") as config_file:
@@ -569,13 +670,17 @@ def run_setup(args: argparse.Namespace) -> dict:
         config_file.write(f"GPU_TYPE = {repr(config_values['GPU_TYPE'])}\n")
         config_file.write(f"DB_PATH = {repr(config_values['DB_PATH'])}\n")
         config_file.write(f"NUMWI = {repr(config_values['NUMWI'])}\n")
-        config_file.write('GRID_MODE = "centers"      # ligand | residues | centers | blind\n')
-        config_file.write('GRID_SPACING = 0.375\n')
-        config_file.write('GRID_MARGIN = 5.0         # Å\n')
-        config_file.write('GRID_CAP = 150.0           # Å cap per axis for blind mode\n')
+        config_file.write(
+            f"GRID_MODE = {repr(config_values['GRID_MODE'])}      # ligand | residues | centers | blind\n"
+        )
+        config_file.write(f"GRID_SPACING = {repr(config_values['GRID_SPACING'])}\n")
+        config_file.write(f"GRID_MARGIN = {repr(config_values['GRID_MARGIN'])}         # Å\n")
+        config_file.write(f"GRID_CAP = {repr(config_values['GRID_CAP'])}           # Å cap per axis for blind mode\n")
         config_file.write('AUTO_GRID_BIN = os.path.join(AUTODOCK_GPU_DIR, "autogrid", "autogrid4")\n')
-        config_file.write('CENTERS_TSV  = os.path.join(MACRO_MOL_DIR, "centers.tsv")  # path or None\n')
-        config_file.write('REF_LIGAND_PDB = None    # path to co-crystal/ref ligand if GRID_MODE="ligand"\n')
+        config_file.write(f"CENTERS_TSV = {repr(config_values['CENTERS_TSV'])}  # path or None\n")
+        config_file.write(
+            f"REF_LIGAND_PDB = {repr(config_values['REF_LIGAND_PDB'])}    # path to co-crystal/ref ligand if GRID_MODE='ligand'\n"
+        )
         config_file.write('HOTSPOT_NMS_MINSEP_A = 2.0\n')
         config_file.write('R_MIN_CAVITY_A = 3.0    # minimum inscribed-sphere radius (Å) for cavity acceptance\n')
         config_file.write('SURFACE_SHELL__MIN_A = 2.0  # min/max distance from protein surface for surface pockets\n')
@@ -585,7 +690,12 @@ def run_setup(args: argparse.Namespace) -> dict:
         config_file.write('CONTACT_SHELL_A = 4.0           # voxels ≤5 Å from surface count as “contact”\n')
         config_file.write('HOTSPOT_BOX_ANGLE = 35       # minimum box side length (Å)\n')
         config_file.write('MIN_SURFACE_FRAC = 0.01        # ~0.2% of box must be near-surface\n')
-        config_file.write('AUTOSITES = 6\n')
+        config_file.write(f"AUTOSITES = {repr(config_values['AUTOSITES'])}\n")
+        config_file.write(f"VINA_CPU = {repr(config_values['VINA_CPU'])}\n")
+        config_file.write(f"VINA_SEED = {repr(config_values['VINA_SEED'])}\n")
+        config_file.write(f"VINA_EXHAUSTIVENESS = {repr(config_values['VINA_EXHAUSTIVENESS'])}\n")
+        config_file.write(f"VINA_NUM_MODES = {repr(config_values['VINA_NUM_MODES'])}\n")
+        config_file.write(f"BENCHMARK_MODE = {repr(config_values['BENCHMARK_MODE'])}\n")
         print(f"Configuration saved to {config_path} and directories were ensured!")
 
     if wget_file_path:
