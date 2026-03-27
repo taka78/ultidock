@@ -28,9 +28,12 @@ MAKE_J="${MAKE_J:-$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || 
 #128wi = 128 threads per ligand (more parallelism)
 
 upper_device="$(echo "$DEVICE" | tr '[:lower:]' '[:upper:]')"
-device_mode="CUDA"
-if [[ "$upper_device" == "OPENCL" || "$upper_device" == "OCL" || "$upper_device" == "OCLGPU" || "$upper_device" == "AMD" ]]; then
+if [[ "$upper_device" == "CPU" ]]; then
+  device_mode="CPU"
+elif [[ "$upper_device" == "OPENCL" || "$upper_device" == "OCL" || "$upper_device" == "OCLGPU" || "$upper_device" == "AMD" ]]; then
   device_mode="OCLGPU"
+else
+  device_mode="CUDA"
 fi
 echo "[INFO] Using device mode: $device_mode (requested: ${GPU_LABEL})"
 # Standard CUDA binary naming
