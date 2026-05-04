@@ -9,6 +9,7 @@ Commands:
     ultidock pdbqt check                <file.pdbqt>
     ultidock pdbqt normalize            <file.pdbqt> -o <out.pdbqt>
     ultidock pdbqt canonicalize-receptor <file.pdbqt> -o <out.pdbqt>
+    ultidock pdbqt prepare-receptor     <file.pdb/.pdbqt> -o <out.pdbqt>
     ultidock grids check                <maps.fld>   [--types C HD OA ...]
     ultidock doctor
 
@@ -119,6 +120,47 @@ def canonicalize_cmd(file: Path, output: Path) -> None:
         sys.exit(1)
 
     click.echo(f"[OK] Canonicalized -> {output}")
+    click.echo(f"  sha256: {digest}")
+
+
+@pdbqt.command("prepare-receptor")
+@click.argument("file", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-o",
+    "--output",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Output path for the prepared receptor PDBQT.",
+)
+@click.option(
+    "--prepare-command",
+    help="External conversion command template. Use {input}, {output}, and optionally {seed}.",
+)
+@click.option("--seed", type=int, default=42, show_default=True)
+@click.option("--timestamp", default="MOLGUARD", show_default=True)
+def prepare_receptor_cmd(
+    file: Path,
+    output: Path,
+    prepare_command: str | None,
+    seed: int,
+    timestamp: str,
+) -> None:
+    """Prepare PDB/PDBQT/MOL2 receptor input through the shared pipeline path."""
+    from molguard.io.receptor_prep import prepare_receptor_pdbqt
+
+    try:
+        digest = prepare_receptor_pdbqt(
+            input_path=file,
+            output_path=output,
+            prepare_command=prepare_command,
+            seed=seed,
+            timestamp=timestamp,
+        )
+    except Exception as exc:
+        click.echo(f"[FAIL] {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"[OK] Prepared receptor -> {output}")
     click.echo(f"  sha256: {digest}")
 
 

@@ -1,6 +1,5 @@
 #dock_v02.py
 import os
-import stat
 import threading
 import numpy as np
 import queue
@@ -26,6 +25,7 @@ try:
         pdbqt_check,
         LintError,
     )
+    from molguard.io.receptor_prep import prepare_receptors_in_directory
     HAS_MOLGUARD = True
 except ImportError:
     HAS_MOLGUARD = False
@@ -124,6 +124,56 @@ def extract_binding_site_from_name(path_like):
         return match.group(1)
     return None
 
+def _load_receptor_overrides(receptor_pdbqt: str) -> dict:
+    """
+    Load per-receptor config overrides from a .config.toml sidecar if present.
+    The sidecar must sit next to the receptor PDBQT and share the same stem:
+        e.g. MACRO_MOL_DIR/src_kinase.pdbqt  →  MACRO_MOL_DIR/src_kinase.config.toml
+
+    Returns a dict of override key/value pairs, or {} if no sidecar exists.
+    Requires Python 3.11+ (stdlib tomllib). On older Pythons falls back gracefully.
+    """
+    sidecar = Path(receptor_pdbqt).with_suffix(".config.toml")
+    if not sidecar.exists():
+        return {}
+    try:
+        import tomllib                          # stdlib Python 3.11+
+    except ImportError:
+        try:
+            import tomli as tomllib             # pip install tomli  (3.8-3.10)
+        except ImportError:
+            print(
+                f"[WARN] sidecar found ({sidecar.name}) but tomllib/tomli not available — "
+                "skipping per-receptor overrides. Install tomli or upgrade to Python 3.11+."
+            )
+            return {}
+    try:
+        with open(sidecar, "rb") as fh:
+            raw = tomllib.load(fh)
+        # strip diagnostic keys (prefixed with _) — they are comments, not config
+        overrides = {k: v for k, v in raw.items() if not k.startswith("_")}
+        print(
+            f"[SIDECAR] {sidecar.name} — loaded {len(overrides)} override(s): "
+            + ", ".join(f"{k}={v}" for k, v in overrides.items())
+        )
+        return overrides
+    except Exception as exc:
+        print(f"[WARN] Failed to parse sidecar {sidecar}: {exc} — using global defaults.")
+        return {}
+
+
+def _optional_float_override(value):
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in {"", "none", "auto", "adaptive"}:
+        return None
+    return float(value)
+
+
+def _float_config_override(overrides: dict, key: str, default):
+    return float(overrides.get(key, getattr(_config, key, default)))
+
+
 def prepare_sites_for_docking(receptor_pdbqt: str, macro_dir: str):
     """
     Returns: list[{
@@ -139,23 +189,53 @@ def prepare_sites_for_docking(receptor_pdbqt: str, macro_dir: str):
     centers_tsv_path.parent.mkdir(parents=True, exist_ok=True)
 
     autogrid_bin = Path(AUTODOCK_GPU_DIR) / "autogrid" / "autogrid4"
+
+    # ── per-receptor overrides ────────────────────────────────────────────
+    _ov = _load_receptor_overrides(receptor_pdbqt)
+    _r_min_raw   = _ov.get("R_MIN_CAVITY_A", R_MIN_CAVITY_A)
+    _r_min       = _optional_float_override(_r_min_raw)
+    _box_angle   = float(_ov.get("HOTSPOT_BOX_ANGLE",    HOTSPOT_BOX_ANGLE))
+    _nms_minsep  = float(_ov.get("HOTSPOT_NMS_MINSEP_A", HOTSPOT_NMS_MINSEP_A))
+    _autosites   = int(  _ov.get("AUTOSITES",            AUTOSITES))
+    _spacing     = float(_ov.get("GRID_SPACING",         GRID_SPACING))
+    _margin      = float(_ov.get("GRID_MARGIN",          GRID_MARGIN))
+    _cap         = float(_ov.get("GRID_CAP",             GRID_CAP))
+    _site_policy = str(getattr(_config, "SITE_POLICY", "receptor_search")).lower()
+    _adaptive_r_min_params = {
+        "percentile": _float_config_override(_ov, "ADAPTIVE_R_MIN_PERCENTILE", 85.0),
+        "peak_percentile": _float_config_override(_ov, "ADAPTIVE_R_MIN_PEAK_PERCENTILE", 10.0),
+        "floor_A": _float_config_override(_ov, "ADAPTIVE_R_MIN_FLOOR_A", 2.0),
+        "ceil_A": _float_config_override(_ov, "ADAPTIVE_R_MIN_CEIL_A", 5.0),
+        "pocket_zone_max_A": _float_config_override(_ov, "ADAPTIVE_R_MIN_POCKET_ZONE_MAX_A", 8.0),
+        "peak_window_A": _float_config_override(_ov, "ADAPTIVE_R_MIN_PEAK_WINDOW_A", 4.0),
+    }
+    _maps_pocket_max_A = _float_config_override(_ov, "MAPS_POCKET_MAX_A", 15.0)
+    _nms_box_fraction = _float_config_override(_ov, "HOTSPOT_NMS_BOX_FRACTION", 0.40)
+    _nms_min_A = _float_config_override(_ov, "HOTSPOT_NMS_MIN_A", 4.0)
+    _nms_max_A = _float_config_override(_ov, "HOTSPOT_NMS_MAX_A", 25.0)
+    # ─────────────────────────────────────────────────────────────────────
+
     grid_mode = (GRID_MODE or "").lower()
 
     if grid_mode == "centers":
-        if not centers_tsv_path.exists():
-            autogenerate_centers_tsv(
-                receptor_pdbqt=receptor_pdbqt,
-                out_root=str(macro_dir),
-                centers_tsv_path=str(centers_tsv_path),
-                n_sites=int(AUTOSITES) if AUTOSITES else 6,
-                default_spacing=float(GRID_SPACING),
-                blind_cap=float(GRID_CAP),
-                autogrid4_bin=str(autogrid_bin),
-                hotspot_box_ang=float(HOTSPOT_BOX_ANGLE),
-                min_sep_A=float(HOTSPOT_NMS_MINSEP_A),
-                r_min=float(R_MIN_CAVITY_A) if R_MIN_CAVITY_A is not None else None,
-                mode="hybrid",
-            )
+        autogenerate_centers_tsv(
+            receptor_pdbqt=receptor_pdbqt,
+            out_root=str(macro_dir),
+            centers_tsv_path=str(centers_tsv_path),
+            n_sites=_autosites,
+            default_spacing=_spacing,
+            blind_cap=_cap,
+            autogrid4_bin=str(autogrid_bin),
+            hotspot_box_ang=_box_angle,
+            min_sep_A=_nms_minsep,
+            r_min=_r_min,
+            mode=_site_policy,
+            adaptive_r_min_params=_adaptive_r_min_params,
+            maps_pocket_max_A=_maps_pocket_max_A,
+            nms_box_fraction=_nms_box_fraction,
+            nms_min_A=_nms_min_A,
+            nms_max_A=_nms_max_A,
+        )
         sites = ensure_grids_multi_centers(
             receptor_pdbqt=receptor_pdbqt,
             out_root=str(macro_dir),
@@ -168,9 +248,9 @@ def prepare_sites_for_docking(receptor_pdbqt: str, macro_dir: str):
             out_dir=str(macro_dir / "S1"),
             mode=grid_mode,
             ref_ligand=REF_LIGAND_PDB,
-            spacing=float(GRID_SPACING),
-            margin=float(GRID_MARGIN),
-            cap=float(GRID_CAP),
+            spacing=_spacing,
+            margin=_margin,
+            cap=_cap,
             autogrid4_bin=str(autogrid_bin),
         )
         sites = [single_site]
@@ -180,22 +260,27 @@ def prepare_sites_for_docking(receptor_pdbqt: str, macro_dir: str):
             receptor_pdbqt=receptor_pdbqt,
             out_root=str(macro_dir),
             centers_tsv_path=str(centers_tsv_path),
-            mode="hybrid",
-            n_sites=int(AUTOSITES) if AUTOSITES else 6,
-            whole_spacing=float(GRID_SPACING),
-            whole_cap_ang=float(GRID_CAP),
-            hotspot_box_ang=float(HOTSPOT_BOX_ANGLE),
+            mode=_site_policy,
+            n_sites=_autosites,
+            whole_spacing=_spacing,
+            whole_cap_ang=_cap,
+            hotspot_box_ang=_box_angle,
             tau_rel=0.58,
-            min_sep_A=float(HOTSPOT_NMS_MINSEP_A),
-            r_min=float(R_MIN_CAVITY_A) if R_MIN_CAVITY_A is not None else None,
+            min_sep_A=_nms_minsep,
+            r_min=_r_min,
+            adaptive_r_min_params=_adaptive_r_min_params,
+            maps_pocket_max_A=_maps_pocket_max_A,
+            nms_box_fraction=_nms_box_fraction,
+            nms_min_A=_nms_min_A,
+            nms_max_A=_nms_max_A,
         )
 
     if not list(macro_dir.glob("*.fld")):
         ensure_whole_protein_maps(
             receptor_pdbqt=receptor_pdbqt,
             out_root=str(macro_dir),
-            spacing=float(GRID_SPACING),
-            cap_ang=float(GRID_CAP),
+            spacing=_spacing,
+            cap_ang=_cap,
             autogrid4_bin=str(autogrid_bin),
         )
     return sites
@@ -215,7 +300,7 @@ def load_receptor_sites(macro_dir: str, site_loader=prepare_sites_for_docking):
 
 
 def _canonicalize_receptors(macro_dir: str) -> dict[str, str]:
-    """Canonicalize all receptor .pdbqt files in macro_dir via molguard.
+    """Prepare/canonicalize all receptor inputs in macro_dir via molguard.
 
     Returns a dict mapping filename -> SHA-256 digest of the canonical output.
     Skips silently if molguard is not installed.
@@ -227,29 +312,30 @@ def _canonicalize_receptors(macro_dir: str) -> dict[str, str]:
         return digests
 
     macro_path = Path(macro_dir)
-    pdbqt_files = sorted(macro_path.glob("*.pdbqt"))
-    if not pdbqt_files:
+    prep_mode = str(getattr(_config, "RECEPTOR_PREP_MODE", "auto") or "auto").lower()
+    if prep_mode in {"off", "skip", "none", "false", "0"}:
+        print("[MOLGUARD] Receptor preparation disabled by RECEPTOR_PREP_MODE.")
         return digests
 
-    print(f"[MOLGUARD] Canonicalizing {len(pdbqt_files)} receptor(s) in {macro_dir}")
-    for pdbqt in pdbqt_files:
-        try:
-            digest = canonicalize_receptor(pdbqt, pdbqt, timestamp="PIPELINE")
-            digests[pdbqt.name] = digest
-            print(f"  {pdbqt.name}  sha256={digest[:16]}…")
-        except LintError as exc:
-            print(f"  {pdbqt.name}  lint error: {exc}")
-            print(f"    Trying to normalize and retry...")
-            try:
-                pdbqt_normalize(pdbqt, pdbqt)
-                digest = canonicalize_receptor(pdbqt, pdbqt, timestamp="PIPELINE")
-                digests[pdbqt.name] = digest
-                print(f"  {pdbqt.name}  fixed + canonicalized  sha256={digest[:16]}…")
-            except Exception as inner:
-                print(f"  {pdbqt.name}  CANNOT FIX: {inner}")
-                print(f"    Docking will proceed with the original file.")
-        except Exception as exc:
-            print(f"  {pdbqt.name}  unexpected error: {exc}")
+    prepare_command = getattr(_config, "RECEPTOR_PREP_COMMAND", None)
+    seed = int(getattr(_config, "RECEPTOR_PREP_SEED", 42))
+    force = bool(getattr(_config, "RECEPTOR_PREP_FORCE", False))
+
+    records = prepare_receptors_in_directory(
+        macro_path,
+        prepare_command=prepare_command,
+        seed=seed,
+        timestamp="PIPELINE",
+        force=force,
+    )
+    if records:
+        print(f"[MOLGUARD] Prepared/canonicalized {len(records)} receptor input(s) in {macro_dir}")
+    for record in records:
+        digests[record.output_path.name] = record.digest
+        print(
+            f"  [OK] {record.output_path.name}  {record.action}  "
+            f"sha256={record.digest[:16]}..."
+        )
 
     return digests
 

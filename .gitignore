@@ -82,3 +82,12 @@ docking/AUTODOCK_GPU_DIR/autogrid/Makefile
 docking/AUTODOCK_GPU_DIR/autogrid/autom4te.cache/
 docking/AUTODOCK_GPU_DIR/test_cuda
 docking/config.py
+
+# Benchmark payloads and generated outputs. Benchmark source scripts are tracked,
+# but downloaded DUD-E datasets and generated maps/results must stay local.
+benchmarks/datasets/
+benchmarks/results/
+
+# Local Codex/session state and scratch notes.
+.codex
+.codex/

@@ -161,6 +161,32 @@ def build_parser() -> argparse.ArgumentParser:
         default=9,
         help="num_modes passed to Vina in CPU mode.",
     )
+    parser.add_argument(
+        "--skip-profile",
+        action="store_true",
+        help="Skip per-receptor profiling (preserves hand-tuned .config.toml sidecars).",
+    )
+    parser.add_argument(
+        "--receptor-prep-mode",
+        choices=["auto", "off"],
+        default="auto",
+        help="Prepare/canonicalize receptor inputs in MACRO_MOL_DIR using molguard.",
+    )
+    parser.add_argument(
+        "--receptor-prepare-command",
+        help="Override receptor conversion command template; use {input}, {output}, {seed}.",
+    )
+    parser.add_argument(
+        "--receptor-prep-seed",
+        type=int,
+        default=42,
+        help="Seed forwarded to receptor-prep conversion commands.",
+    )
+    parser.add_argument(
+        "--force-receptor-prep",
+        action="store_true",
+        help="Regenerate receptor PDBQT outputs even when sibling outputs already exist.",
+    )
     return parser
 
 
@@ -197,9 +223,16 @@ def create_directory_if_needed(path: str | Path) -> str:
     return str(directory)
 
 
-def check_and_fix_receptors(macro_mol_dir: str | Path) -> None:
+def check_and_fix_receptors(
+    macro_mol_dir: str | Path,
+    *,
+    prep_mode: str = "auto",
+    prepare_command: str | None = None,
+    seed: int = 42,
+    force: bool = False,
+) -> None:
     """
-    Scan every .pdbqt file in macro_mol_dir, run pdbqt_check on each,
+    Prepare receptor inputs through molguard, then scan every .pdbqt file,
     print a grouped summary of issues, then ask the user whether to
     auto-fix the problematic files with canonicalize_receptor.
 
@@ -208,12 +241,31 @@ def check_and_fix_receptors(macro_mol_dir: str | Path) -> None:
     """
     try:
         from molguard.io.pdbqt import LintError, canonicalize_receptor, pdbqt_check
+        from molguard.io.receptor_prep import prepare_receptors_in_directory
     except ImportError:
-        print("[warn] molguard not found -- skipping receptor PDBQT check.")
+        print("[warn] molguard not found -- skipping receptor prep/PDBQT check.")
         print("       Install with: pip install -e . (from repo root)")
         return
 
     mol_dir = Path(macro_mol_dir)
+    if prep_mode.lower() not in {"off", "skip", "none", "false", "0"}:
+        records = prepare_receptors_in_directory(
+            mol_dir,
+            prepare_command=prepare_command,
+            seed=seed,
+            timestamp="SETUP",
+            force=force,
+        )
+        if records:
+            print(f"[setup] molguard prepared/canonicalized {len(records)} receptor input(s).")
+            for record in records:
+                print(
+                    f"  [receptor-prep] {record.output_path.name}  {record.action}  "
+                    f"sha256={record.digest[:12]}..."
+                )
+    else:
+        print("[setup] receptor prep disabled by --receptor-prep-mode=off.")
+
     pdbqt_files = sorted(mol_dir.rglob("*.pdbqt"))
 
     if not pdbqt_files:
@@ -507,7 +559,7 @@ def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI):
         if found_bin:
             print(f"AutoDock-GPU is set up for {GPU_TYPE}: {found_bin}")
         else:
-            print(f"[BUILD] Compiling AutoDock-GPU for {GPU_TYPE} (DEVICE={device_env}, NUMWI={NUMWI})…")
+            print(f"[BUILD] Compiling AutoDock-GPU for {GPU_TYPE} (DEVICE={device_env}, NUMWI={NUMWI})...")
             subprocess.run(
                 [
                     "bash",
@@ -531,7 +583,7 @@ def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI):
             print(f"[BUILD] AutoDock-GPU ready: {found_bin}")
     else:
         # CPU-only: still run the script so it compiles/checks AutoGrid
-        print("[BUILD] CPU mode: building/checking AutoGrid only…")
+        print("[BUILD] CPU mode: building/checking AutoGrid only...")
         subprocess.run(
             ["bash", compiler_script, AUTODOCK_GPU_DIR],
             check=True, cwd=AUTODOCK_GPU_DIR, env=env
@@ -650,6 +702,10 @@ def run_setup(args: argparse.Namespace) -> dict:
         "VINA_EXHAUSTIVENESS": args.vina_exhaustiveness,
         "VINA_NUM_MODES": args.vina_num_modes,
         "BENCHMARK_MODE": bool(args.benchmark),
+        "RECEPTOR_PREP_MODE": args.receptor_prep_mode,
+        "RECEPTOR_PREP_COMMAND": args.receptor_prepare_command,
+        "RECEPTOR_PREP_SEED": args.receptor_prep_seed,
+        "RECEPTOR_PREP_FORCE": bool(args.force_receptor_prep),
     }
 
     with open(config_path, "w", encoding="utf-8") as config_file:
@@ -673,6 +729,7 @@ def run_setup(args: argparse.Namespace) -> dict:
         config_file.write(
             f"GRID_MODE = {repr(config_values['GRID_MODE'])}      # ligand | residues | centers | blind\n"
         )
+        config_file.write("SITE_POLICY = 'receptor_search'  # receptor_search | exhaustive_search | internal | surface | hybrid\n")
         config_file.write(f"GRID_SPACING = {repr(config_values['GRID_SPACING'])}\n")
         config_file.write(f"GRID_MARGIN = {repr(config_values['GRID_MARGIN'])}         # Å\n")
         config_file.write(f"GRID_CAP = {repr(config_values['GRID_CAP'])}           # Å cap per axis for blind mode\n")
@@ -681,20 +738,34 @@ def run_setup(args: argparse.Namespace) -> dict:
         config_file.write(
             f"REF_LIGAND_PDB = {repr(config_values['REF_LIGAND_PDB'])}    # path to co-crystal/ref ligand if GRID_MODE='ligand'\n"
         )
-        config_file.write('HOTSPOT_NMS_MINSEP_A = 2.0\n')
-        config_file.write('R_MIN_CAVITY_A = 3.0    # minimum inscribed-sphere radius (Å) for cavity acceptance\n')
+        config_file.write('HOTSPOT_NMS_MINSEP_A = 14.0  # minimum center separation; profile_receptors may tune per receptor\n')
+        config_file.write('R_MIN_CAVITY_A = None    # None = adaptive per receptor; set a float to force a fixed threshold\n')
+        config_file.write('ADAPTIVE_R_MIN_PERCENTILE = 85.0\n')
+        config_file.write('ADAPTIVE_R_MIN_PEAK_PERCENTILE = 10.0\n')
+        config_file.write('ADAPTIVE_R_MIN_FLOOR_A = 2.0\n')
+        config_file.write('ADAPTIVE_R_MIN_CEIL_A = 5.0\n')
+        config_file.write('ADAPTIVE_R_MIN_POCKET_ZONE_MAX_A = 8.0\n')
+        config_file.write('ADAPTIVE_R_MIN_PEAK_WINDOW_A = 4.0\n')
+        config_file.write('MAPS_POCKET_MAX_A = 15.0\n')
+        config_file.write('HOTSPOT_NMS_BOX_FRACTION = 0.40\n')
+        config_file.write('HOTSPOT_NMS_MIN_A = 4.0\n')
+        config_file.write('HOTSPOT_NMS_MAX_A = 25.0\n')
         config_file.write('SURFACE_SHELL__MIN_A = 2.0  # min/max distance from protein surface for surface pockets\n')
         config_file.write('SURFACE_SHELL__MAX_A = 20.0\n')
-        config_file.write('SURFACE_NMS_MINSEP_A = 5        # voxels for non-max suppression of surface pockets\n')
+        config_file.write('SURFACE_NMS_MINSEP_A = 5.0        # Angstrom floor for surface-pocket non-max suppression\n')
         config_file.write('MAX_CENTER_DIST_A = 10.0         \n')
-        config_file.write('CONTACT_SHELL_A = 4.0           # voxels ≤5 Å from surface count as “contact”\n')
+        config_file.write('CONTACT_SHELL_A = 4.0           # Angstrom shell near protein surface counted as contact\n')
         config_file.write('HOTSPOT_BOX_ANGLE = 35       # minimum box side length (Å)\n')
-        config_file.write('MIN_SURFACE_FRAC = 0.01        # ~0.2% of box must be near-surface\n')
+        config_file.write('MIN_SURFACE_FRAC = 0.01        # minimum local near-surface fraction for accepting surface pockets\n')
         config_file.write(f"AUTOSITES = {repr(config_values['AUTOSITES'])}\n")
         config_file.write(f"VINA_CPU = {repr(config_values['VINA_CPU'])}\n")
         config_file.write(f"VINA_SEED = {repr(config_values['VINA_SEED'])}\n")
         config_file.write(f"VINA_EXHAUSTIVENESS = {repr(config_values['VINA_EXHAUSTIVENESS'])}\n")
         config_file.write(f"VINA_NUM_MODES = {repr(config_values['VINA_NUM_MODES'])}\n")
+        config_file.write(f"RECEPTOR_PREP_MODE = {repr(config_values['RECEPTOR_PREP_MODE'])}\n")
+        config_file.write(f"RECEPTOR_PREP_COMMAND = {repr(config_values['RECEPTOR_PREP_COMMAND'])}\n")
+        config_file.write(f"RECEPTOR_PREP_SEED = {repr(config_values['RECEPTOR_PREP_SEED'])}\n")
+        config_file.write(f"RECEPTOR_PREP_FORCE = {repr(config_values['RECEPTOR_PREP_FORCE'])}\n")
         config_file.write(f"BENCHMARK_MODE = {repr(config_values['BENCHMARK_MODE'])}\n")
         print(f"Configuration saved to {config_path} and directories were ensured!")
 
@@ -703,7 +774,26 @@ def run_setup(args: argparse.Namespace) -> dict:
 
     # Check receptor files in MACRO_MOL_DIR for AutoDock column-format issues.
     # This runs after the config is written so macro_mol_dir is confirmed.
-    check_and_fix_receptors(macro_mol_dir)
+    check_and_fix_receptors(
+        macro_mol_dir,
+        prep_mode=args.receptor_prep_mode,
+        prepare_command=args.receptor_prepare_command,
+        seed=args.receptor_prep_seed,
+        force=args.force_receptor_prep,
+    )
+
+    # Auto-generate per-receptor .config.toml sidecars (unless suppressed).
+    # --skip-profile preserves hand-tuned sidecars from previous runs.
+    if not getattr(args, "skip_profile", False):
+        try:
+            from profile_receptors import profile_all
+            profile_all(Path(macro_mol_dir), force=False, dry_run=False)
+        except ImportError:
+            print("[warn] profile_receptors.py not found — skipping per-receptor profiling.")
+        except Exception as exc:
+            print(f"[warn] Per-receptor profiling failed: {exc} — continuing without sidecars.")
+    else:
+        print("[setup] --skip-profile set — skipping per-receptor config generation.")
 
     return config_values
 

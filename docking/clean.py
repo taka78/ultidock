@@ -159,19 +159,19 @@ def clean_config(*, dry: bool):
     _glob_delete(DOCKING_DIR_DEFAULT / "__pycache__", ["config.*.pyc"], dry=dry, only_files=True)
 
 
-def clean_maps(*, dry: bool):
+def clean_maps(*, dry: bool, clean_all: bool = False):
     mm = CFG["MACRO_MOL_DIR"]
     if not mm.exists():
         return
-    # Delete everything in MACRO_MOL_DIR that is NOT a receptor .pdbqt.
+    # Delete everything in MACRO_MOL_DIR that is NOT a receptor .pdbqt (unless --all is passed).
     # Generated outputs include:
     #   - per-receptor subdirs  (e.g. 5i6x_edited/ with S1/ … S6/ inside)
     #   - clash distance grids  (clash_dist.npz.npy, clash_dist.meta.txt)
     #   - hotspot centres       (centers.tsv)
     #   - autogrid products     (*.map, *.fld, *.gpf, *.glg)
-    # All of these sit inside mm as children; we walk one level and skip .pdbqt.
+    # All of these sit inside mm as children; we walk one level and skip .pdbqt unless clean_all.
     for child in sorted(mm.iterdir()):
-        if child.suffix.lower() == ".pdbqt":
+        if child.suffix.lower() == ".pdbqt" and not clean_all:
             print(f"[KEEP] receptor: {child.name}")
             continue
         _safe_delete(child, dry=dry)
@@ -182,7 +182,13 @@ def clean_pycache(*, dry: bool):
     _glob_delete(SCRIPT_DIR, ["*.pyc", "*.pyo"], dry=dry, only_files=True)
 
 def clean_db(*, dry: bool):
-    _safe_delete(CFG["DB_PATH"], dry=dry)
+    db_path = CFG["DB_PATH"]
+    for path in (
+        db_path,
+        Path(f"{db_path}-wal"),
+        Path(f"{db_path}-shm"),
+    ):
+        _safe_delete(path, dry=dry)
 
 def clean_ligands(*, dry: bool):
     # nukes the ligands folder contents (keep the folder)
@@ -190,6 +196,18 @@ def clean_ligands(*, dry: bool):
     if lig.exists():
         for p in lig.iterdir():
             _safe_delete(p, dry=dry)
+
+def clean_sidecars(*, dry: bool):
+    """Delete *.config.toml sidecars from MACRO_MOL_DIR (off by default)."""
+    mm = CFG["MACRO_MOL_DIR"]
+    if not mm.exists():
+        return
+    sidecars = sorted(mm.glob("*.config.toml"))
+    if not sidecars:
+        print("[INFO] No .config.toml sidecars found.")
+        return
+    for s in sidecars:
+        _safe_delete(s, dry=dry)
 
 def parse_args():
     ap = argparse.ArgumentParser(description="Ultidock cleaner", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -199,6 +217,7 @@ def parse_args():
     ap.add_argument("--pycache", action="store_true", help="Clean __pycache__ and *.pyc")
     ap.add_argument("--db", action="store_true", help="Delete results database file")
     ap.add_argument("--ligands", action="store_true", help="Delete all files in LIGANDS_DIR")
+    ap.add_argument("--sidecars", action="store_true", help="Delete *.config.toml sidecars from MACRO_MOL_DIR (off by default, even with --all)")
     ap.add_argument("--all", action="store_true", help="Do everything (build + results + maps + pycache + db + ligands)")
     ap.add_argument("-y", "--yes", action="store_true", help="Actually delete (otherwise perform a dry run)")
     ap.add_argument("--config", action="store_true", help="Delete docking/config.py (and its __pycache__ entry)")
@@ -227,10 +246,11 @@ def main():
 
     if args.build:   clean_build(dry=dry)
     if args.results: clean_results(dry=dry)
-    if args.maps:    clean_maps(dry=dry)
+    if args.maps:    clean_maps(dry=dry, clean_all=args.all)
     if args.pycache: clean_pycache(dry=dry)
     if args.db:      clean_db(dry=dry)
     if args.ligands: clean_ligands(dry=dry)
+    if args.sidecars: clean_sidecars(dry=dry)
     if args.config:  clean_config(dry=dry)
 
     if dry:

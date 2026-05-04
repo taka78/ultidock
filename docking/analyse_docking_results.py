@@ -42,10 +42,10 @@ try:
         DEFAULT_MIN_MODEL,
     )
 except ImportError:
-    DEFAULT_AFFINITY = -7.0        # kcal/mol // you should change this according to how much chemically active your macromolecule.
-    DEFAULT_RMSD_LB = 3.0         # Å // you should change this according to how big your macromolecule's docking site is.
-    DEFAULT_RMSD_UB = 8.0         # Å // you should change this according to how big your macromolecule's docking site is.
-    DEFAULT_MIN_MODEL = 2          # integer // you should change this according to how picky you are.
+    DEFAULT_AFFINITY = -7.0        # kcal/mol // only strong binders (adjust per target)
+    DEFAULT_RMSD_LB = 5.0         # Å // < 5 Å = same pocket; drops cross-site duplicates (Warren et al. 2006)
+    DEFAULT_RMSD_UB = 10.0        # Å // generous; excludes random placements at distant sites
+    DEFAULT_MIN_MODEL = 0          # 0 = include all models (Model 1 is always the best Vina pose!)
 
 # Default output filename: YYYY-MM-DD-docking-results.csv
 DEFAULT_OUT = os.path.join(_db_dir, f"{time.strftime('%Y-%m-%d-%H-%M-%S')}-docking-results.csv")
@@ -126,10 +126,10 @@ def main():
     ext = os.path.splitext(out_path)[1].lower()
     if ext in ('.xlsx', '.xls'):
         df.to_excel(out_path, index=False)
-        print(f"🔹 Results written to Excel: {out_path}")
+        print(f"[*] Results written to Excel: {out_path}")
     else:
         df.to_csv(out_path, index=False)
-        print(f"🔹 Results written to CSV: {out_path}")
+        print(f"[*] Results written to CSV: {out_path}")
 
     # Always print all results to screen
     if not df.empty:

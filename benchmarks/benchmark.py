@@ -427,7 +427,7 @@ def run(args: argparse.Namespace) -> List[BenchmarkResult]:
         if result.returncode != 0:
             print(f"[WARN] Pipeline exited with code {result.returncode}")
         else:
-            print(f"[OK] Completed in {result.wall_time_s:.1f}s; summary → {output_dir}")
+            print(f"[OK] Completed in {result.wall_time_s:.1f}s; summary --> {output_dir}")
     return results
 
 

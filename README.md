@@ -150,8 +150,10 @@ Follow this checklist whenever you want to run Ultidock from a clean workspace.
    ```
 
 4. **Stage inputs:**
-   - Copy your receptor(s) to `docking/MACRO_MOL_DIR/`. Each receptor can live in
-     its own subdirectory if you plan to run multi-site docking.
+   - Copy your receptor(s) to `docking/MACRO_MOL_DIR/`. Ultidock scans files by
+     extension: each `*.pdb` is sanitized and converted to `<input-stem>.pdbqt`,
+     and each `*.pdbqt` is only canonicalized. Generated receptor folders use
+     the same discovered stem, matching the `dock_v02.py`/`make_grids.py` flow.
    - Provide ligands via one of the following:
      - Populate `docking/ligands.wget` with direct links to `.pdbqt.gz` archives
        (one per line). Ultidock will download, verify, and extract them.
