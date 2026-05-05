@@ -1,7 +1,7 @@
 """
 tests/test_pdbqt.py
 ~~~~~~~~~~~~~~~~~~~
-Tests for ultidock.io.pdbqt — lint, normalize, and receptor canonicalization.
+Tests for molguard.io.pdbqt — lint, normalize, and receptor canonicalization.
 
 Test classes:
   TestPdbqtCheck               — pdbqt_check() regression tests
@@ -263,7 +263,7 @@ class TestReceptorCanonicalization:
         out = tmp_path / "canonical.pdbqt"
         canonicalize_receptor(good_receptor, out, timestamp="FIXED")
         first_line = out.read_text("ascii").splitlines()[0]
-        assert first_line.startswith("REMARK Canonicalized by ultidock")
+        assert first_line.startswith("REMARK Canonicalized by molguard")
 
     def test_atom_count_preserved(self, good_receptor, tmp_path):
         """All atoms must be present in output (no drops, assuming no altloc)."""

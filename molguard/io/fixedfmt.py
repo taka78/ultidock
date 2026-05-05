@@ -1,5 +1,5 @@
 """
-ultidock.io.fixedfmt
+molguard.io.fixedfmt
 ~~~~~~~~~~~~~~~~~~~~
 Fixed-width, locale-safe float formatting for AutoDock-era column parsers.
 

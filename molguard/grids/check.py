@@ -1,5 +1,5 @@
 """
-ultidock.grids.check
+molguard.grids.check
 ~~~~~~~~~~~~~~~~~~~~
 Sanity checker for AutoGrid .fld and .map files.
 

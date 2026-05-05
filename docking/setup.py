@@ -323,7 +323,7 @@ def check_and_fix_receptors(
 
     if answer not in ("y", "yes"):
         print("[info] Skipped. You can fix individual files later with:")
-        print("       ultidock pdbqt canonicalize-receptor <file> -o <file>")
+        print("       molguard receptor canonicalize <file> -o <file>")
         return
 
     fixed = 0
@@ -349,7 +349,7 @@ def check_and_fix_receptors(
     print(f"\n  Fixed: {fixed}  Failed: {failed}")
     if failed:
         print("  [warn] Some files could not be fixed automatically.")
-        print("         Check them with: ultidock pdbqt check <file>")
+        print("         Check them with: molguard pdbqt check <file>")
 
 
 def detect_gpu():

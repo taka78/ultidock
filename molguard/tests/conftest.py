@@ -1,5 +1,5 @@
 """
-tests/conftest.py — shared fixtures for the ultidock test suite.
+tests/conftest.py — shared fixtures for the MolGuard test suite.
 """
 from __future__ import annotations
 

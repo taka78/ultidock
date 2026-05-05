@@ -512,7 +512,7 @@ def prepare_receptor_pdbqt(
     input_path = input_path.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="ultidock-receptor-") as tmp_dir_name:
+    with tempfile.TemporaryDirectory(prefix="molguard-receptor-") as tmp_dir_name:
         tmp_dir = Path(tmp_dir_name)
         prepared_input = _materialize_if_gz(input_path, tmp_dir)
         if _effective_suffix(input_path) == ".pdb":

@@ -1,7 +1,7 @@
 """
 tests/test_fixedfmt.py
 ~~~~~~~~~~~~~~~~~~~~~~
-Unit tests for ultidock.io.fixedfmt.
+Unit tests for molguard.io.fixedfmt.
 
 Coverage targets:
   - NaN / Inf rejection

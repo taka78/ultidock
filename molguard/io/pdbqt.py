@@ -1,5 +1,5 @@
 """
-ultidock.io.pdbqt
+molguard.io.pdbqt
 ~~~~~~~~~~~~~~~~~
 PDBQT file linting, in-place numeric normalisation (ligand), and
 deterministic receptor canonicalization.
@@ -231,7 +231,7 @@ def pdbqt_check(path: Path) -> LintReport:
                         i, "b_factor", bfac_raw, "BFAC_OVERFLOW",
                         f"B-factor {bfac_raw} > 99.99 fills the 6-char field with no leading "
                         "space; autogrid4 may misparse adjacent occupancy+bfac as one token. "
-                        "Fix with: ultidock pdbqt canonicalize-receptor <file> -o <file>",
+                        "Fix with: molguard receptor canonicalize <file> -o <file>",
                     ))
             except ValueError:
                 pass  # already caught by _check_numeric_field
@@ -313,7 +313,7 @@ def pdbqt_normalize(path: Path, out_path: Path) -> None:
     if not report.ok:
         msg = (
             f"{len(report.errors)} error(s) in {path.name}; "
-            "run 'ultidock pdbqt check <file>' for details"
+            "run 'molguard pdbqt check <file>' for details"
         )
         raise LintError(msg)
 
@@ -496,7 +496,7 @@ def canonicalize_receptor(
     if not report.ok:
         raise LintError(
             f"{len(report.errors)} error(s) in {infile.name}; "
-            "run 'ultidock pdbqt check <file>' for details"
+            "run 'molguard pdbqt check <file>' for details"
         )
 
     # ── 2. Parse ──────────────────────────────────────────────────────────────
@@ -525,7 +525,7 @@ def canonicalize_receptor(
 
     # ── 6 & 7. Emit ───────────────────────────────────────────────────────────
     ts = timestamp if timestamp is not None else _utc_now()
-    header = f"REMARK Canonicalized by ultidock {__version__} on {ts}"
+    header = f"REMARK Canonicalized by molguard {__version__} on {ts}"
     lines = [header] + [_format_receptor_atom(a) for a in atoms]
     content = ("\n".join(lines) + "\n").encode("ascii")
     outfile.write_bytes(content)

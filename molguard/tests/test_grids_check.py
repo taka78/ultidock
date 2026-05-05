@@ -1,7 +1,7 @@
 """
 tests/test_grids_check.py
 ~~~~~~~~~~~~~~~~~~~~~~~~~
-Tests for ultidock.grids.check — .fld / .map sanity checker.
+Tests for molguard.grids.check — .fld / .map sanity checker.
 """
 
 from __future__ import annotations
