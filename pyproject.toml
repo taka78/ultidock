@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "molguard"
 version = "1.1.1dev"
 requires-python = ">=3.10"
-description = "GPU-accelerated molecular docking pipeline with deterministic I/O"
+description = "Ultidock workflow CLI with MolGuard deterministic molecular I/O"
 dependencies = [
     # I/O hardening CLI
     "click>=8.1",
@@ -29,11 +29,12 @@ dev = [
 ]
 
 [project.scripts]
-ultidock = "molguard.cli:cli"
+ultidock = "cli.ultidock:cli"
+molguard = "cli.molguard:cli"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["molguard*"]
+include = ["molguard*", "cli*"]
 
 [tool.pytest.ini_options]
 testpaths = ["molguard/tests"]
@@ -47,4 +48,3 @@ target-version = "py310"
 python_version = "3.10"
 strict = false
 ignore_missing_imports = true
-

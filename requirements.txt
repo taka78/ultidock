@@ -7,5 +7,5 @@ psutil>=5.9
 matplotlib>=3.7
 pandas>=2.0
 
-# ── Ultidock I/O hardening layer (molguard) ───────────────────────────────────
+# ── Command-line interfaces and MolGuard I/O hardening ────────────────────────
 click>=8.1
