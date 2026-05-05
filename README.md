@@ -230,7 +230,7 @@ most relevant README section instead of burying the terminal in long guidance.
 | `python3 docking/extract.py` | Wrapper around AutoDock Vina's `vina_split` for splitting ligand archives and optional filtering. |
 | `python3 docking/clean.py -y --all` | Removes compiled binaries, cached grids, downloads, and generated configs. Use before starting a fresh run. |
 | `python3 docking/profile_receptors.py` | Generate optional per-receptor `.config.toml` sidecars from receptor geometry. |
-| `python3 benchmarks/cavity_recovery_benchmark.py` | Evaluate receptor-only site finding against co-crystallized ligand centers. |
+| `python3 benchmarks/cavity_recovery_benchmark.py` | Evaluate receptor-only site finding against co-crystallized ligand centers. Supports target-level `--jobs` parallelism. |
 | `python3 benchmarks/download_dude.py` | Download DUD-E receptor, crystal ligand, active, and decoy files. |
 | `ultidock run [options]` | Run the full docking pipeline from anywhere in the repo (no need to `cd docking/`). Forwards all flags to `docking/run.py`. |
 | `ultidock setup [options]` | Run the setup stage through the workflow CLI. |
@@ -505,6 +505,7 @@ ultidock benchmark cavity-recovery \
   --targets ace,bace1,braf,cdk2,cxcr4,drd3,egfr,esr1,gcr,hdac2,hivpr,pde5a,pparg,src,vgfr2 \
   --autosites 6 \
   --site-policy receptor_search \
+  --jobs 4 \
   --force \
   --output-dir benchmarks/results/cavity_recovery
 ```

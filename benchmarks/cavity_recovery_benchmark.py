@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import csv
 import gzip
 import importlib
@@ -24,6 +25,18 @@ DEFAULT_DATASET_ROOT = REPO_ROOT / "benchmarks" / "datasets"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "benchmarks" / "results" / "cavity_recovery"
 DEFAULT_AUTOGRID4 = DOCKING_ROOT / "AUTODOCK_GPU_DIR" / "autogrid" / "autogrid4"
 DEFAULT_THRESHOLDS = (4.0, 5.0, 10.0)
+
+
+def _default_benchmark_jobs() -> int:
+    for env_name in ("ULTIDOCK_BENCHMARK_WORKERS", "ULTIDOCK_WORKERS"):
+        raw_value = os.environ.get(env_name)
+        if raw_value:
+            try:
+                return max(1, int(raw_value))
+            except ValueError:
+                pass
+    cpu_count = os.cpu_count() or 1
+    return max(1, min(4, cpu_count // 2 or 1))
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -737,6 +750,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated target names, or 'all'. Default: all discoverable targets.",
     )
     parser.add_argument("--max-targets", type=int, help="Run only the first N selected targets.")
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=_default_benchmark_jobs(),
+        help=(
+            "Number of targets to process concurrently. "
+            "Can also be set with ULTIDOCK_BENCHMARK_WORKERS."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=42, help="Deterministic receptor-prep seed.")
     parser.add_argument("--autosites", type=int, default=5, help="Number of auto-sites requested.")
     parser.add_argument(
@@ -832,6 +854,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.jobs < 1:
+        raise SystemExit("--jobs must be >= 1")
     normalize_runtime_paths(args)
     dataset_root = Path(args.dataset_root).resolve()
     output_dir = Path(args.output_dir).resolve()
@@ -843,10 +867,12 @@ def main() -> None:
         target_names = target_names[: args.max_targets]
     if not target_names:
         raise SystemExit(f"No targets found in {dataset_root}")
+    args.jobs = min(args.jobs, len(target_names))
 
     print(f"Dataset root: {dataset_root}")
     print(f"Output dir:   {output_dir}")
     print(f"Targets:      {len(target_names)}")
+    print(f"Jobs:         {args.jobs}")
     for name in target_names:
         print(f"  - {name}")
     if args.dry_run:
@@ -860,6 +886,7 @@ def main() -> None:
         "targets": target_names,
         "site_policy": args.site_policy,
         "autosites": args.autosites,
+        "jobs": args.jobs,
         "thresholds_a": thresholds,
         "box_size_a": args.box_size,
         "git_commit": git_value("rev-parse", "HEAD"),
@@ -897,92 +924,15 @@ def run_targets(
     metadata: dict[str, Any],
     make_grids,
 ) -> None:
-    summary_rows: list[dict[str, Any]] = []
-    all_site_rows: list[dict[str, Any]] = []
     centers_root = Path(args.centers_root).resolve() if args.centers_root else None
+    worker_count = min(max(1, int(args.jobs)), len(target_names))
+    results_by_index: dict[int, dict[str, Any]] = {}
 
-    for index, target_name in enumerate(target_names, start=1):
-        print(f"\n[{index}/{len(target_names)}] {target_name}")
-        target_output = output_dir / target_name
-        target_output.mkdir(parents=True, exist_ok=True)
-        receptor_input: Path | None = None
-        reference_ligand: Path | None = None
-        receptor_pdbqt: Path | None = None
-        centers_tsv: Path | None = None
+    if worker_count > 1:
+        print(f"\n[parallel] using {worker_count} target worker(s)")
 
-        try:
-            receptor_input, reference_ligand = load_target_files(dataset_root, target_name)
-            if args.skip_generation:
-                centers_tsv = _first_existing(
-                    existing_centers_candidates(target_name, output_dir, centers_root)
-                )
-                if centers_tsv is None:
-                    raise FileNotFoundError(f"{target_name}: no existing centers.tsv found")
-            else:
-                if make_grids is None:
-                    raise RuntimeError("make_grids module was not loaded")
-                receptor_pdbqt = prepare_receptor(
-                    receptor_input=receptor_input,
-                    output_dir=target_output,
-                    prepare_command=args.receptor_prepare_command,
-                    seed=args.seed,
-                    force=args.force,
-                )
-                centers_tsv = generate_centers(
-                    make_grids=make_grids,
-                    receptor_pdbqt=receptor_pdbqt,
-                    target_output=target_output,
-                    args=args,
-                )
-
-            summary, site_rows, evaluation = evaluate_centers(
-                target_name=target_name,
-                reference_ligand=reference_ligand,
-                centers_tsv=centers_tsv,
-                thresholds=thresholds,
-                box_size=float(args.box_size),
-            )
-            summary["site_policy"] = args.site_policy
-            summary["autosites"] = args.autosites
-            summary["receptor_input"] = str(receptor_input.resolve())
-            summary["receptor_pdbqt"] = str(receptor_pdbqt.resolve()) if receptor_pdbqt else ""
-            (target_output / "evaluation.json").write_text(
-                json.dumps(evaluation, indent=2),
-                encoding="utf-8",
-            )
-            summary_rows.append(summary)
-            all_site_rows.extend(site_rows)
-            print(
-                "  [OK] "
-                f"closest={float(summary['best_distance_a']):.2f} A "
-                f"({summary['best_site_id']})"
-            )
-        except Exception as exc:
-            error = str(exc)
-            print(f"  [FAIL] {error}")
-            (target_output / "failure.json").write_text(
-                json.dumps(
-                    {
-                        "target": target_name,
-                        "error": error,
-                        "traceback": traceback.format_exc(),
-                    },
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
-            summary_rows.append(
-                failure_row(
-                    target_name=target_name,
-                    args=args,
-                    error=error,
-                    reference_ligand=reference_ligand,
-                    receptor_input=receptor_input,
-                    receptor_pdbqt=receptor_pdbqt,
-                    centers_tsv=centers_tsv,
-                )
-            )
-
+    def persist_completed_outputs() -> None:
+        summary_rows, all_site_rows = ordered_benchmark_rows(results_by_index)
         write_run_outputs(
             output_dir=output_dir,
             summary_rows=summary_rows,
@@ -992,8 +942,168 @@ def run_targets(
             metadata=metadata,
         )
 
+    if worker_count == 1:
+        for index, target_name in enumerate(target_names, start=1):
+            results_by_index[index] = run_one_target(
+                index=index,
+                total=len(target_names),
+                target_name=target_name,
+                args=args,
+                dataset_root=dataset_root,
+                output_dir=output_dir,
+                thresholds=thresholds,
+                centers_root=centers_root,
+                make_grids=make_grids,
+            )
+            persist_completed_outputs()
+    else:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="cavity-worker",
+        ) as pool:
+            futures = {
+                pool.submit(
+                    run_one_target,
+                    index=index,
+                    total=len(target_names),
+                    target_name=target_name,
+                    args=args,
+                    dataset_root=dataset_root,
+                    output_dir=output_dir,
+                    thresholds=thresholds,
+                    centers_root=centers_root,
+                    make_grids=make_grids,
+                ): index
+                for index, target_name in enumerate(target_names, start=1)
+            }
+            for future in concurrent.futures.as_completed(futures):
+                index = futures[future]
+                try:
+                    results_by_index[index] = future.result()
+                except Exception as exc:
+                    target_name = target_names[index - 1]
+                    error = str(exc)
+                    print(f"\n[{index}/{len(target_names)}] {target_name}")
+                    print(f"  [FAIL] {error}")
+                    results_by_index[index] = {
+                        "summary": failure_row(
+                            target_name=target_name,
+                            args=args,
+                            error=error,
+                        ),
+                        "site_rows": [],
+                    }
+                persist_completed_outputs()
+                print(f"[progress] completed {len(results_by_index)}/{len(target_names)} target(s)")
+
     print(f"\nSummary CSV: {output_dir / 'summary.csv'}")
     print(f"Sites CSV:   {output_dir / 'sites.csv'}")
+
+
+def ordered_benchmark_rows(
+    results_by_index: dict[int, dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    summary_rows: list[dict[str, Any]] = []
+    all_site_rows: list[dict[str, Any]] = []
+    for index in sorted(results_by_index):
+        result = results_by_index[index]
+        summary_rows.append(result["summary"])
+        all_site_rows.extend(result.get("site_rows", []))
+    return summary_rows, all_site_rows
+
+
+def run_one_target(
+    *,
+    index: int,
+    total: int,
+    target_name: str,
+    args: argparse.Namespace,
+    dataset_root: Path,
+    output_dir: Path,
+    thresholds: list[float],
+    centers_root: Path | None,
+    make_grids,
+) -> dict[str, Any]:
+    print(f"\n[{index}/{total}] {target_name}")
+    target_output = output_dir / target_name
+    target_output.mkdir(parents=True, exist_ok=True)
+    receptor_input: Path | None = None
+    reference_ligand: Path | None = None
+    receptor_pdbqt: Path | None = None
+    centers_tsv: Path | None = None
+
+    try:
+        receptor_input, reference_ligand = load_target_files(dataset_root, target_name)
+        if args.skip_generation:
+            centers_tsv = _first_existing(
+                existing_centers_candidates(target_name, output_dir, centers_root)
+            )
+            if centers_tsv is None:
+                raise FileNotFoundError(f"{target_name}: no existing centers.tsv found")
+        else:
+            if make_grids is None:
+                raise RuntimeError("make_grids module was not loaded")
+            receptor_pdbqt = prepare_receptor(
+                receptor_input=receptor_input,
+                output_dir=target_output,
+                prepare_command=args.receptor_prepare_command,
+                seed=args.seed,
+                force=args.force,
+            )
+            centers_tsv = generate_centers(
+                make_grids=make_grids,
+                receptor_pdbqt=receptor_pdbqt,
+                target_output=target_output,
+                args=args,
+            )
+
+        summary, site_rows, evaluation = evaluate_centers(
+            target_name=target_name,
+            reference_ligand=reference_ligand,
+            centers_tsv=centers_tsv,
+            thresholds=thresholds,
+            box_size=float(args.box_size),
+        )
+        summary["site_policy"] = args.site_policy
+        summary["autosites"] = args.autosites
+        summary["receptor_input"] = str(receptor_input.resolve())
+        summary["receptor_pdbqt"] = str(receptor_pdbqt.resolve()) if receptor_pdbqt else ""
+        (target_output / "evaluation.json").write_text(
+            json.dumps(evaluation, indent=2),
+            encoding="utf-8",
+        )
+        print(
+            "  [OK] "
+            f"closest={float(summary['best_distance_a']):.2f} A "
+            f"({summary['best_site_id']})"
+        )
+        return {"summary": summary, "site_rows": site_rows}
+    except Exception as exc:
+        error = str(exc)
+        print(f"  [FAIL] {error}")
+        (target_output / "failure.json").write_text(
+            json.dumps(
+                {
+                    "target": target_name,
+                    "error": error,
+                    "traceback": traceback.format_exc(),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return {
+            "summary": failure_row(
+                target_name=target_name,
+                args=args,
+                error=error,
+                reference_ligand=reference_ligand,
+                receptor_input=receptor_input,
+                receptor_pdbqt=receptor_pdbqt,
+                centers_tsv=centers_tsv,
+            ),
+            "site_rows": [],
+        }
 
 
 if __name__ == "__main__":

@@ -68,7 +68,7 @@ def _run_python(
     topic: str = "commands",
 ) -> None:
     script = _require_file(script, "script", topic=topic)
-    result = subprocess.run([sys.executable, str(script), *args], cwd=cwd or _repo_root())
+    result = subprocess.run([sys.executable, "-u", str(script), *args], cwd=cwd or _repo_root())
     if result.returncode:
         click.echo(f"       {readme_hint(topic)}", err=True)
     raise SystemExit(result.returncode)
