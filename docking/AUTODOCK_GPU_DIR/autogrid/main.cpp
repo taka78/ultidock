@@ -878,9 +878,9 @@ while( fgets( GPF_line, LINE_LEN, GPF ) != NULL ) {
                  * solvation parameters in PDBQS format... */
 		char field[10], field1[10], field2[10], field3[10];
 
-		(void) strncpy(field1, &line[30], 8); field[8] = '\0';
-		(void) strncpy(field2, &line[38], 8); field[8] = '\0';
-		(void) strncpy(field3, &line[46], 8); field[8] = '\0';
+		(void) strncpy(field1, &line[30], 8); field1[8] = '\0';
+		(void) strncpy(field2, &line[38], 8); field2[8] = '\0';
+		(void) strncpy(field3, &line[46], 8); field3[8] = '\0';
 		if ( 3 != 
                  sscanf(field1, "%lf", &coord[num_receptor_atoms][X]) +
                  sscanf(field2, "%lf", &coord[num_receptor_atoms][Y]) +
