@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 from molguard.io import receptor_prep
@@ -5,6 +6,7 @@ from molguard.io.receptor_prep import (
     _parse_excess_bond_residues,
     prepare_receptor_pdbqt,
     prepare_receptors_in_directory,
+    run_prepare_command,
     sanitize_pdb_for_meeko,
 )
 
@@ -49,6 +51,38 @@ def test_parse_excess_bond_residues_from_meeko_padding_error() -> None:
     )
 
     assert _parse_excess_bond_residues(stderr) == ["A:23", "d:443"]
+
+
+def test_meeko_excess_bond_retry_allows_single_residue(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    input_pdb = tmp_path / "receptor.sanitized.pdb"
+    output_pdbqt = tmp_path / "receptor.pdbqt"
+    input_pdb.write_text("ATOM\n", encoding="ascii")
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        if len(calls) == 1:
+            raise subprocess.CalledProcessError(
+                1,
+                argv,
+                stderr="matched with excess inter-residue bond(s): L:688",
+            )
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(receptor_prep.subprocess, "run", fake_run)
+
+    run_prepare_command(
+        command_template="mk_prepare_receptor.py -i {input} -p {output} --allow_bad_res",
+        input_path=input_pdb,
+        output_path=output_pdbqt,
+        seed=42,
+    )
+
+    assert len(calls) == 2
+    assert calls[1][-2:] == ["--delete_residues", "L:688"]
 
 
 def test_pdbqt_input_is_canonicalized_even_with_prepare_command(

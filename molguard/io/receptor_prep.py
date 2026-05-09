@@ -450,7 +450,7 @@ def run_prepare_command(
         stderr = (exc.stderr or "").strip()
         excess_residues = _parse_excess_bond_residues(stderr)
         if (
-            len(excess_residues) >= 2
+            len(excess_residues) >= 1
             and _is_meeko_receptor_prepare_argv(argv)
             and not _has_delete_residues_arg(argv)
         ):
