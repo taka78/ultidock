@@ -179,13 +179,17 @@ def _write_gpf(gpf_path, receptor_pdbqt, center, npts, spacing, autogrid4_bin="a
         # processing any atom types.  Without it, all maps are zero.
         if param_file:
             f.write(f"parameter_file {param_file}\n")
-        # some builds are picky: put gridfld before gridcenter
+        # AutoGrid reads GPFs sequentially. The receptor atom types must be
+        # declared before the receptor is parsed, and the receptor must be
+        # parsed before gridcenter so coordinates are translated into the grid
+        # frame. If gridcenter comes first, far-from-origin receptors produce
+        # zero C/D maps because atoms never enter the nonbonded cutoff.
         f.write(f"gridfld {fld_name}\n")
         f.write(f"npts {nx} {ny} {nz}\n")
         f.write(f"spacing {float(spacing):.3f}\n")
-        f.write(f"gridcenter {cx:.3f} {cy:.3f} {cz:.3f}\n")
-        f.write(f"receptor {rec_path}\n")
         f.write("receptor_types " + " ".join(_AD4_TYPES) + "\n")
+        f.write(f"receptor {rec_path}\n")
+        f.write(f"gridcenter {cx:.3f} {cy:.3f} {cz:.3f}\n")
         f.write("ligand_types " + " ".join(_AD4_TYPES) + "\n")
         f.write("smooth 0.500\n")
         for t in _AD4_TYPES:
@@ -2669,9 +2673,9 @@ def _write_site_gpf(gpf_path, receptor_pdbqt, center, npts, spacing, autogrid4_b
         f.write(f"gridfld {rec_stem}.maps.fld\n")
         f.write(f"npts {nx} {ny} {nz}\n")
         f.write(f"spacing {float(spacing):.3f}\n")
-        f.write(f"gridcenter {cx:.3f} {cy:.3f} {cz:.3f}\n")
-        f.write(f"receptor {Path(receptor_pdbqt).resolve()}\n")
         f.write(f"receptor_types {' '.join(_AD4_TYPES)}\n")
+        f.write(f"receptor {Path(receptor_pdbqt).resolve()}\n")
+        f.write(f"gridcenter {cx:.3f} {cy:.3f} {cz:.3f}\n")
         f.write(f"ligand_types {' '.join(_AD4_TYPES)}\n")
         f.write("smooth 0.500\n")
         for t in _AD4_TYPES:
