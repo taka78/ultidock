@@ -262,6 +262,7 @@ def autogenerate_centers_tsv(
         "surface_contact_gate": "refined_fixed_shell_v1",
         "core_reserve": "replace_last_v1",
         "axis_reserve": "replace_penultimate_v1",
+        "underfilled_rescue": "edt_tail_fill_v1",
         "r_min_A": "auto" if requested_r_min is None else f"{requested_r_min:.3f}",
         "rmin_floor_A": f"{adaptive_params['floor_A']:.3f}",
         "rmin_ceil_A": f"{adaptive_params['ceil_A']:.3f}",
@@ -464,7 +465,45 @@ def autogenerate_centers_tsv(
             min_recenter_A=2.0,
         )
 
-    # 5) Final fallback: keep the blind box, then add EDT-surface rescue sites.
+    # 5) If normal receptor-search families found some hypotheses but fewer
+    # than requested, fill the tail with geometry-only EDT surface-cleft sites.
+    # This preserves the existing ranked hypotheses and improves recall for
+    # receptors where map scoring underfills the requested portfolio.
+    if policy == "receptor_search" and 0 < len(sites) < expected_site_count:
+        try:
+            pocket_min_A, shell_max_A = _maps_pocket_shell_bounds(
+                r_min_A=profiled_r_min,
+                pocket_max_A=maps_pocket_max_value,
+            )
+            rescue_sites = _edt_surface_sites(
+                receptor_pdbqt,
+                origin,
+                spacing,
+                shape,
+                min_sep_A=candidate_min_sep_A,
+                max_sites=max(0, expected_site_count - len(sites)),
+                box_side_A=float(hotspot_box_ang),
+                pocket_min_A=pocket_min_A,
+                pocket_max_A=shell_max_A,
+            )
+            added = 0
+            for site in rescue_sites:
+                if _take_best_distinct(
+                    [site],
+                    sites,
+                    min_sep_A=_portfolio_min_sep_A(effective_min_sep_A),
+                ) is not None:
+                    sites.append(site)
+                    added += 1
+                if len(sites) >= expected_site_count:
+                    break
+            if added:
+                sites = _relabel_sites(sites)
+                print(f"[centers/rescue] added {added} EDT tail site(s)")
+        except Exception as exc:
+            print(f"[centers/rescue] EDT tail fill skipped due to error: {exc}")
+
+    # 6) Final fallback: keep the blind box, then add EDT-surface rescue sites.
     # This path is intentionally narrow: it only runs when all normal
     # receptor-derived families failed. Keeping blind as S1 preserves the old
     # fallback behavior while allowing extra hypotheses for difficult cases
@@ -516,7 +555,7 @@ def autogenerate_centers_tsv(
             except Exception as exc:
                 print(f"[centers/rescue] EDT rescue skipped due to error: {exc}")
 
-    # 6) Write TSV
+    # 7) Write TSV
     with open(centers_tsv_path, "w") as f:
         f.write("# receptor\tsite_id\tcx\tcy\tcz\tnx\tny\tnz\tspacing\tr_peak\tF\n")
         write_meta = dict(requested_meta)
