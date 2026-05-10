@@ -59,11 +59,14 @@ def test_meeko_excess_bond_retry_allows_single_residue(
 ) -> None:
     input_pdb = tmp_path / "receptor.sanitized.pdb"
     output_pdbqt = tmp_path / "receptor.pdbqt"
+    work_dir = tmp_path / "work"
     input_pdb.write_text("ATOM\n", encoding="ascii")
     calls: list[list[str]] = []
+    run_cwds: list[str | None] = []
 
     def fake_run(argv, **kwargs):
         calls.append(list(argv))
+        run_cwds.append(kwargs.get("cwd"))
         if len(calls) == 1:
             raise subprocess.CalledProcessError(
                 1,
@@ -79,10 +82,12 @@ def test_meeko_excess_bond_retry_allows_single_residue(
         input_path=input_pdb,
         output_path=output_pdbqt,
         seed=42,
+        cwd=work_dir,
     )
 
     assert len(calls) == 2
     assert calls[1][-2:] == ["--delete_residues", "L:688"]
+    assert run_cwds == [str(work_dir.resolve()), str(work_dir.resolve())]
 
 
 def test_pdbqt_input_is_canonicalized_even_with_prepare_command(
@@ -115,6 +120,57 @@ def test_pdbqt_input_is_canonicalized_even_with_prepare_command(
 
     assert digest == "digest-pdbqt"
     assert output_pdbqt.read_text(encoding="ascii") == "CANONICAL\n"
+
+
+def test_pdb_receptor_prep_uses_output_local_scratch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    input_pdb = tmp_path / "raw_receptor.pdb"
+    output_pdbqt = tmp_path / "prepared" / "raw_receptor.pdbqt"
+    input_pdb.write_text("ATOM\n", encoding="ascii")
+    prep_cwds: list[Path | None] = []
+
+    def fake_sanitize(infile: Path, outfile: Path) -> Path:
+        assert infile == input_pdb
+        outfile.write_text("SANITIZED\n", encoding="ascii")
+        return outfile
+
+    def fake_prepare_command(
+        *,
+        command_template: str,
+        input_path: Path,
+        output_path: Path,
+        seed: int,
+        cwd: Path | None,
+    ) -> None:
+        prep_cwds.append(cwd)
+        assert input_path.parent == cwd
+        output_path.write_text("PDBQT\n", encoding="ascii")
+
+    def fake_canonicalize(infile: Path, outfile: Path, *, timestamp: str) -> str:
+        assert infile.read_text(encoding="ascii") == "PDBQT\n"
+        outfile.write_text("CANONICAL\n", encoding="ascii")
+        return "digest-pdb"
+
+    monkeypatch.setattr(receptor_prep, "sanitize_pdb_for_meeko", fake_sanitize)
+    monkeypatch.setattr(receptor_prep, "run_prepare_command", fake_prepare_command)
+    monkeypatch.setattr(receptor_prep, "canonicalize_receptor", fake_canonicalize)
+
+    digest = prepare_receptor_pdbqt(
+        input_path=input_pdb,
+        output_path=output_pdbqt,
+        prepare_command="external-prep {input} {output}",
+        seed=123,
+        timestamp="TEST",
+    )
+
+    assert digest == "digest-pdb"
+    assert output_pdbqt.read_text(encoding="ascii") == "CANONICAL\n"
+    assert len(prep_cwds) == 1
+    assert prep_cwds[0] is not None
+    assert prep_cwds[0].parent == output_pdbqt.parent
+    assert not prep_cwds[0].exists()
 
 
 def test_prepare_receptors_in_directory_uses_input_stems_for_mixed_extensions(

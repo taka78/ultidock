@@ -433,14 +433,19 @@ def run_prepare_command(
     input_path: Path,
     output_path: Path,
     seed: int,
+    cwd: Path | None = None,
 ) -> None:
     """Run a receptor conversion command with the shared Meeko retry policy."""
     argv = format_command_template(command_template, input_path, output_path, seed)
+    run_cwd = Path(cwd).resolve() if cwd is not None else None
+    if run_cwd is not None:
+        run_cwd.mkdir(parents=True, exist_ok=True)
     try:
         subprocess.run(
             argv,
             check=True,
             env=deterministic_env(seed),
+            cwd=str(run_cwd) if run_cwd is not None else None,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -469,6 +474,7 @@ def run_prepare_command(
                     retry_argv,
                     check=True,
                     env=deterministic_env(seed),
+                    cwd=str(run_cwd) if run_cwd is not None else None,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -510,9 +516,13 @@ def prepare_receptor_pdbqt(
     external conversion.
     """
     input_path = input_path.resolve()
+    output_path = output_path.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="molguard-receptor-") as tmp_dir_name:
+    with tempfile.TemporaryDirectory(
+        prefix=".molguard-receptor-",
+        dir=output_path.parent,
+    ) as tmp_dir_name:
         tmp_dir = Path(tmp_dir_name)
         prepared_input = _materialize_if_gz(input_path, tmp_dir)
         if _effective_suffix(input_path) == ".pdb":
@@ -539,6 +549,7 @@ def prepare_receptor_pdbqt(
             input_path=prepared_input,
             output_path=tmp_pdbqt,
             seed=seed,
+            cwd=tmp_dir,
         )
         return canonicalize_receptor(tmp_pdbqt, output_path, timestamp=timestamp)
 

@@ -898,7 +898,12 @@ def main() -> None:
     make_grids = None
     if not args.skip_generation:
         ensure_generation_runtime(args)
-        with tempfile.TemporaryDirectory(prefix="ultidock-cavity-config-") as config_tmp:
+        config_tmp_root = output_dir / "_runtime" / "tmp"
+        config_tmp_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(
+            prefix="config-",
+            dir=config_tmp_root,
+        ) as config_tmp:
             config_dir = Path(config_tmp)
             write_runtime_config(config_dir, args)
             make_grids = load_make_grids(config_dir)
