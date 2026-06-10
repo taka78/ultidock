@@ -174,6 +174,25 @@ def _float_config_override(overrides: dict, key: str, default):
     return float(overrides.get(key, getattr(_config, key, default)))
 
 
+def _centers_tsv_is_provided_manual(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = raw.strip()
+            if not line.startswith("# meta "):
+                continue
+            fields = {}
+            for token in line[len("# meta "):].split():
+                if "=" in token:
+                    key, value = token.split("=", 1)
+                    fields[key.strip()] = value.strip()
+            return fields.get("policy", "").lower() in {"known_site", "manual", "provided"}
+    except OSError:
+        return False
+    return False
+
+
 def prepare_sites_for_docking(receptor_pdbqt: str, macro_dir: str):
     """
     Returns: list[{
@@ -218,24 +237,27 @@ def prepare_sites_for_docking(receptor_pdbqt: str, macro_dir: str):
     grid_mode = (GRID_MODE or "").lower()
 
     if grid_mode == "centers":
-        autogenerate_centers_tsv(
-            receptor_pdbqt=receptor_pdbqt,
-            out_root=str(macro_dir),
-            centers_tsv_path=str(centers_tsv_path),
-            n_sites=_autosites,
-            default_spacing=_spacing,
-            blind_cap=_cap,
-            autogrid4_bin=str(autogrid_bin),
-            hotspot_box_ang=_box_angle,
-            min_sep_A=_nms_minsep,
-            r_min=_r_min,
-            mode=_site_policy,
-            adaptive_r_min_params=_adaptive_r_min_params,
-            maps_pocket_max_A=_maps_pocket_max_A,
-            nms_box_fraction=_nms_box_fraction,
-            nms_min_A=_nms_min_A,
-            nms_max_A=_nms_max_A,
-        )
+        if _centers_tsv_is_provided_manual(centers_tsv_path):
+            print(f"[centers] using provided manual centers from {centers_tsv_path}")
+        else:
+            autogenerate_centers_tsv(
+                receptor_pdbqt=receptor_pdbqt,
+                out_root=str(macro_dir),
+                centers_tsv_path=str(centers_tsv_path),
+                n_sites=_autosites,
+                default_spacing=_spacing,
+                blind_cap=_cap,
+                autogrid4_bin=str(autogrid_bin),
+                hotspot_box_ang=_box_angle,
+                min_sep_A=_nms_minsep,
+                r_min=_r_min,
+                mode=_site_policy,
+                adaptive_r_min_params=_adaptive_r_min_params,
+                maps_pocket_max_A=_maps_pocket_max_A,
+                nms_box_fraction=_nms_box_fraction,
+                nms_min_A=_nms_min_A,
+                nms_max_A=_nms_max_A,
+            )
         sites = ensure_grids_multi_centers(
             receptor_pdbqt=receptor_pdbqt,
             out_root=str(macro_dir),
