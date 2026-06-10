@@ -157,6 +157,7 @@ _RESIDUE_RENAMES: dict[str, str] = {
     "HIY": "HIS",
     "LEV": "LEU",
     "MEU": "MET",
+    "MSE": "MET",
 }
 
 _SOLVENT_RESIDUES: set[str] = {"HOH", "WAT", "TIP", "TIP3", "WAM"}
@@ -193,6 +194,35 @@ def _synthetic_chain_id(segment_index: int) -> str:
     return _SYNTHETIC_CHAIN_IDS[segment_index % len(_SYNTHETIC_CHAIN_IDS)]
 
 
+def _altloc_residue_key(line: str) -> tuple[str, str, str, str]:
+    """Return the residue key used for deterministic altloc selection."""
+    line = line.ljust(80)
+    return (
+        line[21].strip(),
+        line[17:20].strip(),
+        line[22:26].strip(),
+        line[26].strip(),
+    )
+
+
+def _select_primary_altlocs(lines: list[str]) -> dict[tuple[str, str, str, str], str]:
+    """Choose one alternate location per residue, preferring altloc A."""
+    choices: dict[tuple[str, str, str, str], set[str]] = {}
+    for raw in lines:
+        if not raw.startswith(("ATOM", "HETATM")):
+            continue
+        line = raw.rstrip("\n").ljust(80)
+        altloc = line[16].strip()
+        if not altloc:
+            continue
+        choices.setdefault(_altloc_residue_key(line), set()).add(altloc)
+
+    selected: dict[tuple[str, str, str, str], str] = {}
+    for key, altlocs in choices.items():
+        selected[key] = "A" if "A" in altlocs else sorted(altlocs)[0]
+    return selected
+
+
 def _print_receptor_integrity_warning(title: str, details: Iterable[str]) -> None:
     """Print a loud warning when receptor prep removes receptor atoms/residues."""
     border = "!" * 78
@@ -218,11 +248,16 @@ def sanitize_pdb_for_meeko(input_path: Path, output_path: Path) -> Path:
     dropped_solvents: set[str] = set()
     preserved_ions: set[str] = set()
     remapped_residues: dict[tuple[str, str], int] = {}
+    converted_selenomethionine_atoms = 0
     assigned_blank_chain_segments: set[str] = set()
+    resolved_altloc_residues: set[tuple[str, str, str, str]] = set()
+    dropped_altloc_atoms = 0
     blank_segment_index = 0
     blank_segment_has_atoms = False
+    raw_lines = input_path.read_text(encoding="utf-8").splitlines()
+    primary_altlocs = _select_primary_altlocs(raw_lines)
 
-    for raw in input_path.read_text(encoding="utf-8").splitlines():
+    for raw in raw_lines:
         if raw.startswith("TER"):
             line = raw.rstrip("\n").ljust(80)
             if blank_segment_has_atoms and not line[21].strip():
@@ -239,6 +274,14 @@ def sanitize_pdb_for_meeko(input_path: Path, output_path: Path) -> Path:
             continue
 
         line = raw.rstrip("\n").ljust(80)
+        altloc = line[16].strip()
+        if altloc:
+            residue_key = _altloc_residue_key(line)
+            if altloc != primary_altlocs.get(residue_key, altloc):
+                dropped_altloc_atoms += 1
+                continue
+            line = f"{line[:16]} {line[17:]}"
+            resolved_altloc_residues.add(residue_key)
 
         if not line[21].strip():
             chain_id = _synthetic_chain_id(blank_segment_index)
@@ -271,6 +314,14 @@ def sanitize_pdb_for_meeko(input_path: Path, output_path: Path) -> Path:
         occ = line[54:60].strip()
         bfac = line[60:66].strip()
         element = line[76:78].strip()
+
+        atom_name = line[12:16].strip().upper()
+        if line.startswith("ATOM") and resname == "MET" and (
+            atom_name == "SE" or element.upper() == "SE"
+        ):
+            line = f"{line[:12]}{'SD':>4}{line[16:76]}{'S':>2}{line[78:]}"
+            element = "S"
+            converted_selenomethionine_atoms += 1
 
         if not occ:
             line = f"{line[:54]}{1.00:6.2f}{line[60:]}"
@@ -319,10 +370,21 @@ def sanitize_pdb_for_meeko(input_path: Path, output_path: Path) -> Path:
         print(f"  [sanitize] remapped residues: {details}")
     if preserved_ions:
         print(f"  [sanitize] preserved ions as HETATM: {', '.join(sorted(preserved_ions))}")
+    if converted_selenomethionine_atoms:
+        print(
+            "  [sanitize] converted selenomethionine atom(s) to MET sulfur: "
+            f"{converted_selenomethionine_atoms}"
+        )
     if assigned_blank_chain_segments:
         print(
             "  [sanitize] assigned synthetic chain IDs to "
             f"{len(assigned_blank_chain_segments)} blank-chain segment(s)"
+        )
+    if resolved_altloc_residues:
+        print(
+            "  [sanitize] resolved alternate locations for "
+            f"{len(resolved_altloc_residues)} residue(s); "
+            f"dropped {dropped_altloc_atoms} alternate atom(s)"
         )
 
     output_path.write_text("\n".join(lines_out) + "\n", encoding="utf-8")
@@ -332,9 +394,9 @@ def sanitize_pdb_for_meeko(input_path: Path, output_path: Path) -> Path:
 def _auto_receptor_prepare_command() -> str | None:
     """Auto-detect a receptor .pdb -> .pdbqt conversion tool."""
     if shutil.which("mk_prepare_receptor.py"):
-        return "mk_prepare_receptor.py -i {input} -p {output} --allow_bad_res"
+        return "mk_prepare_receptor.py -i {input} -p {output} --allow_bad_res --default_altloc A"
     if shutil.which("mk_prepare_receptor"):
-        return "mk_prepare_receptor -i {input} -p {output} --allow_bad_res"
+        return "mk_prepare_receptor -i {input} -p {output} --allow_bad_res --default_altloc A"
 
     try:
         subprocess.run(
@@ -345,7 +407,7 @@ def _auto_receptor_prepare_command() -> str | None:
         )
         return (
             f"{sys.executable} -m meeko.cli.mk_prepare_receptor "
-            "-i {input} -p {output} --allow_bad_res"
+            "-i {input} -p {output} --allow_bad_res --default_altloc A"
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass

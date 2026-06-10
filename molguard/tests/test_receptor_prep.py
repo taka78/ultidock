@@ -42,6 +42,74 @@ def test_sanitize_pdb_for_meeko_assigns_blank_chain_segments(tmp_path: Path) -> 
     assert ter_lines[1][21] == "B"
 
 
+def test_sanitize_pdb_for_meeko_resolves_altlocs_deterministically(tmp_path: Path) -> None:
+    def atom(serial: int, name: str, altloc: str, resname: str, x: float) -> str:
+        return (
+            f"ATOM  {serial:5d} {name:<4}{altloc}{resname:>3} E{8:4d}    "
+            f"{x:8.3f}{0.0:8.3f}{0.0:8.3f}"
+        )
+
+    input_pdb = tmp_path / "altloc_receptor.pdb"
+    output_pdb = tmp_path / "altloc_receptor.sanitized.pdb"
+    input_pdb.write_text(
+        "\n".join(
+            [
+                atom(1, "N", " ", "ALA", 0.0),
+                atom(2, "CA", "A", "ALA", 1.0),
+                atom(3, "CA", "B", "ALA", 9.0),
+                "TER",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    sanitize_pdb_for_meeko(input_pdb, output_pdb)
+    atom_lines = [
+        line for line in output_pdb.read_text(encoding="utf-8").splitlines()
+        if line.startswith("ATOM")
+    ]
+
+    assert len(atom_lines) == 2
+    assert [line[12:16].strip() for line in atom_lines] == ["N", "CA"]
+    assert all(line[16] == " " for line in atom_lines)
+    assert float(atom_lines[1][30:38]) == 1.0
+
+
+def test_sanitize_pdb_for_meeko_converts_selenomethionine_atoms(tmp_path: Path) -> None:
+    def atom(serial: int, name: str, resname: str, resseq: int, element: str) -> str:
+        return (
+            f"ATOM  {serial:5d} {name:<4} {resname:>3} A{resseq:4d}    "
+            f"{float(serial):8.3f}{0.0:8.3f}{0.0:8.3f}"
+            f"{1.0:6.2f}{0.0:6.2f}          {element:>2}"
+        )
+
+    input_pdb = tmp_path / "selenium_receptor.pdb"
+    output_pdb = tmp_path / "selenium_receptor.sanitized.pdb"
+    input_pdb.write_text(
+        "\n".join(
+            [
+                atom(1, "SE", "MET", 1, "SE"),
+                atom(2, "SE", "MSE", 2, "SE"),
+                "TER",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    sanitize_pdb_for_meeko(input_pdb, output_pdb)
+    atom_lines = [
+        line for line in output_pdb.read_text(encoding="utf-8").splitlines()
+        if line.startswith("ATOM")
+    ]
+
+    assert len(atom_lines) == 2
+    assert [line[17:20].strip() for line in atom_lines] == ["MET", "MET"]
+    assert [line[12:16].strip() for line in atom_lines] == ["SD", "SD"]
+    assert [line[76:78].strip() for line in atom_lines] == ["S", "S"]
+
+
 def test_parse_excess_bond_residues_from_meeko_padding_error() -> None:
     stderr = (
         "matched with excess inter-residue bond(s): A:23\n"
