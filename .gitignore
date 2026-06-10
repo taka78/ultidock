@@ -87,6 +87,14 @@ docking/config.py
 # but downloaded DUD-E datasets and generated maps/results must stay local.
 benchmarks/datasets/
 benchmarks/results/
+benchmarks/backups/
+benchmarks/site_prediction/datasets/raw/
+benchmarks/site_prediction/datasets/normalized/
+benchmarks/site_prediction/manifests/*.jsonl
+
+# External tool checkouts and researcher quickstart output.
+external/
+workspace/
 
 # Local Codex/session state and scratch notes.
 .codex
