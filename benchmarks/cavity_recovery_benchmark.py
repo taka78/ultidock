@@ -25,6 +25,7 @@ DEFAULT_DATASET_ROOT = REPO_ROOT / "benchmarks" / "datasets"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "benchmarks" / "results" / "cavity_recovery"
 DEFAULT_AUTOGRID4 = DOCKING_ROOT / "AUTODOCK_GPU_DIR" / "autogrid" / "autogrid4"
 DEFAULT_THRESHOLDS = (4.0, 5.0, 10.0)
+CAV_EMPS_METHOD_ID = "cav-emps"
 
 
 def _default_benchmark_jobs() -> int:
@@ -182,8 +183,8 @@ def _effective_suffix(path: Path) -> str:
     return path.suffix.lower()
 
 
-def calculate_reference_center(path: Path) -> tuple[float, float, float]:
-    """Calculate a geometric center from MOL2, PDB, or PDBQT coordinates."""
+def calculate_reference_atoms(path: Path) -> list[tuple[float, float, float]]:
+    """Read reference ligand atom coordinates from MOL2, PDB, or PDBQT."""
     opener = gzip.open if path.suffix.lower() == ".gz" else open
     suffix = _effective_suffix(path)
     coords: list[tuple[float, float, float]] = []
@@ -221,11 +222,125 @@ def calculate_reference_center(path: Path) -> tuple[float, float, float]:
 
     if not coords:
         raise ValueError(f"no coordinates found in {path}")
+    return coords
+
+
+def calculate_reference_center(path: Path) -> tuple[float, float, float]:
+    """Calculate a geometric center from MOL2, PDB, or PDBQT coordinates."""
+    coords = calculate_reference_atoms(path)
     count = float(len(coords))
     return (
         sum(coord[0] for coord in coords) / count,
         sum(coord[1] for coord in coords) / count,
         sum(coord[2] for coord in coords) / count,
+    )
+
+
+def distance_to_closest_reference_atom(
+    center: tuple[float, float, float],
+    atoms: list[tuple[float, float, float]],
+) -> float:
+    """P2Rank-style DCC: predicted pocket center to closest ligand atom."""
+    return min(euclidean_distance(center, atom) for atom in atoms)
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _center_header(parts: list[str]) -> list[str]:
+    return [part.strip().lstrip("#").strip().lower() for part in parts]
+
+
+def parse_scored_centers_tsv(path: Path) -> list[dict[str, Any]]:
+    """Parse centers.tsv while preserving site labels and the optional F score."""
+    rows: list[dict[str, Any]] = []
+    header: list[str] | None = None
+
+    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        parts = line.split("\t") if "\t" in line else [part.strip() for part in line.split(",")]
+        normalized = _center_header(parts)
+
+        if line.startswith("#"):
+            if {"site_id", "cx", "cy", "cz"}.issubset(set(normalized)) or {
+                "site_id",
+                "center_x",
+                "center_y",
+                "center_z",
+            }.issubset(set(normalized)):
+                header = normalized
+            continue
+
+        if header is None and (
+            {"site_id", "cx", "cy", "cz"}.issubset(set(normalized))
+            or {"site_id", "center_x", "center_y", "center_z"}.issubset(set(normalized))
+        ):
+            header = normalized
+            continue
+
+        if header is not None:
+            row = {key: value for key, value in zip(header, parts)}
+            site_id = row.get("site_id") or row.get("site") or row.get("id")
+            x = _float_or_none(row.get("cx") or row.get("center_x") or row.get("x"))
+            y = _float_or_none(row.get("cy") or row.get("center_y") or row.get("y"))
+            z = _float_or_none(row.get("cz") or row.get("center_z") or row.get("z"))
+            score = _float_or_none(row.get("f") or row.get("fitness_score") or row.get("method_score"))
+            raw_score = _float_or_none(row.get("raw_f") or row.get("raw_score"))
+            r_peak = _float_or_none(row.get("r_peak"))
+            family = row.get("family") or ""
+            portfolio_role = row.get("portfolio_role") or row.get("role") or ""
+            selection_score = _float_or_none(row.get("selection_score"))
+            center_closeness = _float_or_none(row.get("center_closeness"))
+        else:
+            if len(parts) < 5:
+                continue
+            site_id = parts[1].strip()
+            x = _float_or_none(parts[2])
+            y = _float_or_none(parts[3])
+            z = _float_or_none(parts[4])
+            r_peak = _float_or_none(parts[9]) if len(parts) > 9 else None
+            score = _float_or_none(parts[10]) if len(parts) > 10 else None
+            raw_score = _float_or_none(parts[11]) if len(parts) > 11 else None
+            family = parts[12] if len(parts) > 12 else ""
+            portfolio_role = parts[13] if len(parts) > 13 else ""
+            selection_score = _float_or_none(parts[14]) if len(parts) > 14 else None
+            center_closeness = _float_or_none(parts[15]) if len(parts) > 15 else None
+
+        if not site_id or x is None or y is None or z is None:
+            continue
+        rows.append(
+            {
+                "site_id": str(site_id),
+                "center": (x, y, z),
+                "fitness_score": score,
+                "raw_fitness_score": raw_score,
+                "r_peak": r_peak,
+                "family": family,
+                "portfolio_role": portfolio_role,
+                "selection_score": selection_score,
+                "center_closeness": center_closeness,
+            }
+        )
+    return rows
+
+
+def rank_centers_by_fitness(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return centers ranked by F/fitness score, keeping labels unchanged."""
+    return sorted(
+        rows,
+        key=lambda row: (
+            row.get("fitness_score") is None,
+            -(float(row["fitness_score"]) if row.get("fitness_score") is not None else 0.0),
+            _site_sort_key(str(row["site_id"])),
+        ),
     )
 
 
@@ -507,6 +622,7 @@ def generate_centers(
     make_grids,
     receptor_pdbqt: Path,
     target_output: Path,
+    maps_root: Path,
     args: argparse.Namespace,
 ) -> Path:
     centers_tsv = target_output / "centers.tsv"
@@ -518,7 +634,7 @@ def generate_centers(
     r_min_arg: float | None = float(args.r_min) if args.r_min is not None else None
     make_grids.autogenerate_centers_tsv(
         receptor_pdbqt=str(receptor_pdbqt),
-        out_root=str(target_output / "maps"),
+        out_root=str(maps_root),
         centers_tsv_path=str(centers_tsv),
         n_sites=int(args.autosites),
         default_spacing=float(args.grid_spacing),
@@ -559,21 +675,41 @@ def evaluate_centers(
     thresholds: list[float],
     box_size: float,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
+    reference_atoms = calculate_reference_atoms(reference_ligand)
     crystal_center = calculate_reference_center(reference_ligand)
-    predicted_sites = parse_centers_tsv(centers_tsv)
+    scored_sites = parse_scored_centers_tsv(centers_tsv)
+    predicted_sites = {str(site["site_id"]): site["center"] for site in scored_sites}
     if not predicted_sites:
         raise ValueError(f"no predicted sites found in {centers_tsv}")
+
+    ranked_by_fitness = rank_centers_by_fitness(scored_sites)
+    rank_by_site_id = {
+        str(site["site_id"]): rank for rank, site in enumerate(ranked_by_fitness, start=1)
+    }
+    site_score_by_id = {str(site["site_id"]): site.get("fitness_score") for site in scored_sites}
+    raw_score_by_id = {str(site["site_id"]): site.get("raw_fitness_score") for site in scored_sites}
+    r_peak_by_id = {str(site["site_id"]): site.get("r_peak") for site in scored_sites}
+    family_by_id = {str(site["site_id"]): site.get("family") for site in scored_sites}
+    role_by_id = {str(site["site_id"]): site.get("portfolio_role") for site in scored_sites}
 
     site_rows: list[dict[str, Any]] = []
     for site_order, site_id in enumerate(sorted(predicted_sites, key=_site_sort_key), start=1):
         center = predicted_sites[site_id]
         distance = euclidean_distance(crystal_center, center)
+        dcc = distance_to_closest_reference_atom(center, reference_atoms)
         delta = vector_delta(crystal_center, center)
         row: dict[str, Any] = {
             "target": target_name,
             "site_id": site_id,
             "site_order": site_order,
+            "rank_by_fitness": rank_by_site_id.get(site_id, site_order),
+            "fitness_score": site_score_by_id.get(site_id),
+            "raw_fitness_score": raw_score_by_id.get(site_id),
+            "r_peak": r_peak_by_id.get(site_id),
+            "family": family_by_id.get(site_id),
+            "portfolio_role": role_by_id.get(site_id),
             "distance_a": distance,
+            "dcc_a": dcc,
             "center_x": center[0],
             "center_y": center[1],
             "center_z": center[2],
@@ -582,19 +718,27 @@ def evaluate_centers(
             "delta_z": delta[2],
             "required_cube_side_a": required_cube_side(delta),
             f"within_{threshold_label(box_size)}_cube": within_cube(delta, box_size),
+            "source": str(centers_tsv.resolve()),
         }
         for threshold in thresholds:
             row[f"hit_at_{threshold_label(threshold)}"] = distance <= threshold
+            row[f"dcc_hit_at_{threshold_label(threshold)}"] = dcc <= threshold
         site_rows.append(row)
 
     best = min(site_rows, key=lambda row: float(row["distance_a"]))
+    best_dcc = min(site_rows, key=lambda row: float(row["dcc_a"]))
+    rank1 = min(site_rows, key=lambda row: int(row["rank_by_fitness"]))
+    rank3_pool = [row for row in site_rows if int(row["rank_by_fitness"]) <= 3]
+    rank3_best = min(rank3_pool, key=lambda row: float(row["dcc_a"]))
     summary: dict[str, Any] = {
         "target": target_name,
         "status": "ok",
         "n_sites": len(site_rows),
+        "avg_predicted_sites": len(site_rows),
         "crystal_center_x": crystal_center[0],
         "crystal_center_y": crystal_center[1],
         "crystal_center_z": crystal_center[2],
+        "reference_ligand_atom_count": len(reference_atoms),
         "best_site_id": best["site_id"],
         "best_site_order": best["site_order"],
         "best_distance_a": best["distance_a"],
@@ -602,6 +746,18 @@ def evaluate_centers(
         f"best_within_{threshold_label(box_size)}_cube": best[
             f"within_{threshold_label(box_size)}_cube"
         ],
+        "best_dcc_site_id": best_dcc["site_id"],
+        "best_dcc_rank_by_fitness": best_dcc["rank_by_fitness"],
+        "best_dcc_a": best_dcc["dcc_a"],
+        "rank1_site_id": rank1["site_id"],
+        "rank1_fitness_score": rank1["fitness_score"],
+        "rank1_family": rank1["family"],
+        "rank1_portfolio_role": rank1["portfolio_role"],
+        "rank1_distance_a": rank1["distance_a"],
+        "rank1_dcc_a": rank1["dcc_a"],
+        "rank3_best_site_id": rank3_best["site_id"],
+        "rank3_best_rank_by_fitness": rank3_best["rank_by_fitness"],
+        "rank3_best_dcc_a": rank3_best["dcc_a"],
         "reference_ligand": str(reference_ligand.resolve()),
         "centers_tsv": str(centers_tsv.resolve()),
         "error": "",
@@ -609,6 +765,11 @@ def evaluate_centers(
     for threshold in thresholds:
         label = threshold_label(threshold)
         summary[f"any_site_success_at_{label}"] = bool(best[f"hit_at_{label}"])
+        summary[f"rank1_dcc_success_at_{label}"] = bool(rank1[f"dcc_hit_at_{label}"])
+        summary[f"rank3_dcc_success_at_{label}"] = any(
+            bool(row[f"dcc_hit_at_{label}"]) for row in rank3_pool
+        )
+        summary[f"any_site_dcc_success_at_{label}"] = bool(best_dcc[f"dcc_hit_at_{label}"])
 
     evaluation = {
         "target": target_name,
@@ -619,6 +780,8 @@ def evaluate_centers(
             "y": crystal_center[1],
             "z": crystal_center[2],
         },
+        "reference_ligand_atom_count": len(reference_atoms),
+        "ranking": "site_id labels are names; publication ranks use descending F fitness_score",
         "thresholds_a": thresholds,
         "box_size_a": box_size,
         "summary": summary,
@@ -646,6 +809,43 @@ def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> 
             writer.writerow({key: csv_value(row.get(key, "")) for key in fieldnames})
 
 
+def write_predictions_tsv(path: Path, site_rows: list[dict[str, Any]]) -> None:
+    """Write normalized prediction centers for cross-dataset evaluators."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "target_id",
+        "method",
+        "rank",
+        "site_id",
+        "center_x",
+        "center_y",
+        "center_z",
+        "score",
+        "source",
+    ]
+    ordered = sorted(
+        site_rows,
+        key=lambda row: (str(row["target"]), int(row["rank_by_fitness"]), str(row["site_id"])),
+    )
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t")
+        writer.writeheader()
+        for row in ordered:
+            writer.writerow(
+                {
+                    "target_id": row["target"],
+                    "method": CAV_EMPS_METHOD_ID,
+                    "rank": int(row["rank_by_fitness"]),
+                    "site_id": row["site_id"],
+                    "center_x": csv_value(row["center_x"]),
+                    "center_y": csv_value(row["center_y"]),
+                    "center_z": csv_value(row["center_z"]),
+                    "score": csv_value(row.get("fitness_score")),
+                    "source": row.get("source", ""),
+                }
+            )
+
+
 def write_run_outputs(
     *,
     output_dir: Path,
@@ -663,17 +863,34 @@ def write_run_outputs(
         "site_policy",
         "autosites",
         "n_sites",
+        "avg_predicted_sites",
         "crystal_center_x",
         "crystal_center_y",
         "crystal_center_z",
+        "reference_ligand_atom_count",
         "best_site_id",
         "best_site_order",
         "best_distance_a",
         "best_required_cube_side_a",
         f"best_within_{box_label}_cube",
+        "best_dcc_site_id",
+        "best_dcc_rank_by_fitness",
+        "best_dcc_a",
+        "rank1_site_id",
+        "rank1_fitness_score",
+        "rank1_family",
+        "rank1_portfolio_role",
+        "rank1_distance_a",
+        "rank1_dcc_a",
+        "rank3_best_site_id",
+        "rank3_best_rank_by_fitness",
+        "rank3_best_dcc_a",
     ]
     for label in threshold_labels:
         summary_fields.append(f"any_site_success_at_{label}")
+        summary_fields.append(f"rank1_dcc_success_at_{label}")
+        summary_fields.append(f"rank3_dcc_success_at_{label}")
+        summary_fields.append(f"any_site_dcc_success_at_{label}")
     summary_fields.extend(
         ["reference_ligand", "receptor_input", "receptor_pdbqt", "centers_tsv", "error"]
     )
@@ -682,7 +899,14 @@ def write_run_outputs(
         "target",
         "site_id",
         "site_order",
+        "rank_by_fitness",
+        "fitness_score",
+        "raw_fitness_score",
+        "r_peak",
+        "family",
+        "portfolio_role",
         "distance_a",
+        "dcc_a",
         "center_x",
         "center_y",
         "center_z",
@@ -692,10 +916,14 @@ def write_run_outputs(
         "required_cube_side_a",
         f"within_{box_label}_cube",
     ]
-    site_fields.extend(f"hit_at_{label}" for label in threshold_labels)
+    for label in threshold_labels:
+        site_fields.append(f"hit_at_{label}")
+        site_fields.append(f"dcc_hit_at_{label}")
+    site_fields.append("source")
 
     write_csv(output_dir / "summary.csv", summary_rows, summary_fields)
     write_csv(output_dir / "sites.csv", site_rows, site_fields)
+    write_predictions_tsv(output_dir / "predictions.tsv", site_rows)
 
     summary_json = {
         "metadata": metadata,
@@ -838,6 +1066,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Regenerate receptor PDBQT and centers.tsv even when cached outputs exist.",
     )
     parser.add_argument(
+        "--keep-artifacts",
+        action="store_true",
+        help=(
+            "Keep per-target AutoGrid maps and scratch files in the result directory. "
+            "By default, heavy map artifacts are written to temporary workdirs and removed."
+        ),
+    )
+    parser.add_argument(
+        "--work-root",
+        type=Path,
+        help=(
+            "Temporary work root for heavy benchmark artifacts when --keep-artifacts is not set. "
+            "Defaults to <output-dir>/_runtime/work."
+        ),
+    )
+    parser.add_argument(
         "--no-auto-setup",
         action="store_true",
         help="Fail instead of running minimal setup.py when config.py or AutoGrid is missing.",
@@ -860,6 +1104,10 @@ def main() -> None:
     dataset_root = Path(args.dataset_root).resolve()
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    if args.work_root is None:
+        args.work_root = output_dir / "_runtime" / "work"
+    else:
+        args.work_root = Path(args.work_root).resolve()
     thresholds = parse_thresholds(args.thresholds)
 
     target_names = parse_targets(args.targets, dataset_root)
@@ -887,6 +1135,8 @@ def main() -> None:
         "site_policy": args.site_policy,
         "autosites": args.autosites,
         "jobs": args.jobs,
+        "keep_artifacts": bool(args.keep_artifacts),
+        "work_root": str(Path(args.work_root).resolve()),
         "thresholds_a": thresholds,
         "box_size_a": args.box_size,
         "git_commit": git_value("rev-parse", "HEAD"),
@@ -1055,12 +1305,25 @@ def run_one_target(
                 seed=args.seed,
                 force=args.force,
             )
-            centers_tsv = generate_centers(
-                make_grids=make_grids,
-                receptor_pdbqt=receptor_pdbqt,
-                target_output=target_output,
-                args=args,
-            )
+            if args.keep_artifacts:
+                centers_tsv = generate_centers(
+                    make_grids=make_grids,
+                    receptor_pdbqt=receptor_pdbqt,
+                    target_output=target_output,
+                    maps_root=target_output / "maps",
+                    args=args,
+                )
+            else:
+                work_root = Path(args.work_root)
+                work_root.mkdir(parents=True, exist_ok=True)
+                with tempfile.TemporaryDirectory(prefix=f"{target_name}-", dir=work_root) as work_dir:
+                    centers_tsv = generate_centers(
+                        make_grids=make_grids,
+                        receptor_pdbqt=receptor_pdbqt,
+                        target_output=target_output,
+                        maps_root=Path(work_dir) / "maps",
+                        args=args,
+                    )
 
         summary, site_rows, evaluation = evaluate_centers(
             target_name=target_name,
