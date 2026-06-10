@@ -39,9 +39,21 @@ ADAPTIVE_R_MIN_CEIL_A = float(getattr(_config, "ADAPTIVE_R_MIN_CEIL_A", 5.0))
 ADAPTIVE_R_MIN_POCKET_ZONE_MAX_A = float(getattr(_config, "ADAPTIVE_R_MIN_POCKET_ZONE_MAX_A", 8.0))
 ADAPTIVE_R_MIN_PEAK_WINDOW_A = float(getattr(_config, "ADAPTIVE_R_MIN_PEAK_WINDOW_A", 4.0))
 MAPS_POCKET_MAX_A = float(getattr(_config, "MAPS_POCKET_MAX_A", 15.0))
+MAPS_CONVOLUTION_RADIUS_A = float(getattr(_config, "MAPS_CONVOLUTION_RADIUS_A", 8.0))
+MAPS_GAUSSIAN_SIGMA_A = float(
+    getattr(_config, "MAPS_GAUSSIAN_SIGMA_A", max(1.0, 0.5 * MAPS_CONVOLUTION_RADIUS_A))
+)
+MAPS_C_WEIGHT = float(getattr(_config, "MAPS_C_WEIGHT", 0.42))
+MAPS_E_WEIGHT = float(getattr(_config, "MAPS_E_WEIGHT", 0.28))
+MAPS_D_WEIGHT = float(getattr(_config, "MAPS_D_WEIGHT", 0.30))
+MAPS_EDT_WEIGHT_FLOOR = float(getattr(_config, "MAPS_EDT_WEIGHT_FLOOR", 0.15))
+MAPS_EDT_WEIGHT_POWER = float(getattr(_config, "MAPS_EDT_WEIGHT_POWER", 1.25))
 HOTSPOT_NMS_BOX_FRACTION = float(getattr(_config, "HOTSPOT_NMS_BOX_FRACTION", 0.40))
 HOTSPOT_NMS_MIN_A = float(getattr(_config, "HOTSPOT_NMS_MIN_A", 4.0))
 HOTSPOT_NMS_MAX_A = float(getattr(_config, "HOTSPOT_NMS_MAX_A", 25.0))
+INTERNAL_MEDOID_MIN_DEPTH_FRACTION = float(
+    getattr(_config, "INTERNAL_MEDOID_MIN_DEPTH_FRACTION", 0.50)
+)
 
 
 # ── AD4 parameter-file locator ────────────────────────────────────────────
@@ -267,6 +279,12 @@ def autogenerate_centers_tsv(
         "core_reserve": "replace_last_v1",
         "axis_reserve": "replace_penultimate_v1",
         "underfilled_rescue": "edt_tail_fill_v1",
+        "geometry_reserve_fill": "underfilled_tail_v1",
+        "surface_scoring": "isotropic_gaussian_CED_edt_v1",
+        "surface_kernel": f"gaussian_sigma_A={MAPS_GAUSSIAN_SIGMA_A:.3f}",
+        "surface_weights": f"C={MAPS_C_WEIGHT:.3f},E={MAPS_E_WEIGHT:.3f},D={MAPS_D_WEIGHT:.3f}",
+        "surface_edt_weight": f"floor={MAPS_EDT_WEIGHT_FLOOR:.3f},power={MAPS_EDT_WEIGHT_POWER:.3f}",
+        "ranking_score": "portfolio_role_prior_v2",
         "r_min_A": "auto" if requested_r_min is None else f"{requested_r_min:.3f}",
         "rmin_floor_A": f"{adaptive_params['floor_A']:.3f}",
         "rmin_ceil_A": f"{adaptive_params['ceil_A']:.3f}",
@@ -485,22 +503,18 @@ def autogenerate_centers_tsv(
                 spacing,
                 shape,
                 min_sep_A=candidate_min_sep_A,
-                max_sites=max(0, expected_site_count - len(sites)),
+                max_sites=max(expected_site_count * 4, 24),
                 box_side_A=float(hotspot_box_ang),
                 pocket_min_A=pocket_min_A,
                 pocket_max_A=shell_max_A,
             )
-            added = 0
-            for site in rescue_sites:
-                if _take_best_distinct(
-                    [site],
-                    sites,
-                    min_sep_A=_portfolio_min_sep_A(effective_min_sep_A),
-                ) is not None:
-                    sites.append(site)
-                    added += 1
-                if len(sites) >= expected_site_count:
-                    break
+            added = _append_distinct_tail_sites(
+                sites,
+                rescue_sites,
+                target_count=expected_site_count,
+                portfolio_role="edt_tail_rescue",
+                min_sep_A=_portfolio_min_sep_A(effective_min_sep_A),
+            )
             if added:
                 sites = _relabel_sites(sites)
                 print(f"[centers/rescue] added {added} EDT tail site(s)")
@@ -527,6 +541,8 @@ def autogenerate_centers_tsv(
                 spacing=sp,
                 r_peak=float(blind_cap) / 4.0,
                 F=0.0,
+                family="blind_fallback",
+                portfolio_role="blind_fallback",
             )
         ]
         if policy in {"surface", "hybrid", "receptor_search", "exhaustive_search"}:
@@ -541,34 +557,73 @@ def autogenerate_centers_tsv(
                     spacing,
                     shape,
                     min_sep_A=candidate_min_sep_A,
-                    max_sites=max(0, expected_site_count - len(sites)),
+                    max_sites=max(expected_site_count * 4, 24),
                     box_side_A=float(hotspot_box_ang),
                     pocket_min_A=pocket_min_A,
                     pocket_max_A=shell_max_A,
                 )
-                for site in rescue_sites:
-                    if _take_best_distinct(
-                        [site],
-                        sites,
-                        min_sep_A=_portfolio_min_sep_A(effective_min_sep_A),
-                    ) is not None:
-                        sites.append(site)
-                    if len(sites) >= expected_site_count:
-                        break
+                _append_distinct_tail_sites(
+                    sites,
+                    rescue_sites,
+                    target_count=expected_site_count,
+                    portfolio_role="edt_tail_rescue",
+                    min_sep_A=_portfolio_min_sep_A(effective_min_sep_A),
+                )
                 sites = _relabel_sites(sites)
             except Exception as exc:
                 print(f"[centers/rescue] EDT rescue skipped due to error: {exc}")
 
-    # 7) Write TSV
+    # 7) Last-resort geometry reserve fill. This is deliberately lower priority
+    # than map, hybrid, internal, and EDT rescue hypotheses; it exists to honor
+    # the requested portfolio size without promoting reserve boxes as confident
+    # binding-site predictions.
+    if policy == "receptor_search" and 0 < len(sites) < expected_site_count:
+        reserve_candidates = []
+        axis_sites = _receptor_axis_reserve_sites(
+            receptor_pdbqt,
+            preserved_sites=sites,
+            box_side_A=float(hotspot_box_ang),
+            spacing=float(spacing),
+        )
+        core_site = _receptor_core_reserve_site(
+            receptor_pdbqt,
+            box_side_A=float(hotspot_box_ang),
+            spacing=float(spacing),
+        )
+        if core_site is not None:
+            reserve_candidates.append(core_site)
+        reserve_candidates.extend(axis_sites)
+        added = _append_distinct_tail_sites(
+            sites,
+            reserve_candidates,
+            target_count=expected_site_count,
+            portfolio_role="reserve",
+            min_sep_A=_portfolio_min_sep_A(effective_min_sep_A),
+        )
+        if added:
+            sites = _relabel_sites(sites)
+            print(f"[centers/reserve] added {added} geometry reserve site(s)")
+
+    if policy == "receptor_search":
+        sites = _assign_receptor_search_fitness_scores(sites)
+
+    # 8) Write TSV
     with open(centers_tsv_path, "w") as f:
-        f.write("# receptor\tsite_id\tcx\tcy\tcz\tnx\tny\tnz\tspacing\tr_peak\tF\n")
+        f.write(
+            "# receptor\tsite_id\tcx\tcy\tcz\tnx\tny\tnz\tspacing\tr_peak\tF\t"
+            "raw_F\tfamily\tportfolio_role\tselection_score\tcenter_closeness\n"
+        )
         write_meta = dict(requested_meta)
         write_meta["site_count"] = str(len(sites))
         f.write("# meta " + " ".join(f"{key}={value}" for key, value in write_meta.items()) + "\n")
         for s in sites:
             f.write(
                 f"{rec_stem}\t{s['site_id']}\t{s['cx']:.3f}\t{s['cy']:.3f}\t{s['cz']:.3f}\t"
-                f"{s['nx']}\t{s['ny']}\t{s['nz']}\t{s['spacing']:.3f}\t{s.get('r_peak', 2.5):.2f}\t{s.get('F', 1.0):.3f}\n"
+                f"{s['nx']}\t{s['ny']}\t{s['nz']}\t{s['spacing']:.3f}\t"
+                f"{s.get('r_peak', 2.5):.2f}\t{s.get('F', 1.0):.3f}\t"
+                f"{s.get('raw_F', s.get('F', 1.0)):.3f}\t"
+                f"{s.get('family', '')}\t{s.get('portfolio_role', '')}\t"
+                f"{s.get('selection_score', '')}\t{s.get('center_closeness', '')}\n"
             )
     print(f"[centers] wrote {len(sites)} --> {centers_tsv_path}")
     return str(centers_tsv_path)
@@ -703,6 +758,48 @@ def _sigmoid_stable(x):
     # clip to avoid overflow; equivalent to logistic for our purposes
     x = np.clip(x, -30.0, 30.0)
     return 1.0 / (1.0 + np.exp(-x))
+
+
+def _positive_signal_unit_interval(values: np.ndarray, *, floor: float = 1e-6) -> np.ndarray:
+    """Robustly scale nonnegative map support to [0, 1]."""
+    values = np.asarray(values, dtype=np.float32)
+    finite = np.isfinite(values)
+    signal = np.zeros_like(values, dtype=np.float32)
+    positive = values[finite & (values > floor)]
+    if positive.size < 8:
+        return signal
+    lo = float(np.percentile(positive, 5.0))
+    hi = float(np.percentile(positive, 95.0))
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo + 1e-6:
+        lo = 0.0
+        hi = float(np.max(positive))
+    if hi <= lo + 1e-6:
+        return signal
+    signal[finite] = np.clip((values[finite] - lo) / (hi - lo + 1e-6), 0.0, 1.0)
+    return signal.astype(np.float32)
+
+
+def _normalize_positive_weights(weights: dict[str, float]) -> dict[str, float]:
+    cleaned = {key: max(0.0, float(value)) for key, value in weights.items()}
+    total = sum(cleaned.values())
+    if total <= 0.0:
+        return {key: 1.0 / len(cleaned) for key in cleaned}
+    return {key: value / total for key, value in cleaned.items()}
+
+
+def _continuous_edt_weight(
+    edt_grid: np.ndarray,
+    *,
+    pocket_min_A: float,
+    pocket_max_A: float,
+    floor: float = MAPS_EDT_WEIGHT_FLOOR,
+    power: float = MAPS_EDT_WEIGHT_POWER,
+) -> np.ndarray:
+    """Continuous enclosure/depth weight for pocket voxels."""
+    span = max(1e-6, float(pocket_max_A) - float(pocket_min_A))
+    depth = np.clip((edt_grid.astype(np.float32) - float(pocket_min_A)) / span, 0.0, 1.0)
+    floor = float(np.clip(floor, 0.0, 1.0))
+    return floor + (1.0 - floor) * np.power(depth, max(0.1, float(power)))
 
 
 def _maps_are_degenerate(C, E, D) -> bool:
@@ -893,6 +990,42 @@ def _take_best_distinct(
     return None
 
 
+def _append_distinct_tail_sites(
+    selected: list[dict],
+    candidates: list[dict],
+    *,
+    target_count: int,
+    portfolio_role: str,
+    min_sep_A: float,
+) -> int:
+    """
+    Fill only the tail of an underfilled portfolio.
+
+    The normal portfolio separation is intentionally conservative for docking
+    boxes.  When a difficult receptor underfills, ask for many rescue candidates
+    and relax the tail separation gradually rather than returning too few sites.
+    """
+    if len(selected) >= int(target_count) or not candidates:
+        return 0
+    primary = max(0.0, float(min_sep_A))
+    schedule = [
+        primary,
+        max(5.0, 0.75 * primary),
+        max(3.0, 0.50 * primary),
+        2.0,
+    ]
+    added = 0
+    for site in candidates:
+        if len(selected) >= int(target_count):
+            return added
+        for sep in schedule:
+            if _take_best_distinct([site], selected, min_sep_A=sep) is not None:
+                selected.append(_clone_site(site, portfolio_role=portfolio_role))
+                added += 1
+                break
+    return added
+
+
 def _rank_union_sites(*site_groups: list[dict]) -> list[dict]:
     union = [site for group in site_groups for site in group]
     return sorted(union, key=lambda site: _site_score_value(site), reverse=True)
@@ -916,6 +1049,70 @@ def _rank_hybrid_low_score_focus_sites(hybrid_sites: list[dict]) -> list[dict]:
         sorted(low_score_sites, key=_site_hybrid_focus_score, reverse=True)
         + sorted(high_score_sites, key=_site_hybrid_focus_score, reverse=True)
     )
+
+
+def _normalized_site_values(sites: list[dict], field: str) -> dict[int, float]:
+    values = np.array([float(site.get(field, 0.0) or 0.0) for site in sites], dtype=np.float32)
+    if values.size == 0:
+        return {}
+    if np.allclose(float(values.max()), float(values.min())):
+        return {index: 0.5 for index in range(len(sites))}
+    norm = (values - values.min()) / (values.max() - values.min() + 1e-6)
+    return {index: float(value) for index, value in enumerate(norm)}
+
+
+def _assign_receptor_search_fitness_scores(sites: list[dict]) -> list[dict]:
+    """
+    Calibrate final receptor-search F across heterogeneous candidate families.
+
+    Raw map/internal scores are useful inside a family, but not comparable
+    across surface peaks, hybrid consensus sites, and reserve/core boxes.  The
+    final F used for publication ranking is therefore a small portfolio model:
+    role prior + local raw support + geometry/context bonuses.  Site labels stay
+    untouched; the score is what carries ranking semantics.
+    """
+    if not sites:
+        return sites
+
+    role_prior = {
+        "surface_focus": 1.00,
+        "core_reserve": 0.98,
+        "hybrid_low_score_focus": 0.86,
+        "edt_tail_rescue": 0.82,
+        "surface_primary": 0.76,
+        "surface": 0.72,
+        "internal_primary": 0.50,
+        "hybrid_primary": 0.44,
+        "reserve": 0.24,
+        "axis_reserve": 0.12,
+        "blind_fallback": 0.10,
+    }
+    raw_norm = _normalized_site_values(sites, "F")
+    r_norm = _normalized_site_values(sites, "r_peak")
+    calibrated: list[dict] = []
+    for index, site in enumerate(sites):
+        raw_f = float(site.get("F", 0.0) or 0.0)
+        role = str(site.get("portfolio_role") or site.get("family") or "reserve")
+        centrality = float(site.get("center_closeness", 0.0) or 0.0)
+        contact = float(site.get("contact_frac", 0.0) or 0.0)
+        cluster_support = min(1.0, float(site.get("cluster_size", 1) or 1) / 4.0)
+        score = (
+            role_prior.get(role, 0.20)
+            + 0.10 * raw_norm.get(index, 0.0)
+            + 0.04 * r_norm.get(index, 0.0)
+            + 0.04 * centrality
+            + 0.03 * contact
+            + 0.02 * cluster_support
+        )
+        calibrated.append(
+            _clone_site(
+                site,
+                raw_F=raw_f,
+                ranking_score=float(score),
+                F=float(score),
+            )
+        )
+    return calibrated
 
 
 def _build_surface_region_sites(
@@ -1017,10 +1214,32 @@ def _receptor_axis_reserve_site(
     offset_min_A: float = 8.0,
     offset_max_A: float = 14.0,
 ) -> dict | None:
+    sites = _receptor_axis_reserve_sites(
+        receptor_pdbqt,
+        preserved_sites=preserved_sites,
+        box_side_A=box_side_A,
+        spacing=spacing,
+        offset_fraction=offset_fraction,
+        offset_min_A=offset_min_A,
+        offset_max_A=offset_max_A,
+    )
+    return sites[0] if sites else None
+
+
+def _receptor_axis_reserve_sites(
+    receptor_pdbqt,
+    *,
+    preserved_sites: list[dict],
+    box_side_A: float,
+    spacing: float,
+    offset_fraction: float = 0.22,
+    offset_min_A: float = 8.0,
+    offset_max_A: float = 14.0,
+) -> list[dict]:
     try:
         atoms = pdbqt_atoms(receptor_pdbqt)
         if not atoms:
-            return None
+            return []
         coords = np.array([(a[0], a[1], a[2]) for a in atoms], dtype=np.float32)
         mins = coords.min(axis=0)
         maxs = coords.max(axis=0)
@@ -1029,7 +1248,7 @@ def _receptor_axis_reserve_site(
         core = np.asarray(core, dtype=np.float32)
     except Exception as exc:
         print(f"[centers/axis] skipped due to error: {exc}")
-        return None
+        return []
 
     preserved_centers = [_site_center(site) for site in preserved_sites]
     candidates: list[tuple[float, np.ndarray, int, int]] = []
@@ -1046,26 +1265,30 @@ def _receptor_axis_reserve_site(
             candidates.append((coverage_gap, center, axis, sign))
 
     if not candidates:
-        return None
+        return []
 
-    coverage_gap, center, axis, sign = max(candidates, key=lambda item: item[0])
     n = _npts_for_box_side(float(box_side_A), float(spacing))
-    return dict(
-        site_id="S_axis",
-        cx=float(center[0]),
-        cy=float(center[1]),
-        cz=float(center[2]),
-        nx=n,
-        ny=n,
-        nz=n,
-        spacing=float(sp),
-        r_peak=max(1.0, float(box_side_A) * 0.15),
-        F=0.0,
-        family="axis_reserve",
-        reserve_axis=int(axis),
-        reserve_sign=int(sign),
-        reserve_coverage_gap_A=float(coverage_gap),
-    )
+    reserve_sites = []
+    for coverage_gap, center, axis, sign in sorted(candidates, key=lambda item: item[0], reverse=True):
+        reserve_sites.append(
+            dict(
+                site_id=f"S_axis_{int(axis)}_{int(sign)}",
+                cx=float(center[0]),
+                cy=float(center[1]),
+                cz=float(center[2]),
+                nx=n,
+                ny=n,
+                nz=n,
+                spacing=float(sp),
+                r_peak=max(1.0, float(box_side_A) * 0.15),
+                F=0.0,
+                family="axis_reserve",
+                reserve_axis=int(axis),
+                reserve_sign=int(sign),
+                reserve_coverage_gap_A=float(coverage_gap),
+            )
+        )
+    return reserve_sites
 
 
 def _replace_tail_with_reserve_sites(
@@ -1085,10 +1308,10 @@ def _replace_tail_with_reserve_sites(
 
     changed = False
     if axis_site is not None and len(updated) >= 2 and _far_enough(axis_site, updated[:-2]):
-        updated[-2] = axis_site
+        updated[-2] = _clone_site(axis_site, portfolio_role="axis_reserve")
         changed = True
     if core_site is not None and _far_enough(core_site, updated[:-1]):
-        updated[-1] = core_site
+        updated[-1] = _clone_site(core_site, portfolio_role="core_reserve")
         changed = True
 
     return _relabel_sites(updated) if changed else sites
@@ -1299,19 +1522,23 @@ def _assemble_receptor_search_sites(
     surface_focus_sites = _rank_surface_focus_sites(surface_sites)
     hybrid_low_score_focus_sites = _rank_hybrid_low_score_focus_sites(hybrid_sites)
     if int(target_count) <= 3:
-        portfolio_pools = (hybrid_sites, internal_sites, surface_sites)
+        portfolio_pools = (
+            ("hybrid_primary", hybrid_sites),
+            ("internal_primary", internal_sites),
+            ("surface_primary", surface_sites),
+        )
     else:
         portfolio_pools = (
-            hybrid_sites,
-            internal_sites,
-            surface_sites,
-            surface_focus_sites,
-            hybrid_low_score_focus_sites,
+            ("hybrid_primary", hybrid_sites),
+            ("internal_primary", internal_sites),
+            ("surface_primary", surface_sites),
+            ("surface_focus", surface_focus_sites),
+            ("hybrid_low_score_focus", hybrid_low_score_focus_sites),
         )
-    for pool in portfolio_pools:
+    for role, pool in portfolio_pools:
         site = _take_best_distinct(pool, selected, min_sep_A=selection_min_sep_A)
         if site is not None:
-            selected.append(site)
+            selected.append(_clone_site(site, portfolio_role=role))
         if len(selected) == target_count:
             break
 
@@ -1319,7 +1546,7 @@ def _assemble_receptor_search_sites(
         reserves = _rank_union_sites(internal_sites, surface_sites, hybrid_sites)
         for site in reserves:
             if _take_best_distinct([site], selected, min_sep_A=selection_min_sep_A) is not None:
-                selected.append(site)
+                selected.append(_clone_site(site, portfolio_role="reserve"))
             if len(selected) == target_count:
                 break
 
@@ -1666,18 +1893,20 @@ def detect_maps_hotspots(
     pocket interiors.  A real binding pocket is characterised by *many* favorable
     contacts surrounding a ligand-sized cavity from multiple sides.  We therefore:
 
-    1. **Clip** C and E to only favorable (negative) values, discarding steric
+    1. **Clip/scale** C and E to favorable contact support, discarding steric
        clashes (large positives from VDW overlap) that dominate the raw range.
-    2. **Average** the clipped favorability over an ~8 Å-radius sphere — the
-       approximate radius of a drug-like molecule (MW 300–500 Da).  This converts
-       the per-atom-contact energy landscape into a *regional druggability score*:
-       high score = many simultaneous favorable contacts = enclosed pocket.
-    3. **Mask** to a receptor-specific EDT pocket shell derived from the
-       profiled cavity threshold, excluding bulk solvent and steric-clash voxels.
+    2. **Add** D-map desolvation support so hydrophobic/dehydrating crypts are
+       not invisible to the regional score.
+    3. **Convolve** the combined field with an isotropic Gaussian over a
+       ligand-sized length scale.  This is rotationally invariant, unlike a
+       cubic box filter.
+    4. **Weight/mask** by the receptor-specific EDT pocket shell, using a
+       continuous enclosure/depth weight before excluding bulk solvent and
+       steric-clash voxels.
 
-    Validated on PDB 5I6X (SERT–escitalopram): places the orthosteric site (S1
-    binding site) within 10.7 Å of the crystallographic ligand centroid, whereas
-    the previous per-voxel sigmoid scoring placed all 8 sites > 30 Å away.
+    This regional scoring replaces the old per-voxel sigmoid scoring, which was
+    too sensitive to isolated surface contacts and too weak at distinguishing
+    enclosed pockets from exposed grooves.
 
     If the maps are degenerate (E all-zero, C mostly-zero with extreme outliers),
     falls back to pure EDT-based pocket detection from the receptor geometry.
@@ -1744,19 +1973,17 @@ def detect_maps_hotspots(
     #   are therefore RIGHT AT the protein surface, not at pocket centres.
     #   Per-voxel scoring (the old robust_z → sigmoid approach) picks surface
     #   atoms as "hotspots" rather than the enclosed cavities that ligands
-    #   actually bind in.  On 5I6X, per-voxel scores yielded F ∈ [0.946, 0.968]
-    #   — essentially flat, with no discrimination between the orthosteric
-    #   pocket and random surface grooves.
+    #   actually bind in.  It also tends to compress scores into a narrow,
+    #   poorly discriminating range across unrelated surface grooves.
     #
-    # WHY neighbourhood averaging?
+    # WHY isotropic regional convolution?
     #   A druggable binding pocket (Kd < 10 µM) is defined by *complementarity*:
     #   the ligand must form simultaneous favorable contacts with protein residues
-    #   on multiple sides.  Averaging the interaction energy over a ligand-sized
-    #   sphere (~8 Å radius, typical for MW 300–500 Da drug-like molecules)
-    #   effectively measures this complementarity — a high average score means
-    #   "a ligand placed here would see many good contacts from all directions".
-    #   Isolated favorable voxels at exposed surfaces wash out in the average,
-    #   while enclosed pockets with walls on 3+ sides accumulate high scores.
+    #   on multiple sides.  Convolving the interaction support over a ligand-sized
+    #   length scale (~8 Å support, typical for MW 300–500 Da drug-like molecules)
+    #   effectively measures this complementarity without introducing grid-axis
+    #   bias.  Isolated favorable voxels at exposed surfaces wash out, while
+    #   enclosed pockets with walls on 3+ sides accumulate high scores.
     #
     # WHY clip to negative values only?
     #   Positive C/E values represent steric clashes (VDW repulsion) or
@@ -1769,29 +1996,25 @@ def detect_maps_hotspots(
     #   interactions (H-bonds, salt bridges) span a wider energy range than
     #   van-der-Waals contacts.
     #
-    from scipy.ndimage import uniform_filter
-
-    # Step 1: clip to favorable-only interaction energies
+    # Step 1: clip to favorable-only interaction support
     # C_fav: van-der-Waals favorable contacts.  Typical VDW well depths for
     #   drug-like atoms are -0.1 to -0.5 kcal/mol; -5.0 accommodates H-bonds.
     # E_fav: electrostatic favorable contacts.  Salt bridges can reach -40
     #   kcal/mol in vacuum; -50.0 is a generous upper bound.
-    C_fav = np.clip(C, -5.0, 0.0).astype(np.float32)
-    E_fav = np.clip(E, -50.0, 0.0).astype(np.float32)
+    C_fav = np.clip(-np.clip(C, -5.0, 0.0) / 5.0, 0.0, 1.0).astype(np.float32)
+    E_fav = np.clip(-np.clip(E, -50.0, 0.0) / 50.0, 0.0, 1.0).astype(np.float32)
+    D_fav = _positive_signal_unit_interval(np.abs(D))
 
-    # Step 2: equal-weight combination.  Both VDW shape complementarity and
-    # electrostatic complementarity contribute to binding affinity (Böhm, 1994;
-    # Gohlke & Klebe, 2002).  Equal weighting avoids over-fitting to one term.
-    fav = 0.5 * C_fav + 0.5 * E_fav
+    weights = _normalize_positive_weights(
+        {"C": MAPS_C_WEIGHT, "E": MAPS_E_WEIGHT, "D": MAPS_D_WEIGHT}
+    )
+    fav = (
+        weights["C"] * C_fav
+        + weights["E"] * E_fav
+        + weights["D"] * D_fav
+    ).astype(np.float32)
 
-    # Step 3: average over ligand-sized sphere.  8 Å radius ≈ the radius of
-    # gyration of a typical drug molecule (aspirin ~4 Å, imatinib ~7 Å,
-    # escitalopram ~6 Å).  The uniform filter is a fast 3D box average;
-    # kernel_radius is converted from Å to voxels.
-    kernel_radius = max(3, int(round(8.0 / sp)))
-    fav_smooth = uniform_filter(fav, size=2 * kernel_radius + 1, mode='constant', cval=0.0)
-
-    # Step 4: restrict to a receptor-specific "pocket shell" — voxels near the
+    # Step 2: restrict to a receptor-specific "pocket shell" — voxels near the
     # protein surface, but not inside steric-clash volume.  The lower EDT bound
     # is derived from the profiled cavity threshold instead of being a fixed
     # 3 Å cutoff, because shallow surface pockets often place ligand atoms at
@@ -1809,6 +2032,34 @@ def detect_maps_hotspots(
         Dn = np.clip((D - dmin) / (d95 - dmin + 1e-6), 0.0, 1.0)
         pocket = Dn > 0.35
 
+    # Step 3: isotropic ligand-scale convolution.  The Gaussian is separable and
+    # rotationally symmetric, so the score does not depend on how the receptor
+    # sits relative to the grid axes.  The truncate value keeps the effective
+    # support near MAPS_CONVOLUTION_RADIUS_A.
+    sigma_vox = max(0.5, float(MAPS_GAUSSIAN_SIGMA_A) / sp)
+    truncate = max(
+        2.0,
+        float(MAPS_CONVOLUTION_RADIUS_A) / max(float(MAPS_GAUSSIAN_SIGMA_A), 1e-6),
+    )
+    fav_smooth = gaussian_filter(
+        fav,
+        sigma=sigma_vox,
+        mode="constant",
+        cval=0.0,
+        truncate=truncate,
+    ).astype(np.float32)
+
+    # Step 4: continuously reward enclosure/depth inside the allowed pocket
+    # shell.  This keeps the hard shell as a safety mask while avoiding a binary
+    # all-or-none treatment of shallow grooves versus deep vestibules.
+    score = fav_smooth
+    if edt_grid is not None:
+        score = score * _continuous_edt_weight(
+            edt_grid,
+            pocket_min_A=pocket_min_A,
+            pocket_max_A=shell_max_A,
+        )
+
     # Step 5: exclude outermost 5 voxels on every face.  AutoGrid's finite-
     # difference solver uses boundary conditions that produce artefactual
     # energy values at grid edges (often maximal, causing false peaks).
@@ -1816,9 +2067,6 @@ def detect_maps_hotspots(
     border_mask = np.zeros(C.shape, dtype=bool)
     border_mask[BORDER:-BORDER, BORDER:-BORDER, BORDER:-BORDER] = True
 
-    # Final score: negate fav_smooth so higher = more favorable for peak finding
-    # (uniform_filter output is negative; negate to make peaks positive)
-    score = -fav_smooth
     score[~(pocket & border_mask)] = 0.0
 
     # Local maxima. Start with the requested relative threshold, but if that
@@ -2034,6 +2282,33 @@ def internal_cavities(occ):
     return dist, cc, ncc
 
 
+def _component_edt_weighted_medoid(mask, dist):
+    """Choose a real cavity voxel near the EDT-weighted center of a component."""
+    indices = np.argwhere(mask)
+    if indices.size == 0:
+        return None
+
+    weights = dist[mask].astype(np.float64, copy=False)
+    peak_pos = int(np.argmax(weights))
+    peak_i, peak_j, peak_k = (int(v) for v in indices[peak_pos])
+    peak_r_vox = float(weights[peak_pos])
+    total_weight = float(weights.sum())
+    if total_weight <= 0.0 or peak_r_vox <= 0.0:
+        return peak_i, peak_j, peak_k, peak_r_vox
+
+    weighted_center = np.average(indices.astype(np.float64), axis=0, weights=weights)
+    depth_fraction = float(np.clip(INTERNAL_MEDOID_MIN_DEPTH_FRACTION, 0.0, 1.0))
+    deep = weights >= (depth_fraction * peak_r_vox)
+    if not np.any(deep):
+        return peak_i, peak_j, peak_k, peak_r_vox
+
+    deep_indices = indices[deep]
+    deltas = deep_indices.astype(np.float64) - weighted_center
+    medoid_pos = int(np.argmin(np.einsum("ij,ij->i", deltas, deltas)))
+    i, j, k = (int(v) for v in deep_indices[medoid_pos])
+    return i, j, k, peak_r_vox
+
+
 #### MAP SAMPLING AND SCORING ####
 def trilinear_sample(vol, xyz, origin, sp):
     x, y, z = xyz
@@ -2093,8 +2368,8 @@ def site_score(E, C, D, origin, sp, center):
     Dn = np.clip((vD - dmin) / (d95 - dmin + 1e-6), 0, 1)
 
     # squashes
-    sC = 1.0 / (1.0 + np.exp(-Cz))
-    sE = 1.0 / (1.0 + np.exp(+0.7 * Ez * -1.0))  # more negative E -> higher
+    sC = _sigmoid_stable(Cz)
+    sE = _sigmoid_stable(-0.7 * Ez)  # more negative E -> higher
     sD = Dn
 
     # combine
@@ -2221,9 +2496,11 @@ def pick_centers(
         mask = (cc == lab)
         if not mask.any():
             continue
-        # peak voxel
-        i, j, k = np.unravel_index(np.argmax(dist * mask), dist.shape)
-        r_peak = dist[i, j, k] * sp
+        medoid = _component_edt_weighted_medoid(mask, dist)
+        if medoid is None:
+            continue
+        i, j, k, r_peak_vox = medoid
+        r_peak = r_peak_vox * sp
         peak_records.append((int(lab), int(i), int(j), int(k), float(r_peak)))
 
     search_r_min = _select_internal_search_r_min(
