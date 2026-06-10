@@ -233,10 +233,15 @@ most relevant README section instead of burying the terminal in long guidance.
 | `python3 benchmarks/cavity_recovery_benchmark.py` | Evaluate receptor-only site finding against co-crystallized ligand centers. Supports target-level `--jobs` parallelism. |
 | `python3 benchmarks/download_dude.py` | Download DUD-E receptor, crystal ligand, active, and decoy files. |
 | `ultidock run [options]` | Run the full docking pipeline from anywhere in the repo (no need to `cd docking/`). Forwards all flags to `docking/run.py`. |
+| `ultidock known-site --center x,y,z [options]` | Run docking with a manual/expert site box. |
+| `ultidock cavity [options]` | Run CaV-EMPS automatic binding-site proposal and dock against predicted sites. |
+| `ultidock blind [options]` | Run whole-receptor/blind docking. |
+| `ultidock report <run_dir>` | Generate Markdown/HTML reports plus PyMOL/ChimeraX helper files from a run directory. |
 | `ultidock setup [options]` | Run the setup stage through the workflow CLI. |
 | `ultidock clean [-y] [--all]` | Reset compiled binaries and outputs. Forwards all flags to `docking/clean.py`. |
 | `ultidock benchmark cavity-recovery [options]` | CLI wrapper for the receptor-only site-recovery benchmark. |
 | `ultidock benchmark download-dude [options]` | Download DUD-E receptor, crystal ligand, active, and decoy files. |
+| `ultidock benchmark site-prediction [options]` | Download/normalize COACH420/HOLO4K, run `cav-emps\|fpocket\|p2rank`, evaluate DCC metrics, and generate reports. |
 | `ultidock example list` / `ultidock example run <name>` | Discover and run bundled example pipelines. |
 | `ultidock doctor` | Print tool locations and versions. Distinguishes between binaries not compiled yet (source present) and not found at all. |
 | `molguard pdbqt check <file>` | Lint a receptor or ligand PDBQT for AutoDock column-format issues (exponent notation, missing decimals, bad atom types). |
@@ -245,6 +250,17 @@ most relevant README section instead of burying the terminal in long guidance.
 | `molguard receptor prepare <file> -o <out>` | Run the shared receptor-prep path. `.pdbqt` is canonicalized; `.pdb` is sanitized, converted, then canonicalized. |
 | `molguard grids check <maps.fld>` | Validate AutoGrid output: checks for all-zero maps, NaN/Inf energies, missing files, and atom-type mismatches. |
 | `molguard doctor` | Print MolGuard version and optional receptor-conversion backend availability. |
+
+### Researcher-Facing Run Modes
+
+- **known-site**: an expert/manual box baseline. You provide the center and box,
+  and Ultidock docks against that site.
+- **cavity**: automatic CaV-EMPS mode. Ultidock proposes receptor-only site
+  hypotheses and docks against those predicted boxes.
+- **blind**: naive whole-receptor baseline. Ultidock builds a broad receptor
+  box without a site hypothesis.
+- **benchmark**: reproducible evaluation workflows for DUD-E, COACH420,
+  HOLO4K, and method comparisons.
 
 ### Key `run.py` Flags
 
@@ -439,19 +455,20 @@ scripts.
 
 ## Spotlight: Grid Boxing & Cavity Finder Algorithm
 
-Ultidock's automatic site finder is one of the pipeline's central features. Its
-goal is to approximate the binding-site center that a researcher might otherwise
-take from a co-crystal ligand, using only receptor-derived information. In
-practical screening work, that co-crystallized ligand and its centroid are often
-not available, so Ultidock does not require a known crystal center before
-docking.
+Ultidock's automatic site finder is formally named **CaV-EMPS**: Cavity
+detection via Electrostatic Map Pocket Scoring. Its goal is to approximate the
+binding-site center that a researcher might otherwise take from a co-crystal
+ligand, using only receptor-derived information. In practical screening work,
+that co-crystallized ligand and its centroid are often not available, so
+Ultidock does not require a known crystal center before docking.
 
 The finder is implemented in [`docking/make_grids.py`](docking/make_grids.py)
 and orchestrated by [`docking/dock_v02.py`](docking/dock_v02.py). It analyzes
 receptor geometry and receptor-derived AutoGrid signals to propose a compact set
 of likely docking boxes. In benchmarks, the crystal ligand center is used only
-after site generation as an external recovery reference, not as an input to the
-site finder.
+after site generation as an external recovery reference, not as an input to
+CaV-EMPS. CaV-EMPS ranking scores are used to order site hypotheses; they are
+not binding affinity estimates.
 
 The default `receptor_search` policy combines complementary receptor-derived
 signals:
@@ -510,16 +527,57 @@ ultidock benchmark cavity-recovery \
   --output-dir benchmarks/results/cavity_recovery
 ```
 
-The benchmark measures the distance from each generated site center to the
-centroid of the co-crystallized ligand. The ligand centroid is an external
-reference for the experimentally observed bound pose; it is not used during site
-generation.
+The benchmark records both the legacy distance from each generated site center
+to the centroid of the co-crystallized ligand and the paper-facing DCC distance
+to the closest ligand atom. The ligand geometry is an external reference for the
+experimentally observed bound pose; it is not used during site generation.
 
 Important output files:
 
-- `summary.csv`: target-level closest-site distances and success flags
-- `sites.csv`: per-site distances for every generated docking box
+- `summary.csv`: target-level closest-site, DCC, and Top-k success flags
+- `sites.csv`: per-site centroid distances, DCC distances, and ranking metadata
+- `predictions.tsv`: normalized `cav-emps` predictions for shared evaluators
 - per-target `centers.tsv`: the generated docking boxes used for evaluation
+
+By default, benchmark runs use a compact artifact layout: large AutoGrid maps
+and scratch files are written to temporary work directories and removed after
+the small evaluation files are written. Add `--keep-artifacts` when debugging a
+target and you want to preserve per-target `maps/` files; use `--work-root` to
+put scratch work on a larger disk.
+
+### COACH420/HOLO4K Site-Prediction Benchmark
+
+Run the paper-facing site-prediction benchmark in one pass:
+
+```bash
+ultidock benchmark site-prediction \
+  --datasets coach420,holo4k \
+  --methods cav-emps,fpocket,p2rank \
+  --jobs 4 \
+  --output-dir benchmarks/results/site_prediction/coach_holo_$(date +%Y%m%d_%H%M)
+```
+
+The command downloads `rdk/p2rank-datasets` when needed, normalizes receptors
+and ligand labels, runs each selected method, evaluates DCC Top-n/Top-(n+2), and
+writes Markdown/HTML reports under the output directory.
+
+The site-prediction benchmark follows the same compact default for CaV-EMPS
+AutoGrid maps. Pass `--keep-artifacts` only for debugging, or `--work-root
+/path/to/scratch` when temporary files should live on a larger drive.
+
+## Reports and Visualization
+
+Ultidock run directories can be turned into researcher-facing artifacts:
+
+```bash
+ultidock report path/to/run_dir
+```
+
+The report generator writes `report.md`, `report.html`, `cavity_centers.pdb`,
+`cavemps_sites.pml`, `site_boxes.pml`, `top_poses.pml`, `cavemps_sites.cxc`,
+and `cavity_centers.bild` when site coordinates are available. These files are
+intended for quick inspection in PyMOL or ChimeraX and for recording the command,
+configuration, software version, and CaV-EMPS site ranking used for a run.
 
 ### Docking/Enrichment Benchmarks
 
@@ -533,8 +591,20 @@ be treated as final validation runs rather than quick smoke tests.
 
 ## Working with the Example Pipelines
 
-Two curated examples (`gabaa-benzos` and `sert-escitalopram`) showcase the full
-workflow. Each example runner performs the same steps a user would follow:
+Start with the lightweight quickstart to verify the researcher-facing artifact
+flow:
+
+```bash
+ultidock example run quickstart
+```
+
+It writes `input/receptor.pdb`, `input/reference_ligand.mol2`,
+`run_config.yaml`, `sites.tsv`, `predictions.tsv`, `top_hits.csv`,
+`results.sqlite`, `report.md`, `report.html`, and PyMOL/ChimeraX helper files.
+
+Two curated examples (`gabaa-benzos` and `sert-escitalopram`) showcase the fuller
+docking workflow. Each full example runner performs the same steps a user would
+follow:
 
 ```bash
 ultidock example list
