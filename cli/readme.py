@@ -16,9 +16,10 @@ README_TOPICS = {
     "examples": ("Working with the Example Pipelines", "working-with-the-example-pipelines"),
     "troubleshooting": ("Troubleshooting", "troubleshooting"),
     "site-finder": (
-        "Grid Boxing & Cavity Finder Algorithm",
+        "CaV-EMPS Site Finder",
         "spotlight-grid-boxing--cavity-finder-algorithm",
     ),
+    "reports": ("Reports and Visualization", "reports-and-visualization"),
 }
 
 
