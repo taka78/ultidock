@@ -5,10 +5,12 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import click
 
+from cli.report import generate_report
 from cli.readme import readme_hint
 from molguard import __version__
 
@@ -71,6 +73,123 @@ def _run_python(
     result = subprocess.run([sys.executable, "-u", str(script), *args], cwd=cwd or _repo_root())
     if result.returncode:
         click.echo(f"       {readme_hint(topic)}", err=True)
+    raise SystemExit(result.returncode)
+
+
+def _timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def _default_run_dir(mode: str) -> Path:
+    return (_repo_root() / "runs" / f"{mode}_{_timestamp()}").resolve()
+
+
+def _split_center(center: str) -> tuple[float, float, float]:
+    parts = [part.strip() for part in center.replace(";", ",").split(",")]
+    if len(parts) != 3:
+        raise click.BadParameter("center must be formatted as x,y,z")
+    try:
+        return (float(parts[0]), float(parts[1]), float(parts[2]))
+    except ValueError as exc:
+        raise click.BadParameter("center must contain three numbers") from exc
+
+
+def _write_run_config(path: Path, rows: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for key, value in rows.items():
+        if isinstance(value, (list, tuple)):
+            rendered = "[" + ", ".join(str(item) for item in value) + "]"
+        else:
+            rendered = str(value)
+        lines.append(f"{key}: {rendered}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_known_site_tsv(path: Path, center: tuple[float, float, float], box_size: float) -> None:
+    spacing = 0.375
+    npts = max(1, int(round(float(box_size) / spacing)))
+    if npts % 2 == 0:
+        npts += 1
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "# receptor\tsite_id\tcx\tcy\tcz\tnx\tny\tnz\tspacing\tr_peak\tF\t"
+        "raw_F\tfamily\tportfolio_role\tselection_score\tcenter_closeness\n"
+        "# meta policy=known_site site_count=1 ranking_score=manual_box\n"
+        f"known_site\tS1\t{center[0]:.3f}\t{center[1]:.3f}\t{center[2]:.3f}\t"
+        f"{npts}\t{npts}\t{npts}\t{spacing:.3f}\t{float(box_size) / 4.0:.2f}\t"
+        "1.000\t1.000\tknown_site\tknown_site\t1.0\t1.0\n",
+        encoding="utf-8",
+    )
+
+
+def _pipeline_dirs(run_dir: Path) -> dict[str, Path]:
+    return {
+        "docking": run_dir / "docking",
+        "analysis": run_dir / "analysis",
+        "results": run_dir / "results",
+    }
+
+
+def _run_pipeline_mode(
+    *,
+    public_mode: str,
+    grid_mode: str,
+    output_dir: Path | None,
+    extra_args: tuple[str, ...],
+    dry_run: bool,
+    report: bool,
+    centers_tsv: Path | None = None,
+    config_extra: dict[str, object] | None = None,
+) -> None:
+    run_dir = (output_dir.resolve() if output_dir else _default_run_dir(public_mode))
+    dirs = _pipeline_dirs(run_dir)
+    for path in [run_dir, *dirs.values()]:
+        path.mkdir(parents=True, exist_ok=True)
+    if centers_tsv is None:
+        centers_tsv = run_dir / "sites.tsv"
+
+    command = [
+        sys.executable,
+        "-u",
+        str(_docking_dir() / "run.py"),
+        "--grid-mode",
+        grid_mode,
+        "--centers-tsv",
+        str(centers_tsv),
+        "--docking-dir",
+        str(dirs["docking"]),
+        "--analysis-dir",
+        str(dirs["analysis"]),
+        "--results-dir",
+        str(dirs["results"]),
+        *extra_args,
+    ]
+    config = {
+        "workflow": public_mode,
+        "site_method": "cav-emps" if public_mode == "cavity" else public_mode,
+        "grid_mode": grid_mode,
+        "run_dir": str(run_dir),
+        "centers_tsv": str(centers_tsv),
+        "command": " ".join(command),
+    }
+    if config_extra:
+        config.update(config_extra)
+    _write_run_config(run_dir / "run_config.yaml", config)
+
+    if dry_run:
+        click.echo("Dry run command:")
+        click.echo(" ".join(command))
+        click.echo(f"Run config: {run_dir / 'run_config.yaml'}")
+        return
+
+    result = subprocess.run(command, cwd=_docking_dir())
+    if report:
+        os.environ["ULTIDOCK_COMMAND"] = " ".join(command)
+        generate_report(run_dir)
+        click.echo(f"Report: {run_dir / 'report.html'}")
+    if result.returncode:
+        click.echo(f"       {readme_hint('quick-start')}", err=True)
     raise SystemExit(result.returncode)
 
 
@@ -143,6 +262,97 @@ def run_cmd(extra_args: tuple[str, ...]) -> None:
     _run_python(_docking_dir() / "run.py", extra_args, cwd=_docking_dir(), topic="quick-start")
 
 
+@cli.command("known-site", context_settings=FORWARD_CONTEXT)
+@click.option("--center", required=True, help="Known binding-site center as x,y,z.")
+@click.option("--box-size", default=35.0, show_default=True, help="Manual docking box side in A.")
+@click.option("--output-dir", type=click.Path(path_type=Path), help="Run directory.")
+@click.option("--dry-run", is_flag=True, help="Write config and print the pipeline command only.")
+@click.option("--report/--no-report", default=True, show_default=True, help="Generate report files.")
+@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+def known_site_cmd(
+    center: str,
+    box_size: float,
+    output_dir: Path | None,
+    dry_run: bool,
+    report: bool,
+    extra_args: tuple[str, ...],
+) -> None:
+    """Run docking with an expert/manual known-site box."""
+    run_dir = output_dir.resolve() if output_dir else _default_run_dir("known_site")
+    centers_tsv = run_dir / "sites.tsv"
+    parsed_center = _split_center(center)
+    _write_known_site_tsv(centers_tsv, parsed_center, box_size)
+    _run_pipeline_mode(
+        public_mode="known-site",
+        grid_mode="centers",
+        output_dir=run_dir,
+        extra_args=extra_args,
+        dry_run=dry_run,
+        report=report,
+        centers_tsv=centers_tsv,
+        config_extra={"known_center": parsed_center, "box_size_a": box_size},
+    )
+
+
+@cli.command("cavity", context_settings=FORWARD_CONTEXT)
+@click.option("--autosites", default=6, show_default=True, help="Number of CaV-EMPS sites.")
+@click.option("--output-dir", type=click.Path(path_type=Path), help="Run directory.")
+@click.option("--dry-run", is_flag=True, help="Write config and print the pipeline command only.")
+@click.option("--report/--no-report", default=True, show_default=True, help="Generate report files.")
+@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+def cavity_cmd(
+    autosites: int,
+    output_dir: Path | None,
+    dry_run: bool,
+    report: bool,
+    extra_args: tuple[str, ...],
+) -> None:
+    """Run CaV-EMPS automatic site proposal, then docking."""
+    _run_pipeline_mode(
+        public_mode="cavity",
+        grid_mode="centers",
+        output_dir=output_dir,
+        extra_args=("--autosites", str(autosites), *extra_args),
+        dry_run=dry_run,
+        report=report,
+        config_extra={"autosites": autosites},
+    )
+
+
+@cli.command("blind", context_settings=FORWARD_CONTEXT)
+@click.option("--grid-cap", default=150.0, show_default=True, help="Blind box cap in A.")
+@click.option("--output-dir", type=click.Path(path_type=Path), help="Run directory.")
+@click.option("--dry-run", is_flag=True, help="Write config and print the pipeline command only.")
+@click.option("--report/--no-report", default=True, show_default=True, help="Generate report files.")
+@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+def blind_cmd(
+    grid_cap: float,
+    output_dir: Path | None,
+    dry_run: bool,
+    report: bool,
+    extra_args: tuple[str, ...],
+) -> None:
+    """Run naive whole-receptor/blind docking."""
+    _run_pipeline_mode(
+        public_mode="blind",
+        grid_mode="blind",
+        output_dir=output_dir,
+        extra_args=("--grid-cap", str(grid_cap), *extra_args),
+        dry_run=dry_run,
+        report=report,
+        config_extra={"grid_cap_a": grid_cap},
+    )
+
+
+@cli.command("report")
+@click.argument("run_dir", type=click.Path(path_type=Path))
+def report_cmd(run_dir: Path) -> None:
+    """Generate Markdown/HTML reports and visualization files for a run directory."""
+    outputs = generate_report(run_dir)
+    click.echo(f"Markdown: {outputs['report_md']}")
+    click.echo(f"HTML:     {outputs['report_html']}")
+
+
 @cli.command("clean", context_settings=FORWARD_CONTEXT)
 @click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
 def clean_cmd(extra_args: tuple[str, ...]) -> None:
@@ -174,6 +384,83 @@ def benchmark_download_dude_cmd(extra_args: tuple[str, ...]) -> None:
 def benchmark_cavity_recovery_cmd(extra_args: tuple[str, ...]) -> None:
     """Evaluate receptor-only site recovery against crystal-ligand centers."""
     _run_python(_benchmarks_dir() / "cavity_recovery_benchmark.py", extra_args, topic="benchmarks")
+
+
+@benchmark.command("baseline-p2rank", context_settings=FORWARD_CONTEXT)
+@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+def benchmark_baseline_p2rank_cmd(extra_args: tuple[str, ...]) -> None:
+    """Evaluate P2Rank site recovery against crystal-ligand centers."""
+    _run_python(
+        _benchmarks_dir() / "baseline" / "p2rank" / "run_p2rank_baseline.py",
+        extra_args,
+        topic="benchmarks",
+    )
+
+
+@benchmark.command("baseline-fpocket", context_settings=FORWARD_CONTEXT)
+@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+def benchmark_baseline_fpocket_cmd(extra_args: tuple[str, ...]) -> None:
+    """Evaluate fpocket site recovery against crystal-ligand centers."""
+    _run_python(
+        _benchmarks_dir() / "baseline" / "fpocket" / "run_fpocket_baseline.py",
+        extra_args,
+        topic="benchmarks",
+    )
+
+
+@benchmark.command("site-evaluate", context_settings=FORWARD_CONTEXT, hidden=True)
+@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+def benchmark_site_evaluate_cmd(extra_args: tuple[str, ...]) -> None:
+    """Evaluate normalized site-prediction outputs with DCC Top-n metrics."""
+    _run_python(
+        _benchmarks_dir() / "site_prediction" / "evaluate_predictions.py",
+        extra_args,
+        topic="benchmarks",
+    )
+
+
+@benchmark.command("site-prediction", context_settings=FORWARD_CONTEXT)
+@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+def benchmark_site_prediction_cmd(extra_args: tuple[str, ...]) -> None:
+    """Download, normalize, run, evaluate, and report site-prediction benchmarks."""
+    _run_python(
+        _benchmarks_dir() / "site_prediction" / "run_site_prediction_benchmark.py",
+        extra_args,
+        topic="benchmarks",
+    )
+
+
+@benchmark.command("site-import", context_settings=FORWARD_CONTEXT, hidden=True)
+@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+def benchmark_site_import_cmd(extra_args: tuple[str, ...]) -> None:
+    """Advanced: download/normalize COACH420/HOLO4K datasets."""
+    _run_python(
+        _benchmarks_dir() / "site_prediction" / "prepare_site_datasets.py",
+        extra_args,
+        topic="benchmarks",
+    )
+
+
+@benchmark.command("site-run", context_settings=FORWARD_CONTEXT, hidden=True)
+@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+def benchmark_site_run_cmd(extra_args: tuple[str, ...]) -> None:
+    """Advanced: generate cav-emps, fpocket, or p2rank predictions."""
+    _run_python(
+        _benchmarks_dir() / "site_prediction" / "predict_sites.py",
+        extra_args,
+        topic="benchmarks",
+    )
+
+
+@benchmark.command("site-report", context_settings=FORWARD_CONTEXT, hidden=True)
+@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+def benchmark_site_report_cmd(extra_args: tuple[str, ...]) -> None:
+    """Generate a Markdown/HTML site-benchmark summary page."""
+    _run_python(
+        _benchmarks_dir() / "site_prediction" / "report.py",
+        extra_args,
+        topic="benchmarks",
+    )
 
 
 @benchmark.command("dude-docking", context_settings=FORWARD_CONTEXT)
@@ -213,8 +500,10 @@ def example_list_cmd() -> None:
     if not roots:
         click.echo("No runnable examples found.")
         return
+    roots = sorted(roots, key=lambda path: (path.name != "quickstart", path.name))
     for path in roots:
-        click.echo(path.name)
+        suffix = " (recommended first run)" if path.name == "quickstart" else ""
+        click.echo(f"{path.name}{suffix}")
 
 
 @example_group.command("run", context_settings=FORWARD_CONTEXT)
