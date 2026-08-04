@@ -294,6 +294,11 @@ def parse_scored_centers_tsv(path: Path) -> list[dict[str, Any]]:
             z = _float_or_none(row.get("cz") or row.get("center_z") or row.get("z"))
             score = _float_or_none(row.get("f") or row.get("fitness_score") or row.get("method_score"))
             raw_score = _float_or_none(row.get("raw_f") or row.get("raw_score"))
+            legacy_score = _float_or_none(row.get("legacy_f") or row.get("legacy_ranking_score"))
+            common_physics_score = _float_or_none(row.get("common_physics_score"))
+            common_physics_raw = _float_or_none(row.get("common_physics_raw"))
+            common_edt_a = _float_or_none(row.get("common_edt_a"))
+            ranking_basis = row.get("ranking_basis") or ""
             r_peak = _float_or_none(row.get("r_peak"))
             family = row.get("family") or ""
             portfolio_role = row.get("portfolio_role") or row.get("role") or ""
@@ -309,6 +314,11 @@ def parse_scored_centers_tsv(path: Path) -> list[dict[str, Any]]:
             r_peak = _float_or_none(parts[9]) if len(parts) > 9 else None
             score = _float_or_none(parts[10]) if len(parts) > 10 else None
             raw_score = _float_or_none(parts[11]) if len(parts) > 11 else None
+            legacy_score = None
+            common_physics_score = None
+            common_physics_raw = None
+            common_edt_a = None
+            ranking_basis = ""
             family = parts[12] if len(parts) > 12 else ""
             portfolio_role = parts[13] if len(parts) > 13 else ""
             selection_score = _float_or_none(parts[14]) if len(parts) > 14 else None
@@ -322,6 +332,11 @@ def parse_scored_centers_tsv(path: Path) -> list[dict[str, Any]]:
                 "center": (x, y, z),
                 "fitness_score": score,
                 "raw_fitness_score": raw_score,
+                "legacy_fitness_score": legacy_score,
+                "common_physics_score": common_physics_score,
+                "common_physics_raw": common_physics_raw,
+                "common_edt_a": common_edt_a,
+                "ranking_basis": ranking_basis,
                 "r_peak": r_peak,
                 "family": family,
                 "portfolio_role": portfolio_role,
@@ -688,6 +703,21 @@ def evaluate_centers(
     }
     site_score_by_id = {str(site["site_id"]): site.get("fitness_score") for site in scored_sites}
     raw_score_by_id = {str(site["site_id"]): site.get("raw_fitness_score") for site in scored_sites}
+    legacy_score_by_id = {
+        str(site["site_id"]): site.get("legacy_fitness_score") for site in scored_sites
+    }
+    common_score_by_id = {
+        str(site["site_id"]): site.get("common_physics_score") for site in scored_sites
+    }
+    common_raw_by_id = {
+        str(site["site_id"]): site.get("common_physics_raw") for site in scored_sites
+    }
+    common_edt_by_id = {
+        str(site["site_id"]): site.get("common_edt_a") for site in scored_sites
+    }
+    ranking_basis_by_id = {
+        str(site["site_id"]): site.get("ranking_basis") for site in scored_sites
+    }
     r_peak_by_id = {str(site["site_id"]): site.get("r_peak") for site in scored_sites}
     family_by_id = {str(site["site_id"]): site.get("family") for site in scored_sites}
     role_by_id = {str(site["site_id"]): site.get("portfolio_role") for site in scored_sites}
@@ -705,6 +735,11 @@ def evaluate_centers(
             "rank_by_fitness": rank_by_site_id.get(site_id, site_order),
             "fitness_score": site_score_by_id.get(site_id),
             "raw_fitness_score": raw_score_by_id.get(site_id),
+            "legacy_fitness_score": legacy_score_by_id.get(site_id),
+            "common_physics_score": common_score_by_id.get(site_id),
+            "common_physics_raw": common_raw_by_id.get(site_id),
+            "common_edt_a": common_edt_by_id.get(site_id),
+            "ranking_basis": ranking_basis_by_id.get(site_id),
             "r_peak": r_peak_by_id.get(site_id),
             "family": family_by_id.get(site_id),
             "portfolio_role": role_by_id.get(site_id),
@@ -781,7 +816,10 @@ def evaluate_centers(
             "z": crystal_center[2],
         },
         "reference_ligand_atom_count": len(reference_atoms),
-        "ranking": "site_id labels are names; publication ranks use descending F fitness_score",
+        "ranking": (
+            "site_id labels are names; ranks use descending common regional-physics "
+            "F, with legacy role-prior F retained as an ablation"
+        ),
         "thresholds_a": thresholds,
         "box_size_a": box_size,
         "summary": summary,
@@ -902,6 +940,11 @@ def write_run_outputs(
         "rank_by_fitness",
         "fitness_score",
         "raw_fitness_score",
+        "legacy_fitness_score",
+        "common_physics_score",
+        "common_physics_raw",
+        "common_edt_a",
+        "ranking_basis",
         "r_peak",
         "family",
         "portfolio_role",
