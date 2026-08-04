@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.ndimage import binary_closing, distance_transform_edt, label, generate_binary_structure
 from collections import namedtuple
+import hashlib
 import re, os, argparse
 from pathlib import Path
 from scipy.ndimage import gaussian_filter, maximum_filter
@@ -54,6 +55,18 @@ HOTSPOT_NMS_MAX_A = float(getattr(_config, "HOTSPOT_NMS_MAX_A", 25.0))
 INTERNAL_MEDOID_MIN_DEPTH_FRACTION = float(
     getattr(_config, "INTERNAL_MEDOID_MIN_DEPTH_FRACTION", 0.50)
 )
+
+# AutoGrid4 accepts at most 1024 intervals (1025 grid points) per axis.  Keep
+# docking maps within AutoDock-GPU's 256-point limit, but let CaV-EMPS retain
+# the configured base resolution over much larger whole-receptor boxes.
+AUTOGRID4_NPTS_MAX = 1024
+DOCKING_GRID_NPTS_MAX = 255
+CAV_EMPS_WHOLE_NPTS_MAX = int(getattr(_config, "CAV_EMPS_WHOLE_NPTS_MAX", AUTOGRID4_NPTS_MAX))
+if not 25 <= CAV_EMPS_WHOLE_NPTS_MAX <= AUTOGRID4_NPTS_MAX:
+    raise ValueError(
+        "CAV_EMPS_WHOLE_NPTS_MAX must be between 25 and "
+        f"{AUTOGRID4_NPTS_MAX}, found {CAV_EMPS_WHOLE_NPTS_MAX}"
+    )
 
 
 # ── AD4 parameter-file locator ────────────────────────────────────────────
@@ -178,12 +191,36 @@ def _ensure_odd_clamped(nxyz, clamp=(60, 255)):
     return tuple(int(x) for x in n.tolist())
 
 
-def _write_gpf(gpf_path, receptor_pdbqt, center, npts, spacing, autogrid4_bin="autogrid4"):
+def receptor_atom_types(pdbqt_path):
+    found = []
+    valid = set(_AD4_TYPES)
+    with open(pdbqt_path, "r", errors="ignore") as handle:
+        for line in handle:
+            if not line.startswith(("ATOM", "HETATM")):
+                continue
+            atom_type = line[77:79].strip()
+            if not atom_type:
+                raise ValueError(f"{pdbqt_path}: missing PDBQT atom type in line: {line.rstrip()}")
+            if atom_type not in valid:
+                raise ValueError(
+                    f"{pdbqt_path}: unsupported receptor atom type {atom_type!r}; "
+                    f"expected one of {', '.join(_AD4_TYPES)}"
+                )
+            if atom_type not in found:
+                found.append(atom_type)
+    if not found:
+        raise ValueError(f"{pdbqt_path}: no ATOM/HETATM records with PDBQT atom types found")
+    return tuple(found)
+
+
+def _write_gpf(gpf_path, receptor_pdbqt, center, npts, spacing, autogrid4_bin="autogrid4", map_types=None):
     """Write a per-site GPF; **do not** modify npts here."""
     cx, cy, cz = map(float, center)  # correct: center → (cx,cy,cz)
     nx, ny, nz = (int(npts[0]), int(npts[1]), int(npts[2]))  # correct: npts → (nx,ny,nz)
     rec_path = Path(receptor_pdbqt).resolve()
     rec_stem = rec_path.stem
+    receptor_types = receptor_atom_types(rec_path)
+    ligand_types = _normalize_autogrid_map_types(map_types)
     fld_name = f"{rec_stem}.maps.fld"
     param_file = _find_ad4_parameter_file(autogrid4_bin)
     with open(gpf_path, "w") as f:
@@ -199,12 +236,12 @@ def _write_gpf(gpf_path, receptor_pdbqt, center, npts, spacing, autogrid4_bin="a
         f.write(f"gridfld {fld_name}\n")
         f.write(f"npts {nx} {ny} {nz}\n")
         f.write(f"spacing {float(spacing):.3f}\n")
-        f.write("receptor_types " + " ".join(_AD4_TYPES) + "\n")
+        f.write("receptor_types " + " ".join(receptor_types) + "\n")
         f.write(f"receptor {rec_path}\n")
         f.write(f"gridcenter {cx:.3f} {cy:.3f} {cz:.3f}\n")
-        f.write("ligand_types " + " ".join(_AD4_TYPES) + "\n")
+        f.write("ligand_types " + " ".join(ligand_types) + "\n")
         f.write("smooth 0.500\n")
-        for t in _AD4_TYPES:
+        for t in ligand_types:
             f.write(f"map {rec_stem}.{t}.map\n")
         f.write(f"elecmap {rec_stem}.e.map\n")
         f.write(f"dsolvmap {rec_stem}.d.map\n")
@@ -231,9 +268,11 @@ def autogenerate_centers_tsv(
     mode: str = "receptor_search",
     adaptive_r_min_params: dict | None = None,
     maps_pocket_max_A: float | None = None,
+    map_types=None,
     nms_box_fraction: float = HOTSPOT_NMS_BOX_FRACTION,
     nms_min_A: float = HOTSPOT_NMS_MIN_A,
     nms_max_A: float = HOTSPOT_NMS_MAX_A,
+    whole_map_npts_max: int = CAV_EMPS_WHOLE_NPTS_MAX,
 ):
     """
     Generate centers.tsv under out_root using already-present maps or by making whole-protein maps.
@@ -258,6 +297,28 @@ def autogenerate_centers_tsv(
     requested_r_min = _coerce_optional_float(r_min)
     adaptive_params = _adaptive_r_min_params(adaptive_r_min_params)
     maps_pocket_max_value = MAPS_POCKET_MAX_A if maps_pocket_max_A is None else float(maps_pocket_max_A)
+    whole_map_npts_max = int(whole_map_npts_max)
+    if not 25 <= whole_map_npts_max <= AUTOGRID4_NPTS_MAX:
+        raise ValueError(
+            "CaV-EMPS whole_map_npts_max must be between 25 and "
+            f"{AUTOGRID4_NPTS_MAX}, found {whole_map_npts_max}"
+        )
+    autogrid_map_types = _normalize_autogrid_map_types(map_types)
+    cav_emps_policies = {
+        "internal",
+        "surface",
+        "hybrid",
+        "receptor_search",
+        "exhaustive_search",
+    }
+    if policy in cav_emps_policies:
+        full_types = tuple(_AD4_TYPES)
+        if autogrid_map_types != full_types:
+            raise ValueError(
+                "CaV-EMPS requires full AD4 ligand_types because "
+                "AutoGrid dsolvmap depends on the requested type set."
+            )
+        autogrid_map_types = full_types
     effective_min_sep_A = _effective_hotspot_min_sep_A(
         min_sep_A,
         hotspot_box_ang,
@@ -273,7 +334,7 @@ def autogenerate_centers_tsv(
         "min_sep_A": f"{effective_min_sep_A:.3f}",
         "candidate_min_sep_A": f"{candidate_min_sep_A:.3f}",
         "surface_relaxation": "progressive_tau_budget_v2",
-        "surface_center_refinement": "edt_core_centroid_v2",
+        "surface_center_refinement": "edt_component_core_centroid_v3",
         "surface_region_centroid": "cluster_lobes_v1",
         "surface_contact_gate": "refined_fixed_shell_v1",
         "core_reserve": "replace_last_v1",
@@ -284,7 +345,15 @@ def autogenerate_centers_tsv(
         "surface_kernel": f"gaussian_sigma_A={MAPS_GAUSSIAN_SIGMA_A:.3f}",
         "surface_weights": f"C={MAPS_C_WEIGHT:.3f},E={MAPS_E_WEIGHT:.3f},D={MAPS_D_WEIGHT:.3f}",
         "surface_edt_weight": f"floor={MAPS_EDT_WEIGHT_FLOOR:.3f},power={MAPS_EDT_WEIGHT_POWER:.3f}",
-        "ranking_score": "portfolio_role_prior_v2",
+        "ranking_score": "common_regional_physics_v1",
+        "ranking_normalization": "receptor_field_max_v1",
+        "legacy_ranking_score": "portfolio_role_prior_v3",
+        "map_loader": "autogrid_dim_plus_one_exact_dsolv_v2",
+        "dsolv_context": "full_ad4_ligand_types_v1",
+        "autogrid_ligand_types": ",".join(autogrid_map_types),
+        "autogrid_map_types": ",".join(autogrid_map_types),
+        "whole_map_policy": "adaptive_spacing_autogrid_cap_v1",
+        "whole_map_npts_max": str(whole_map_npts_max),
         "r_min_A": "auto" if requested_r_min is None else f"{requested_r_min:.3f}",
         "rmin_floor_A": f"{adaptive_params['floor_A']:.3f}",
         "rmin_ceil_A": f"{adaptive_params['ceil_A']:.3f}",
@@ -311,17 +380,34 @@ def autogenerate_centers_tsv(
             )
 
     # 1) Find (or build) whole-protein maps (.fld)
-    fld_candidates = list(out_root.glob("**/*.fld"))
+    fld_candidates = sorted(out_root.glob("**/*.fld"))
     if fld_candidates:
-        def grid_volume(f):
-            try:
-                m = load_fld_or_map_meta(str(f))
-                sh = m["shape"]
-                return int(sh[0] * sh[1] * sh[2])
-            except Exception:
-                return -1
-        fld_candidates.sort(key=grid_volume, reverse=True)
+        if len(fld_candidates) != 1:
+            raise RuntimeError(
+                f"Expected one compatible FLD, found {len(fld_candidates)}: "
+                f"{fld_candidates}"
+            )
         fld = fld_candidates[0]
+        existing_meta = load_fld_or_map_meta(str(fld))
+        if tuple(existing_meta["affinity_types"]) != tuple(autogrid_map_types):
+            raise RuntimeError(
+                f"Incompatible cached FLD {fld}: expected affinity types "
+                f"{autogrid_map_types}, found "
+                f"{existing_meta['affinity_types']}. Use a clean work directory."
+            )
+        _, _, expected_spacing = compute_whole_box_auto(
+            receptor_pdbqt=receptor_pdbqt,
+            base_spacing=float(default_spacing),
+            margin_A=8.0,
+            npts_max=whole_map_npts_max,
+        )
+        expected_spacing = float(f"{expected_spacing:.3f}")
+        if not np.isclose(float(existing_meta["spacing"]), expected_spacing, rtol=0.0, atol=1e-9):
+            raise RuntimeError(
+                f"Incompatible cached FLD {fld}: CaV-EMPS expects spacing "
+                f"{expected_spacing:.3f} A with npts_max={whole_map_npts_max}, found "
+                f"{float(existing_meta['spacing']):.3f} A. Use a clean work directory."
+            )
     else:
         # bootstrap: generate whole-protein maps once
         fld_path = ensure_whole_protein_maps(
@@ -330,6 +416,8 @@ def autogenerate_centers_tsv(
             spacing=default_spacing,
             cap_ang=blind_cap,
             autogrid4_bin=autogrid4_bin,
+            map_types=autogrid_map_types,
+            npts_max=whole_map_npts_max,
         )
         fld_candidates = [Path(fld_path)]
 
@@ -340,6 +428,10 @@ def autogenerate_centers_tsv(
     C = load_map_ascii(mp["C"], shape)
     E = load_map_ascii(mp["E"], shape)
     D = load_map_ascii(mp["D"], shape)
+    map_diagnostics = {}
+    map_diagnostics.update(_map_diagnostics("C", mp["C"], C))
+    map_diagnostics.update(_map_diagnostics("E", mp["E"], E))
+    map_diagnostics.update(_map_diagnostics("D", mp["D"], D))
 
     profiled_r_min = requested_r_min
     r_min_is_profiled = False
@@ -375,6 +467,7 @@ def autogenerate_centers_tsv(
     internal_sites: list[dict] = []
     surface_sites: list[dict] = []
     hybrid_sites: list[dict] = []
+    ranking_score_context: dict | None = None
 
     if policy in {"internal", "hybrid", "receptor_search", "exhaustive_search"}:
         try:
@@ -395,7 +488,7 @@ def autogenerate_centers_tsv(
         except Exception as exc:
             print(f"[centers/internal] skipped due to error: {exc}")
 
-    def _collect_surface_sites(threshold: float) -> list[dict]:
+    def _collect_surface_sites(threshold: float) -> tuple[list[dict], dict | None]:
         return detect_maps_hotspots(
             C,
             E,
@@ -411,11 +504,12 @@ def autogenerate_centers_tsv(
             pocket_max_A=maps_pocket_max_value,
             receptor_pdbqt=receptor_pdbqt,
             min_peak_candidates=candidate_budget,
+            return_score_context=True,
         )
 
     if policy in {"surface", "hybrid", "receptor_search", "exhaustive_search"}:
         print("[centers] collecting surface-pocket candidates")
-        surface_sites = _collect_surface_sites(float(tau_rel))
+        surface_sites, ranking_score_context = _collect_surface_sites(float(tau_rel))
         if len(surface_sites) < surface_target_count:
             print(
                 f"[centers] surface search underfilled after adaptive thresholding "
@@ -606,24 +700,78 @@ def autogenerate_centers_tsv(
 
     if policy == "receptor_search":
         sites = _assign_receptor_search_fitness_scores(sites)
+        sites = _assign_common_physics_ranking_scores(
+            sites,
+            score_context=ranking_score_context,
+        )
 
     # 8) Write TSV
+    diagnostic_columns = [
+        "original_peak_x",
+        "original_peak_y",
+        "original_peak_z",
+        "refined_center_x",
+        "refined_center_y",
+        "refined_center_z",
+        "refinement_shift_A",
+        "refinement_component_size",
+        "refinement_component_count",
+        "internal_anchor_x",
+        "internal_anchor_y",
+        "internal_anchor_z",
+        "surface_anchor_x",
+        "surface_anchor_y",
+        "surface_anchor_z",
+        "anchor_separation_A",
+        "hybrid_center_x",
+        "hybrid_center_y",
+        "hybrid_center_z",
+        "cluster_size",
+        "cluster_spread_A",
+        "unprojected_centroid_x",
+        "unprojected_centroid_y",
+        "unprojected_centroid_z",
+    ]
+
+    def _format_diagnostic_value(value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (int, np.integer)):
+            return str(int(value))
+        if isinstance(value, (float, np.floating)):
+            if not np.isfinite(float(value)):
+                return ""
+            return f"{float(value):.3f}"
+        return str(value)
+
     with open(centers_tsv_path, "w") as f:
         f.write(
             "# receptor\tsite_id\tcx\tcy\tcz\tnx\tny\tnz\tspacing\tr_peak\tF\t"
-            "raw_F\tfamily\tportfolio_role\tselection_score\tcenter_closeness\n"
+            "raw_F\tlegacy_F\tcommon_physics_score\tcommon_physics_raw\tcommon_edt_A\t"
+            "ranking_basis\tfamily\tportfolio_role\tselection_score\tcenter_closeness\t"
+            + "\t".join(diagnostic_columns)
+            + "\n"
         )
         write_meta = dict(requested_meta)
+        write_meta.update(map_diagnostics)
         write_meta["site_count"] = str(len(sites))
         f.write("# meta " + " ".join(f"{key}={value}" for key, value in write_meta.items()) + "\n")
         for s in sites:
             f.write(
                 f"{rec_stem}\t{s['site_id']}\t{s['cx']:.3f}\t{s['cy']:.3f}\t{s['cz']:.3f}\t"
                 f"{s['nx']}\t{s['ny']}\t{s['nz']}\t{s['spacing']:.3f}\t"
-                f"{s.get('r_peak', 2.5):.2f}\t{s.get('F', 1.0):.3f}\t"
-                f"{s.get('raw_F', s.get('F', 1.0)):.3f}\t"
+                f"{s.get('r_peak', 2.5):.2f}\t{s.get('F', 1.0):.6f}\t"
+                f"{s.get('raw_F', s.get('F', 1.0)):.6f}\t"
+                f"{s.get('legacy_F', s.get('F', 1.0)):.6f}\t"
+                f"{s.get('common_physics_score', s.get('F', 1.0)):.6f}\t"
+                f"{s.get('common_physics_raw', 0.0):.8f}\t"
+                f"{s.get('common_edt_A', 0.0):.4f}\t{s.get('ranking_basis', '')}\t"
                 f"{s.get('family', '')}\t{s.get('portfolio_role', '')}\t"
-                f"{s.get('selection_score', '')}\t{s.get('center_closeness', '')}\n"
+                f"{s.get('selection_score', '')}\t{s.get('center_closeness', '')}\t"
+                + "\t".join(_format_diagnostic_value(s.get(key, "")) for key in diagnostic_columns)
+                + "\n"
             )
     print(f"[centers] wrote {len(sites)} --> {centers_tsv_path}")
     return str(centers_tsv_path)
@@ -670,17 +818,13 @@ def ensure_grids_multi_centers(
             print(f"[autogrid/{site_id}] FAILED\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}")
             raise RuntimeError(f"autogrid failed for {site_id}")
 
-        # Prefer the exact expected fld name first (deterministic)
         expected_fld = site_dir / f"{rec_stem}.maps.fld"
-        if expected_fld.exists():
-            fld_path = str(expected_fld.resolve())
-        else:
-            fld_candidates = list(site_dir.glob("*.fld"))
-            if not fld_candidates:
-                fld_candidates = list(site_dir.glob(f"{rec_stem}*.fld"))
-            if not fld_candidates:
-                raise FileNotFoundError(f"No .fld produced in {site_dir}; see {log_path}")
-            fld_path = str(fld_candidates[0].resolve())
+        if not expected_fld.exists():
+            fld_candidates = sorted(site_dir.glob("*.fld"))
+            raise FileNotFoundError(
+                f"Expected AutoGrid FLD {expected_fld}, found {fld_candidates}; see {log_path}"
+            )
+        fld_path = str(expected_fld.resolve())
 
         # NOW meta is safe
         meta = load_fld_or_map_meta(fld_path)
@@ -1063,29 +1207,28 @@ def _normalized_site_values(sites: list[dict], field: str) -> dict[int, float]:
 
 def _assign_receptor_search_fitness_scores(sites: list[dict]) -> list[dict]:
     """
-    Calibrate final receptor-search F across heterogeneous candidate families.
+    Preserve the historical v3 role-prior score for benchmark ablations.
 
     Raw map/internal scores are useful inside a family, but not comparable
-    across surface peaks, hybrid consensus sites, and reserve/core boxes.  The
-    final F used for publication ranking is therefore a small portfolio model:
-    role prior + local raw support + geometry/context bonuses.  Site labels stay
-    untouched; the score is what carries ranking semantics.
+    across surface peaks, hybrid consensus sites, and reserve/core boxes. This
+    score is retained in ``legacy_F`` by the common-physics ranker and is no
+    longer the publication ranking score.
     """
     if not sites:
         return sites
 
     role_prior = {
-        "surface_focus": 1.00,
-        "core_reserve": 0.98,
-        "hybrid_low_score_focus": 0.86,
-        "edt_tail_rescue": 0.82,
-        "surface_primary": 0.76,
-        "surface": 0.72,
-        "internal_primary": 0.50,
-        "hybrid_primary": 0.44,
-        "reserve": 0.24,
-        "axis_reserve": 0.12,
-        "blind_fallback": 0.10,
+        "surface_focus": 0.92,
+        "surface_primary": 0.88,
+        "hybrid_primary": 0.82,
+        "internal_primary": 0.76,
+        "hybrid_low_score_focus": 0.68,
+        "surface": 0.64,
+        "edt_tail_rescue": 0.42,
+        "reserve": 0.22,
+        "axis_reserve": 0.14,
+        "core_reserve": 0.10,
+        "blind_fallback": 0.05,
     }
     raw_norm = _normalized_site_values(sites, "F")
     r_norm = _normalized_site_values(sites, "r_peak")
@@ -1113,6 +1256,97 @@ def _assign_receptor_search_fitness_scores(sites: list[dict]) -> list[dict]:
             )
         )
     return calibrated
+
+
+def _sample_site_grid_value(site: dict, grid: np.ndarray | None, origin, spacing: float) -> float:
+    if grid is None:
+        return 0.0
+    value = trilinear_sample(
+        grid,
+        (float(site["cx"]), float(site["cy"]), float(site["cz"])),
+        origin,
+        float(spacing),
+    )
+    return float(value) if np.isfinite(value) else 0.0
+
+
+def _assign_common_physics_ranking_scores(
+    sites: list[dict],
+    *,
+    score_context: dict | None,
+) -> list[dict]:
+    """
+    Rank every emitted center in one shared physical scoring space.
+
+    Candidate-family scores remain useful while harvesting surface, internal,
+    and hybrid hypotheses, but their numerical scales are not comparable.  At
+    the portfolio boundary, sample the same regional C/E/D/EDT field at every
+    final center and normalize only by the strongest field value in that
+    receptor.  Portfolio roles are retained as diagnostics and do not
+    contribute to the new ranking score.
+
+    If map scoring is unavailable or wholly degenerate, use the same EDT shell
+    support at every center as a deterministic geometry-only fallback.
+    """
+    if not sites:
+        return sites
+
+    context = score_context or {}
+    origin = context.get("origin")
+    spacing = float(context.get("spacing", 1.0))
+    score_field = context.get("score_field")
+    edt_grid = context.get("edt_grid")
+    pocket_min_A = float(context.get("pocket_min_A", 0.0))
+    pocket_max_A = float(context.get("pocket_max_A", np.inf))
+
+    if origin is None:
+        origin = (0.0, 0.0, 0.0)
+
+    raw_physics = [
+        max(0.0, _sample_site_grid_value(site, score_field, origin, spacing))
+        for site in sites
+    ]
+    edt_values = [
+        max(0.0, _sample_site_grid_value(site, edt_grid, origin, spacing))
+        for site in sites
+    ]
+
+    field_max = float(context.get("score_max", 0.0) or 0.0)
+    if not np.isfinite(field_max) or field_max <= 1e-12:
+        field_max = max(raw_physics, default=0.0)
+
+    if field_max > 1e-12:
+        scores = [float(np.clip(value / field_max, 0.0, 1.0)) for value in raw_physics]
+        ranking_basis = "regional_CED_EDT"
+    else:
+        geometry_support = [
+            value if pocket_min_A <= value <= pocket_max_A else 0.0
+            for value in edt_values
+        ]
+        geometry_max = max(geometry_support, default=0.0)
+        if geometry_max > 1e-12:
+            scores = [float(value / geometry_max) for value in geometry_support]
+        else:
+            scores = [0.0 for _ in sites]
+        ranking_basis = "EDT_fallback"
+
+    ranked = []
+    for site, score, raw_score, edt_A in zip(sites, scores, raw_physics, edt_values):
+        legacy_score = float(site.get("F", 0.0) or 0.0)
+        ranked.append(
+            _clone_site(
+                site,
+                legacy_F=legacy_score,
+                legacy_ranking_score=float(site.get("ranking_score", legacy_score) or 0.0),
+                common_physics_score=float(score),
+                common_physics_raw=float(raw_score),
+                common_edt_A=float(edt_A),
+                ranking_basis=ranking_basis,
+                ranking_score=float(score),
+                F=float(score),
+            )
+        )
+    return ranked
 
 
 def _build_surface_region_sites(
@@ -1146,6 +1380,7 @@ def _build_surface_region_sites(
 
         centers = np.array([_site_center(site) for site in neighbors], dtype=np.float32)
         centroid = centers.mean(axis=0)
+        cluster_spread_A = float(np.max(np.linalg.norm(centers - centroid, axis=1)))
         f_values = [float(site.get("F", 0.0)) for site in neighbors]
         r_values = [float(site.get("r_peak", 0.0)) for site in neighbors]
         template = max(neighbors, key=_site_score_value)
@@ -1161,6 +1396,10 @@ def _build_surface_region_sites(
                 selection_score=support_score,
                 r_peak=float(np.mean(r_values)) if r_values else float(template.get("r_peak", 1.0)),
                 cluster_size=len(neighbors),
+                cluster_spread_A=cluster_spread_A,
+                unprojected_centroid_x=float(centroid[0]),
+                unprojected_centroid_y=float(centroid[1]),
+                unprojected_centroid_z=float(centroid[2]),
                 center_closeness=max(
                     float(site.get("center_closeness", 0.0)) for site in neighbors
                 ),
@@ -1368,7 +1607,8 @@ def _refine_surface_hotspot_ijk(
     radius_A: float = 8.0,
     score_keep_fraction: float = 0.55,
     edt_core_percentile: float = 85.0,
-) -> tuple[int, int, int]:
+    return_diagnostics: bool = False,
+) -> tuple[int, int, int] | tuple[tuple[int, int, int], dict]:
     """
     Move a surface-score peak toward the geometric center of the same pocket.
 
@@ -1377,8 +1617,19 @@ def _refine_surface_hotspot_ijk(
     the refinement local and require retained map support so it does not drift
     into unrelated solvent space.
     """
+    seed_ijk = (int(ijk[0]), int(ijk[1]), int(ijk[2]))
+
+    def _return(result: tuple[int, int, int], **diagnostics):
+        if return_diagnostics:
+            return result, diagnostics
+        return result
+
     if edt_grid is None:
-        return (int(ijk[0]), int(ijk[1]), int(ijk[2]))
+        return _return(
+            seed_ijk,
+            refinement_component_count=0,
+            refinement_component_size=0,
+        )
 
     sp = float(spacing)
     radius_vox = max(1, int(round(float(radius_A) / sp)))
@@ -1407,7 +1658,37 @@ def _refine_surface_hotspot_ijk(
     score_floor = max(0.01, float(raw_score) * float(score_keep_fraction))
     local_mask &= (local_dist_A <= float(radius_A)) & (local_score >= score_floor)
     if not np.any(local_mask):
-        return (int(ijk[0]), int(ijk[1]), int(ijk[2]))
+        return _return(
+            seed_ijk,
+            refinement_component_count=0,
+            refinement_component_size=0,
+        )
+
+    component_labels, component_count = label(
+        local_mask,
+        structure=generate_binary_structure(3, 2),
+    )
+    seed_local = tuple(
+        int(ijk[axis]) - int(slices[axis].start)
+        for axis in range(3)
+    )
+    seed_component = int(component_labels[seed_local])
+    if seed_component <= 0:
+        valid_coords = np.argwhere(local_mask)
+        if valid_coords.size:
+            seed_array = np.asarray(seed_local, dtype=np.int32)
+            nearest_index = int(np.argmin(np.sum((valid_coords - seed_array) ** 2, axis=1)))
+            nearest_coord = tuple(int(value) for value in valid_coords[nearest_index])
+            seed_component = int(component_labels[nearest_coord])
+    if seed_component > 0:
+        local_mask &= component_labels == seed_component
+    if not np.any(local_mask):
+        return _return(
+            seed_ijk,
+            refinement_component_count=int(component_count),
+            refinement_component_size=0,
+        )
+    component_size = int(np.count_nonzero(local_mask))
 
     core_floor = float(np.percentile(local_edt[local_mask], float(edt_core_percentile)))
     core_mask = local_mask & (local_edt >= core_floor)
@@ -1416,7 +1697,11 @@ def _refine_surface_hotspot_ijk(
 
     weights = local_edt[core_mask] * (local_score[core_mask] + 1e-3)
     if weights.size == 0 or not np.isfinite(weights).all() or float(weights.sum()) <= 0.0:
-        return (int(ijk[0]), int(ijk[1]), int(ijk[2]))
+        return _return(
+            seed_ijk,
+            refinement_component_count=int(component_count),
+            refinement_component_size=component_size,
+        )
 
     local_coords = np.where(core_mask)
     centroid = np.array(
@@ -1429,9 +1714,14 @@ def _refine_surface_hotspot_ijk(
         + (local_coords[2] - centroid[2]) ** 2
     )
     closest = int(np.argmin(dist_to_centroid))
-    return tuple(
+    refined_ijk = tuple(
         int(local_coords[axis][closest] + slices[axis].start)
         for axis in range(3)
+    )
+    return _return(
+        refined_ijk,
+        refinement_component_count=int(component_count),
+        refinement_component_size=component_size,
     )
 
 
@@ -1480,6 +1770,12 @@ def _build_hybrid_sites(
             weights = np.array([max(1e-3, float(site["selection_score"])) for site in anchors], dtype=np.float32)
             centers = np.array([_site_center(site) for site in anchors], dtype=np.float32)
             ctr = np.average(centers, axis=0, weights=weights)
+        internal_anchor_center = _site_center(internal_anchor) if internal_anchor is not None else None
+        surface_anchor_center = _site_center(surface_anchor) if surface_anchor is not None else None
+        if internal_anchor_center is not None and surface_anchor_center is not None:
+            anchor_separation_A = float(np.linalg.norm(internal_anchor_center - surface_anchor_center))
+        else:
+            anchor_separation_A = ""
 
         template = max(anchors + [candidate], key=lambda site: _site_score_value(site))
         center_closeness = max(
@@ -1496,6 +1792,16 @@ def _build_hybrid_sites(
                 selection_score=float(hybrid_score),
                 F=float(hybrid_score),
                 center_closeness=float(center_closeness),
+                internal_anchor_x="" if internal_anchor_center is None else float(internal_anchor_center[0]),
+                internal_anchor_y="" if internal_anchor_center is None else float(internal_anchor_center[1]),
+                internal_anchor_z="" if internal_anchor_center is None else float(internal_anchor_center[2]),
+                surface_anchor_x="" if surface_anchor_center is None else float(surface_anchor_center[0]),
+                surface_anchor_y="" if surface_anchor_center is None else float(surface_anchor_center[1]),
+                surface_anchor_z="" if surface_anchor_center is None else float(surface_anchor_center[2]),
+                anchor_separation_A=anchor_separation_A,
+                hybrid_center_x=float(ctr[0]),
+                hybrid_center_y=float(ctr[1]),
+                hybrid_center_z=float(ctr[2]),
             )
         )
 
@@ -1877,6 +2183,7 @@ def detect_maps_hotspots(
     pocket_max_A: float | None = None,
     receptor_pdbqt=None,        # if supplied, EDT r_peak is computed from true geometry
     min_peak_candidates: int | None = None,
+    return_score_context: bool = False,
 ):
     """
     Binding-site finder using pocket-averaged interaction energy from AutoGrid maps.
@@ -1925,6 +2232,11 @@ def detect_maps_hotspots(
 
     sp = float(spacing)
 
+    def _result(found_sites: list[dict], context: dict | None = None):
+        if return_score_context:
+            return found_sites, context
+        return found_sites
+
     # ── Build EDT for pocket masking ─────────────────────────────────────────
     edt_grid = None
     occ_grid = None
@@ -1953,7 +2265,7 @@ def detect_maps_hotspots(
     # ── Degenerate-map guard ─────────────────────────────────────────────────
     if receptor_pdbqt is not None and _maps_are_degenerate(C, E, D):
         pocket_min_A, shell_max_A = _maps_pocket_shell_bounds(r_min_A=r_min_A, pocket_max_A=pocket_max_A)
-        return _edt_surface_sites(
+        fallback_sites = _edt_surface_sites(
             receptor_pdbqt,
             origin,
             spacing,
@@ -1963,6 +2275,18 @@ def detect_maps_hotspots(
             box_side_A=box_side_A,
             pocket_min_A=pocket_min_A,
             pocket_max_A=shell_max_A,
+        )
+        return _result(
+            fallback_sites,
+            {
+                "origin": tuple(float(value) for value in origin),
+                "spacing": sp,
+                "score_field": None,
+                "score_max": 0.0,
+                "edt_grid": edt_grid,
+                "pocket_min_A": float(pocket_min_A),
+                "pocket_max_A": float(shell_max_A),
+            },
         )
 
     # ── Pocket-averaged favorability scoring ─────────────────────────────────
@@ -2068,6 +2392,15 @@ def detect_maps_hotspots(
     border_mask[BORDER:-BORDER, BORDER:-BORDER, BORDER:-BORDER] = True
 
     score[~(pocket & border_mask)] = 0.0
+    score_context = {
+        "origin": tuple(float(value) for value in origin),
+        "spacing": sp,
+        "score_field": score,
+        "score_max": float(np.nanmax(score)),
+        "edt_grid": edt_grid,
+        "pocket_min_A": float(pocket_min_A),
+        "pocket_max_A": float(shell_max_A),
+    }
 
     # Local maxima. Start with the requested relative threshold, but if that
     # yields too few raw peaks, relax it before NMS. This keeps the default
@@ -2112,7 +2445,7 @@ def detect_maps_hotspots(
     if not np.any(peak_mask):
         print("[maps/hotspots] no peaks found in favorability landscape")
         if receptor_pdbqt is not None:
-            return _edt_surface_sites(
+            fallback_sites = _edt_surface_sites(
                 receptor_pdbqt,
                 origin,
                 spacing,
@@ -2123,7 +2456,8 @@ def detect_maps_hotspots(
                 pocket_min_A=pocket_min_A,
                 pocket_max_A=shell_max_A,
             )
-        return []
+            return _result(fallback_sites, score_context)
+        return _result([], score_context)
 
     peaks = np.argwhere(peak_mask)
     scores = score[peak_mask].astype(np.float32)
@@ -2149,8 +2483,12 @@ def detect_maps_hotspots(
     kept_xyz, sites = [], []
     for ijk, sc in zip(peaks, scores):
         refined_ijk = (int(ijk[0]), int(ijk[1]), int(ijk[2]))
+        refinement_diagnostics = {
+            "refinement_component_count": "",
+            "refinement_component_size": "",
+        }
         if edt_grid is not None:
-            refined_ijk = _refine_surface_hotspot_ijk(
+            refined_ijk, refinement_diagnostics = _refine_surface_hotspot_ijk(
                 ijk,
                 score=score,
                 edt_grid=edt_grid,
@@ -2158,7 +2496,9 @@ def detect_maps_hotspots(
                 border_mask=border_mask,
                 spacing=sp,
                 raw_score=float(sc),
+                return_diagnostics=True,
             )
+        original_wp = vox2world(ijk)
         wp = vox2world(refined_ijk)
         if all(np.linalg.norm(wp - q) >= min_sep_A for q in kept_xyz):
             contact_frac = 1.0
@@ -2192,10 +2532,19 @@ def detect_maps_hotspots(
                 family="surface",
                 contact_frac=float(contact_frac),
                 center_closeness=center_closeness(wp),
+                original_peak_x=float(original_wp[0]),
+                original_peak_y=float(original_wp[1]),
+                original_peak_z=float(original_wp[2]),
+                refined_center_x=float(wp[0]),
+                refined_center_y=float(wp[1]),
+                refined_center_z=float(wp[2]),
+                refinement_shift_A=float(np.linalg.norm(wp - original_wp)),
+                refinement_component_size=refinement_diagnostics.get("refinement_component_size", ""),
+                refinement_component_count=refinement_diagnostics.get("refinement_component_count", ""),
             ))
             if len(sites) == int(max_sites):
                 break
-    return sites
+    return _result(sites, score_context)
 
 
 def pdbqt_atoms(path):
@@ -2570,9 +2919,10 @@ def load_fld_or_map_meta(fld_or_dir):
     {
       'origin': (ox,oy,oz),  # lower-left-back corner in Å
       'spacing': spacing,    # Å
-      'shape': (nx,ny,nz),   # for reshaping .map arrays (Fortran order)
+      'shape': (dim1,dim2,dim3),  # for reshaping .map arrays (Fortran order)
       'dir': Path,           # directory of the fld
-      'map_paths': {'C': Path, 'E': Path, 'D': Path}
+      'map_paths': {'C': Path, 'E': Path, 'D': Path},
+      'affinity_types': tuple[str, ...],
     }
     """
     import re
@@ -2581,9 +2931,9 @@ def load_fld_or_map_meta(fld_or_dir):
     p = Path(fld_or_dir)
     if not p.is_file():
         # try to find a .fld inside the directory
-        cands = list(Path(fld_or_dir).glob("*.fld"))
-        if not cands:
-            raise FileNotFoundError(f"No .fld in {fld_or_dir}")
+        cands = sorted(Path(fld_or_dir).glob("*.fld"))
+        if len(cands) != 1:
+            raise RuntimeError(f"Expected one FLD in {fld_or_dir}, found {len(cands)}: {cands}")
         p = cands[0]
     d = p.parent
     txt = open(p, "r", encoding="utf-8", errors="ignore").read()
@@ -2616,7 +2966,7 @@ def load_fld_or_map_meta(fld_or_dir):
     if not (dim1 and dim2 and dim3):
         raise RuntimeError("Could not parse dim1/dim2/dim3 from .fld")
 
-    shape = (dim1, dim2, dim3)
+    dims = (dim1, dim2, dim3)
 
     # compute origin from center + spacing + npts (true npts, NOT dims)
     if spacing is None or center is None:
@@ -2624,19 +2974,18 @@ def load_fld_or_map_meta(fld_or_dir):
     if nelems is None:
         # fallback: infer npts = dims - 1
         nelems = (dim1 - 1, dim2 - 1, dim3 - 1)
+    expected_dims = tuple(n + 1 for n in nelems)
+    if dims != expected_dims:
+        raise ValueError(
+            f"FLD dimensions {dims} do not equal "
+            f"NELEMENTS+1 {expected_dims}"
+        )
 
-    # after parsing 'nelems' (nx,ny,nz), 'center', and 'spacing sp'
-    # ...
-    # shape must be NELEMENTS (true npts), not dim*
-    shape = nelems  # (nx, ny, nz)
-
-    # correct origin: center ± (npts-1)*spacing/2
-    nx, ny, nz = nelems
-    cx, cy, cz = center
-    ox = cx - ((nx - 1) * spacing) / 2.0
-    oy = cy - ((ny - 1) * spacing) / 2.0
-    oz = cz - ((nz - 1) * spacing) / 2.0
-    origin = (ox, oy, oz)
+    shape = dims
+    origin = tuple(
+        float(center_value) - 0.5 * float(nelement) * float(spacing)
+        for center_value, nelement in zip(center, nelems)
+    )
 
     # map variable -> label + file
     # example lines:
@@ -2654,6 +3003,12 @@ def load_fld_or_map_meta(fld_or_dir):
     labels = []
     for m in re.finditer(r"label\s*=\s*(.+)", txt, flags=re.I):
         labels.append(m.group(1).strip())  # e.g., "C-affinity", "Electrostatics", "Desolvation"
+    affinity_types = []
+    suffix = "-affinity"
+    for label in labels:
+        label_clean = label.strip()
+        if label_clean.lower().endswith(suffix):
+            affinity_types.append(label_clean[: -len(suffix)])
 
     # Build name->file mapping using typical AutoGrid ordering:
     # veclen=19; variables 1..19 correspond to labels 1..19
@@ -2678,21 +3033,35 @@ def load_fld_or_map_meta(fld_or_dir):
             if k.lower().startswith("c-affinity"):
                 C_path = v
                 break
-    E_path = name_to_path.get("Electrostatics") or name_to_path.get("electrostatics")
-    D_path = name_to_path.get("Desolvation") or name_to_path.get("desolvation")
+    def _path_for_label(label_name):
+        wanted = str(label_name).strip().lower()
+        for label, path in name_to_path.items():
+            if str(label).strip().lower() == wanted:
+                return path
+        return None
+
+    def _map_candidates_by_suffixes(*suffixes):
+        matches = []
+        for map_path in d.glob("*.map"):
+            if any(map_path.name.endswith(suffix) for suffix in suffixes):
+                matches.append(map_path)
+        return sorted(matches)
+
+    E_path = _path_for_label("Electrostatics")
+    D_path = _path_for_label("Desolvation")
 
     if not C_path:
         # fallback glob (avoid Cl/Br etc.)
-        cands = sorted(d.glob("*C.map"))
+        cands = _map_candidates_by_suffixes(".C.map")
         if cands:
             C_path = cands[0]
     if not E_path:
         # often lowercase 'e.map'
-        cands = sorted(list(d.glob("*E.map")) + list(d.glob("*.e.map")))
+        cands = _map_candidates_by_suffixes(".E.map", ".e.map")
         if cands:
             E_path = cands[0]
     if not D_path:
-        cands = sorted(list(d.glob("*D.map")) + list(d.glob("*.d.map")))
+        cands = _map_candidates_by_suffixes(".D.map", ".d.map")
         if cands:
             D_path = cands[0]
 
@@ -2706,7 +3075,54 @@ def load_fld_or_map_meta(fld_or_dir):
         "shape": shape,  # use (dim1,dim2,dim3) when reshaping maps
         "dir": d,
         "map_paths": {"C": C_path, "E": E_path, "D": D_path},
+        "affinity_types": tuple(affinity_types),
     }
+
+
+def _sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _map_diagnostics(label, map_path, arr):
+    values = np.asarray(arr)
+    finite_mask = np.isfinite(values)
+    finite = values[finite_mask]
+    prefix = f"map_{label}"
+    shape_value = "x".join(str(int(x)) for x in values.shape)
+    diagnostics = {
+        f"{prefix}_filename": Path(map_path).name,
+        f"{prefix}_sha256": _sha256_file(map_path),
+        f"{prefix}_shape": shape_value,
+        f"{prefix}_value_count": str(int(values.size)),
+        f"{prefix}_finite_count": str(int(finite.size)),
+        f"{prefix}_nonfinite_count": str(int(values.size - finite.size)),
+    }
+    if finite.size:
+        p01, median, p99 = np.percentile(finite, [1.0, 50.0, 99.0])
+        diagnostics.update(
+            {
+                f"{prefix}_min": f"{float(np.min(finite)):.9g}",
+                f"{prefix}_max": f"{float(np.max(finite)):.9g}",
+                f"{prefix}_p01": f"{float(p01):.9g}",
+                f"{prefix}_median": f"{float(median):.9g}",
+                f"{prefix}_p99": f"{float(p99):.9g}",
+            }
+        )
+    else:
+        diagnostics.update(
+            {
+                f"{prefix}_min": "nan",
+                f"{prefix}_max": "nan",
+                f"{prefix}_p01": "nan",
+                f"{prefix}_median": "nan",
+                f"{prefix}_p99": "nan",
+            }
+        )
+    return diagnostics
 
 
 def load_map_ascii(map_path, shape):
@@ -2731,11 +3147,14 @@ def load_map_ascii(map_path, shape):
                     vals.append(float(tok))
                 except ValueError:
                     pass
-    arr = np.asarray(vals, dtype=np.float32)
     need = int(np.prod(shape))
-    if arr.size > need:
-        arr = arr[-need:]  # keep trailing data block
-    arr = arr[:need].reshape(shape, order="F")  # x fastest
+    arr = np.asarray(vals, dtype=np.float32)
+    if arr.size != need:
+        raise ValueError(
+            f"{map_path}: expected {need} values for shape {shape}, "
+            f"found {arr.size}"
+        )
+    arr = arr.reshape(shape, order="F")  # x fastest
     return arr
 
 
@@ -2863,11 +3282,11 @@ def ensure_grids(
         print(f"[autogrid/{mode}] FAILED\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}")
         raise RuntimeError("autogrid failed")
 
-    # Pick up resulting FLD
-    fld_candidates = list(out_dir_p.glob("*.fld"))
-    if not fld_candidates:
-        raise FileNotFoundError(f"No .fld produced in {out_dir_p}; see {log}")
-    fld_path = str(fld_candidates[0].resolve())
+    expected_fld = out_dir_p / f"{Path(receptor_pdbqt).stem}.maps.fld"
+    if not expected_fld.exists():
+        fld_candidates = sorted(out_dir_p.glob("*.fld"))
+        raise FileNotFoundError(f"Expected AutoGrid FLD {expected_fld}, found {fld_candidates}; see {log}")
+    fld_path = str(expected_fld.resolve())
     return {
         "site_id": "S1",
         "center": (float(center[0]), float(center[1]), float(center[2])),
@@ -2928,6 +3347,32 @@ _AD4_TYPES = [
 ]
 
 
+def _normalize_autogrid_map_types(map_types=None) -> tuple[str, ...]:
+    """
+    Return ligand map types to ask AutoGrid to compute.
+
+    None preserves historical behavior and generates every AD4 affinity map.
+    CaV-EMPS policies reject selective maps because AutoGrid dsolvmap depends
+    on the requested ligand type set.
+    """
+    if map_types is None:
+        return tuple(_AD4_TYPES)
+    if isinstance(map_types, str):
+        raw = [part.strip() for part in re.split(r"[,\s]+", map_types) if part.strip()]
+    else:
+        raw = [str(part).strip() for part in map_types if str(part).strip()]
+    if not raw:
+        return tuple(_AD4_TYPES)
+    valid = set(_AD4_TYPES)
+    normalized = []
+    for atom_type in raw:
+        if atom_type not in valid:
+            raise ValueError(f"unsupported AutoGrid map type {atom_type!r}; expected one of {', '.join(_AD4_TYPES)}")
+        if atom_type not in normalized:
+            normalized.append(atom_type)
+    return tuple(normalized)
+
+
 def _ensure_odd_clamped(nxyz, clamp=(60, 255)):
     import numpy as _np
     n = _np.array(nxyz, int)
@@ -2936,11 +3381,28 @@ def _ensure_odd_clamped(nxyz, clamp=(60, 255)):
     return tuple(int(x) for x in n.tolist())
 
 
-def _write_site_gpf(gpf_path, receptor_pdbqt, center, npts, spacing, autogrid4_bin="autogrid4"):
+def _write_site_gpf(
+    gpf_path,
+    receptor_pdbqt,
+    center,
+    npts,
+    spacing,
+    autogrid4_bin="autogrid4",
+    map_types=None,
+    npts_max: int = DOCKING_GRID_NPTS_MAX,
+):
     """GPF writer that matches ligand_types ⇔ map lines 1:1 (+ elec/dsolv maps)."""
-    rec_stem = Path(receptor_pdbqt).stem
+    rec_path = Path(receptor_pdbqt).resolve()
+    rec_stem = rec_path.stem
     cx, cy, cz = [float(v) for v in center]
-    nx, ny, nz = _ensure_odd_clamped(npts)
+    npts_max = int(npts_max)
+    if not 25 <= npts_max <= AUTOGRID4_NPTS_MAX:
+        raise ValueError(
+            f"npts_max must be between 25 and {AUTOGRID4_NPTS_MAX}, found {npts_max}"
+        )
+    nx, ny, nz = _ensure_odd_clamped(npts, clamp=(60, npts_max))
+    receptor_types = receptor_atom_types(rec_path)
+    ligand_types = _normalize_autogrid_map_types(map_types)
     param_file = _find_ad4_parameter_file(autogrid4_bin)
     with open(gpf_path, "w") as f:
         # parameter_file MUST come first — AutoGrid reads parameters before
@@ -2950,12 +3412,12 @@ def _write_site_gpf(gpf_path, receptor_pdbqt, center, npts, spacing, autogrid4_b
         f.write(f"gridfld {rec_stem}.maps.fld\n")
         f.write(f"npts {nx} {ny} {nz}\n")
         f.write(f"spacing {float(spacing):.3f}\n")
-        f.write(f"receptor_types {' '.join(_AD4_TYPES)}\n")
-        f.write(f"receptor {Path(receptor_pdbqt).resolve()}\n")
+        f.write(f"receptor_types {' '.join(receptor_types)}\n")
+        f.write(f"receptor {rec_path}\n")
         f.write(f"gridcenter {cx:.3f} {cy:.3f} {cz:.3f}\n")
-        f.write(f"ligand_types {' '.join(_AD4_TYPES)}\n")
+        f.write(f"ligand_types {' '.join(ligand_types)}\n")
         f.write("smooth 0.500\n")
-        for t in _AD4_TYPES:
+        for t in ligand_types:
             f.write(f"map {rec_stem}.{t}.map\n")
         f.write(f"elecmap {rec_stem}.e.map\n")
         f.write(f"dsolvmap {rec_stem}.d.map\n")
@@ -2987,13 +3449,19 @@ def compute_whole_box_auto(
     receptor_pdbqt: str,
     base_spacing: float,
     margin_A: float = 8.0,
-    npts_max: int = 255,
+    npts_max: int = DOCKING_GRID_NPTS_MAX,
 ):
     """
     Returns center, (nx,ny,nz) for GPF npts, and spacing.
     Uses larger spacing if needed so the box fully covers the receptor AABB (+margin)
     while keeping npts <= npts_max.
     """
+    npts_max = int(npts_max)
+    if not 25 <= npts_max <= AUTOGRID4_NPTS_MAX:
+        raise ValueError(
+            f"npts_max must be between 25 and {AUTOGRID4_NPTS_MAX}, found {npts_max}"
+        )
+
     ctr, ext, mins, maxs = receptor_aabb_A(receptor_pdbqt)
     side = ext + 2.0 * float(margin_A)
 
@@ -3050,8 +3518,9 @@ def ensure_whole_protein_maps(
     spacing: float = GRID_SPACING,
     cap_ang: float = None,            # keep arg for API compatibility
     margin_A: float = 8.0,
-    npts_max: int = 255,
+    npts_max: int = DOCKING_GRID_NPTS_MAX,
     autogrid4_bin: str = "autogrid4",
+    map_types=None,
 ):
     """
     Build whole-receptor maps robustly:
@@ -3075,7 +3544,16 @@ def ensure_whole_protein_maps(
     validate_box_covers_receptor(receptor_pdbqt, center, npts, sp)
 
     gpf_path = out_root / "grid.gpf"
-    _write_site_gpf(gpf_path, receptor_pdbqt, center, npts, sp)
+    _write_site_gpf(
+        gpf_path,
+        receptor_pdbqt,
+        center,
+        npts,
+        sp,
+        autogrid4_bin=autogrid4_bin,
+        map_types=map_types,
+        npts_max=npts_max,
+    )
 
     log_path = out_root / "grid.glg"
     cmd = [autogrid4_bin, "-p", gpf_path.name, "-l", log_path.name]
@@ -3085,10 +3563,11 @@ def ensure_whole_protein_maps(
             f"autogrid whole-protein failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
         )
 
-    fld_candidates = list(out_root.glob(f"{rec_stem}*.fld"))
-    if not fld_candidates:
-        raise FileNotFoundError(f"No .fld produced in {out_root}. Check {log_path}")
-    fld_path = str(fld_candidates[0].resolve())
+    expected_fld = out_root / f"{rec_stem}.maps.fld"
+    if not expected_fld.exists():
+        fld_candidates = sorted(out_root.glob("*.fld"))
+        raise FileNotFoundError(f"Expected AutoGrid FLD {expected_fld}, found {fld_candidates}. Check {log_path}")
+    fld_path = str(expected_fld.resolve())
 
     # (Optional) post-check: make sure the produced fld bounds cover receptor too (uses your meta loader)
     # meta = load_fld_or_map_meta(fld_path)
@@ -3127,6 +3606,7 @@ class HotspotGPFGenerator:
         nms_box_fraction: float = HOTSPOT_NMS_BOX_FRACTION,
         nms_min_A: float = HOTSPOT_NMS_MIN_A,
         nms_max_A: float = HOTSPOT_NMS_MAX_A,
+        whole_npts_max: int = CAV_EMPS_WHOLE_NPTS_MAX,
     ):
         """
         Returns: a list of site dicts (site_id, center, npts, spacing, fld_path, out_dir)
@@ -3141,6 +3621,7 @@ class HotspotGPFGenerator:
             spacing=whole_spacing,
             cap_ang=whole_cap_ang,
             autogrid4_bin=self.autogrid4_bin,
+            npts_max=whole_npts_max,
         )
 
         # (B) detect hotspots and write centers.tsv (internal/maps/hybrid)
@@ -3166,6 +3647,7 @@ class HotspotGPFGenerator:
             nms_box_fraction=nms_box_fraction,
             nms_min_A=nms_min_A,
             nms_max_A=nms_max_A,
+            whole_map_npts_max=whole_npts_max,
         )
 
         # (C) per-site GPF + AutoGrid into <out_root>/<site_id>/*
