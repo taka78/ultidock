@@ -69,6 +69,96 @@ if not 25 <= CAV_EMPS_WHOLE_NPTS_MAX <= AUTOGRID4_NPTS_MAX:
     )
 
 
+CAV_EMPS_ABLATION_PROFILES = (
+    "combined-final",
+    "geometry-only",
+    "physics-only",
+    "combined-no-d",
+    "combined-no-regional",
+    "combined-v3-ranking",
+    "combined-no-rescue",
+)
+
+
+def normalize_cav_emps_ablation_profile(profile: str | None) -> str:
+    """Return a canonical, benchmark-facing CaV-EMPS ablation profile."""
+    normalized = str(profile or "combined-final").strip().lower().replace("_", "-")
+    aliases = {
+        "default": "combined-final",
+        "final": "combined-final",
+        "combined": "combined-final",
+        "no-d": "combined-no-d",
+        "no-regional": "combined-no-regional",
+        "v3-ranking": "combined-v3-ranking",
+        "no-rescue": "combined-no-rescue",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in CAV_EMPS_ABLATION_PROFILES:
+        raise ValueError(
+            f"Unsupported CaV-EMPS ablation profile {profile!r}; expected one of "
+            + ", ".join(CAV_EMPS_ABLATION_PROFILES)
+        )
+    return normalized
+
+
+def _cav_emps_ablation_settings(profile: str | None) -> dict:
+    """
+    Describe one controlled component ablation.
+
+    Geometry remains a hard validity constraint for every profile: points
+    inside receptor occupancy or outside the finite pocket shell are not valid
+    docking centers. ``physics-only`` therefore means that candidate evidence
+    comes from C/e/d rather than continuous EDT depth, not that steric geometry
+    is ignored.
+    """
+    profile = normalize_cav_emps_ablation_profile(profile)
+    settings = {
+        "profile": profile,
+        "surface_scoring_mode": "combined",
+        "internal_scoring_mode": "combined",
+        "map_weights": None,
+        "regional_scoring": True,
+        "continuous_edt_weight": True,
+        "edt_refinement": True,
+        "contact_gate": True,
+        "allow_edt_fallback": True,
+        "include_internal": True,
+        "include_hybrid": True,
+        "ranking": "common-physics",
+        "rescue": True,
+    }
+    if profile == "geometry-only":
+        settings.update(
+            surface_scoring_mode="geometry-only",
+            internal_scoring_mode="geometry-only",
+            ranking="geometry-only",
+        )
+    elif profile == "physics-only":
+        settings.update(
+            surface_scoring_mode="physics-only",
+            include_internal=False,
+            include_hybrid=False,
+            continuous_edt_weight=False,
+            edt_refinement=False,
+            contact_gate=False,
+            allow_edt_fallback=False,
+            rescue=False,
+        )
+    elif profile == "combined-no-d":
+        settings["map_weights"] = {
+            "C": MAPS_C_WEIGHT,
+            "E": MAPS_E_WEIGHT,
+            "D": 0.0,
+        }
+    elif profile == "combined-no-regional":
+        settings["regional_scoring"] = False
+    elif profile == "combined-v3-ranking":
+        settings["ranking"] = "portfolio-role-prior-v3"
+    elif profile == "combined-no-rescue":
+        settings["rescue"] = False
+    return settings
+
+
 # ── AD4 parameter-file locator ────────────────────────────────────────────
 _AD4_PARAM_FILE_CACHE: str | None = None
 
@@ -273,6 +363,7 @@ def autogenerate_centers_tsv(
     nms_min_A: float = HOTSPOT_NMS_MIN_A,
     nms_max_A: float = HOTSPOT_NMS_MAX_A,
     whole_map_npts_max: int = CAV_EMPS_WHOLE_NPTS_MAX,
+    ablation_profile: str = "combined-final",
 ):
     """
     Generate centers.tsv under out_root using already-present maps or by making whole-protein maps.
@@ -293,6 +384,7 @@ def autogenerate_centers_tsv(
     policy = (mode or "receptor_search").lower()
     if policy == "maps":
         policy = "surface"
+    ablation = _cav_emps_ablation_settings(ablation_profile)
     expected_site_count = _expected_site_count(policy, n_sites)
     requested_r_min = _coerce_optional_float(r_min)
     adaptive_params = _adaptive_r_min_params(adaptive_r_min_params)
@@ -327,7 +419,42 @@ def autogenerate_centers_tsv(
         max_A=nms_max_A,
     )
     candidate_min_sep_A = _candidate_harvest_min_sep_A(effective_min_sep_A, expected_site_count)
+    surface_scoring_tag = {
+        "combined": "isotropic_gaussian_CED_edt_v1",
+        "physics-only": "isotropic_gaussian_CED_no_continuous_edt_v1",
+        "geometry-only": "EDT_surface_geometry_v1",
+    }[ablation["surface_scoring_mode"]]
+    if not ablation["regional_scoring"]:
+        surface_scoring_tag = "voxel_CED_edt_no_regional_v1"
+    if ablation["surface_scoring_mode"] == "geometry-only":
+        surface_kernel_tag = "EDT_gaussian_sigma_vox=2.000"
+        surface_weights_tag = "C=0.000,E=0.000,D=0.000"
+        surface_edt_tag = "geometry_candidate_and_ranking"
+    else:
+        surface_kernel_tag = (
+            f"gaussian_sigma_A={MAPS_GAUSSIAN_SIGMA_A:.3f}"
+            if ablation["regional_scoring"]
+            else "disabled"
+        )
+        surface_weights_tag = _format_map_weights(ablation["map_weights"])
+        surface_edt_tag = (
+            f"floor={MAPS_EDT_WEIGHT_FLOOR:.3f},power={MAPS_EDT_WEIGHT_POWER:.3f}"
+            if ablation["continuous_edt_weight"]
+            else "disabled"
+        )
+    ranking_tag = {
+        "common-physics": "common_regional_physics_v1",
+        "geometry-only": "common_EDT_geometry_v1",
+        "portfolio-role-prior-v3": "portfolio_role_prior_v3",
+    }[ablation["ranking"]]
     requested_meta = {
+        "ablation_profile": ablation["profile"],
+        "ablation_surface_channel": ablation["surface_scoring_mode"],
+        "ablation_internal_channel": ablation["internal_scoring_mode"],
+        "ablation_regional_scoring": "on" if ablation["regional_scoring"] else "off",
+        "ablation_continuous_edt_weight": "on" if ablation["continuous_edt_weight"] else "off",
+        "ablation_ranking": ablation["ranking"],
+        "ablation_rescue": "on" if ablation["rescue"] else "off",
         "policy": policy,
         "site_count": str(expected_site_count),
         "box_side_A": f"{float(hotspot_box_ang):.3f}",
@@ -341,11 +468,11 @@ def autogenerate_centers_tsv(
         "axis_reserve": "replace_penultimate_v1",
         "underfilled_rescue": "edt_tail_fill_v1",
         "geometry_reserve_fill": "underfilled_tail_v1",
-        "surface_scoring": "isotropic_gaussian_CED_edt_v1",
-        "surface_kernel": f"gaussian_sigma_A={MAPS_GAUSSIAN_SIGMA_A:.3f}",
-        "surface_weights": f"C={MAPS_C_WEIGHT:.3f},E={MAPS_E_WEIGHT:.3f},D={MAPS_D_WEIGHT:.3f}",
-        "surface_edt_weight": f"floor={MAPS_EDT_WEIGHT_FLOOR:.3f},power={MAPS_EDT_WEIGHT_POWER:.3f}",
-        "ranking_score": "common_regional_physics_v1",
+        "surface_scoring": surface_scoring_tag,
+        "surface_kernel": surface_kernel_tag,
+        "surface_weights": surface_weights_tag,
+        "surface_edt_weight": surface_edt_tag,
+        "ranking_score": ranking_tag,
         "ranking_normalization": "receptor_field_max_v1",
         "legacy_ranking_score": "portfolio_role_prior_v3",
         "map_loader": "autogrid_dim_plus_one_exact_dsolv_v2",
@@ -469,7 +596,10 @@ def autogenerate_centers_tsv(
     hybrid_sites: list[dict] = []
     ranking_score_context: dict | None = None
 
-    if policy in {"internal", "hybrid", "receptor_search", "exhaustive_search"}:
+    if (
+        ablation["include_internal"]
+        and policy in {"internal", "hybrid", "receptor_search", "exhaustive_search"}
+    ):
         try:
             internal_sites = pick_centers(
                 receptor_pdbqt,
@@ -484,6 +614,8 @@ def autogenerate_centers_tsv(
                 k_box=float(k_box),
                 max_sites=candidate_budget,
                 inflate_A=0.0,
+                scoring_mode=ablation["internal_scoring_mode"],
+                map_weights=ablation["map_weights"],
             )
         except Exception as exc:
             print(f"[centers/internal] skipped due to error: {exc}")
@@ -505,6 +637,13 @@ def autogenerate_centers_tsv(
             receptor_pdbqt=receptor_pdbqt,
             min_peak_candidates=candidate_budget,
             return_score_context=True,
+            scoring_mode=ablation["surface_scoring_mode"],
+            map_weights=ablation["map_weights"],
+            regional_scoring=ablation["regional_scoring"],
+            continuous_edt_weight=ablation["continuous_edt_weight"],
+            edt_refinement=ablation["edt_refinement"],
+            contact_gate=ablation["contact_gate"],
+            allow_edt_fallback=ablation["allow_edt_fallback"],
         )
 
     if policy in {"surface", "hybrid", "receptor_search", "exhaustive_search"}:
@@ -527,7 +666,10 @@ def autogenerate_centers_tsv(
         if surface_region_sites:
             print(f"[centers] built {len(surface_region_sites)} surface-region candidates")
 
-    if policy in {"hybrid", "receptor_search", "exhaustive_search"}:
+    if (
+        ablation["include_hybrid"]
+        and policy in {"hybrid", "receptor_search", "exhaustive_search"}
+    ):
         hybrid_sites = _build_hybrid_sites(
             internal_sites,
             surface_sites,
@@ -562,7 +704,12 @@ def autogenerate_centers_tsv(
     else:
         raise ValueError(f"Unsupported center-generation policy: {policy}")
 
-    if policy == "receptor_search" and expected_site_count >= 6 and len(sites) >= expected_site_count:
+    if (
+        ablation["rescue"]
+        and policy == "receptor_search"
+        and expected_site_count >= 6
+        and len(sites) >= expected_site_count
+    ):
         core_site = _receptor_core_reserve_site(
             receptor_pdbqt,
             box_side_A=float(hotspot_box_ang),
@@ -585,7 +732,7 @@ def autogenerate_centers_tsv(
     # than requested, fill the tail with geometry-only EDT surface-cleft sites.
     # This preserves the existing ranked hypotheses and improves recall for
     # receptors where map scoring underfills the requested portfolio.
-    if policy == "receptor_search" and 0 < len(sites) < expected_site_count:
+    if ablation["rescue"] and policy == "receptor_search" and 0 < len(sites) < expected_site_count:
         try:
             pocket_min_A, shell_max_A = _maps_pocket_shell_bounds(
                 r_min_A=profiled_r_min,
@@ -620,7 +767,7 @@ def autogenerate_centers_tsv(
     # receptor-derived families failed. Keeping blind as S1 preserves the old
     # fallback behavior while allowing extra hypotheses for difficult cases
     # such as transmembrane channels.
-    if len(sites) == 0:
+    if ablation["rescue"] and len(sites) == 0:
         print("[centers] search yielded no sites; falling back to blind box plus EDT rescue")
         center, npts, sp = blind_box(receptor_pdbqt, cap=blind_cap, spacing=default_spacing)
         sites = [
@@ -671,7 +818,7 @@ def autogenerate_centers_tsv(
     # than map, hybrid, internal, and EDT rescue hypotheses; it exists to honor
     # the requested portfolio size without promoting reserve boxes as confident
     # binding-site predictions.
-    if policy == "receptor_search" and 0 < len(sites) < expected_site_count:
+    if ablation["rescue"] and policy == "receptor_search" and 0 < len(sites) < expected_site_count:
         reserve_candidates = []
         axis_sites = _receptor_axis_reserve_sites(
             receptor_pdbqt,
@@ -700,10 +847,19 @@ def autogenerate_centers_tsv(
 
     if policy == "receptor_search":
         sites = _assign_receptor_search_fitness_scores(sites)
-        sites = _assign_common_physics_ranking_scores(
-            sites,
-            score_context=ranking_score_context,
-        )
+        if ablation["ranking"] == "common-physics":
+            sites = _assign_common_physics_ranking_scores(
+                sites,
+                score_context=ranking_score_context,
+            )
+        elif ablation["ranking"] == "geometry-only":
+            geometry_context = dict(ranking_score_context or {})
+            geometry_context["score_field"] = None
+            geometry_context["score_max"] = 0.0
+            sites = _assign_common_physics_ranking_scores(
+                sites,
+                score_context=geometry_context,
+            )
 
     # 8) Write TSV
     diagnostic_columns = [
@@ -929,6 +1085,23 @@ def _normalize_positive_weights(weights: dict[str, float]) -> dict[str, float]:
     if total <= 0.0:
         return {key: 1.0 / len(cleaned) for key in cleaned}
     return {key: value / total for key, value in cleaned.items()}
+
+
+def _effective_map_weights(weights: dict[str, float] | None = None) -> dict[str, float]:
+    if weights is None:
+        weights = {
+            "C": MAPS_C_WEIGHT,
+            "E": MAPS_E_WEIGHT,
+            "D": MAPS_D_WEIGHT,
+        }
+    return _normalize_positive_weights(
+        {channel: float(weights.get(channel, 0.0)) for channel in ("C", "E", "D")}
+    )
+
+
+def _format_map_weights(weights: dict[str, float] | None = None) -> str:
+    effective = _effective_map_weights(weights)
+    return ",".join(f"{channel}={effective[channel]:.3f}" for channel in ("C", "E", "D"))
 
 
 def _continuous_edt_weight(
@@ -2184,6 +2357,13 @@ def detect_maps_hotspots(
     receptor_pdbqt=None,        # if supplied, EDT r_peak is computed from true geometry
     min_peak_candidates: int | None = None,
     return_score_context: bool = False,
+    scoring_mode: str = "combined",
+    map_weights: dict[str, float] | None = None,
+    regional_scoring: bool = True,
+    continuous_edt_weight: bool = True,
+    edt_refinement: bool = True,
+    contact_gate: bool = True,
+    allow_edt_fallback: bool = True,
 ):
     """
     Binding-site finder using pocket-averaged interaction energy from AutoGrid maps.
@@ -2229,6 +2409,9 @@ def detect_maps_hotspots(
     C = np.asarray(C, dtype=np.float32)
     E = np.asarray(E, dtype=np.float32)
     D = np.asarray(D, dtype=np.float32)
+    scoring_mode = str(scoring_mode).strip().lower().replace("_", "-")
+    if scoring_mode not in {"combined", "physics-only", "geometry-only"}:
+        raise ValueError(f"Unsupported surface scoring mode: {scoring_mode}")
 
     sp = float(spacing)
 
@@ -2262,9 +2445,41 @@ def detect_maps_hotspots(
     if r_min_A is None and occ_grid is not None:
         r_min_A = adaptive_r_min_cavity(occ_grid, sp, **_adaptive_r_min_params(adaptive_r_min_params))
 
+    pocket_min_A, shell_max_A = _maps_pocket_shell_bounds(
+        r_min_A=r_min_A,
+        pocket_max_A=pocket_max_A,
+    )
+    if scoring_mode == "geometry-only":
+        if receptor_pdbqt is None:
+            raise ValueError("geometry-only scoring requires receptor_pdbqt")
+        geometry_sites = _edt_surface_sites(
+            receptor_pdbqt,
+            origin,
+            spacing,
+            C.shape,
+            min_sep_A=min_sep_A,
+            max_sites=max_sites,
+            box_side_A=box_side_A,
+            pocket_min_A=pocket_min_A,
+            pocket_max_A=shell_max_A,
+        )
+        return _result(
+            geometry_sites,
+            {
+                "origin": tuple(float(value) for value in origin),
+                "spacing": sp,
+                "score_field": None,
+                "score_max": 0.0,
+                "edt_grid": edt_grid,
+                "pocket_min_A": float(pocket_min_A),
+                "pocket_max_A": float(shell_max_A),
+            },
+        )
+
     # ── Degenerate-map guard ─────────────────────────────────────────────────
     if receptor_pdbqt is not None and _maps_are_degenerate(C, E, D):
-        pocket_min_A, shell_max_A = _maps_pocket_shell_bounds(r_min_A=r_min_A, pocket_max_A=pocket_max_A)
+        if not allow_edt_fallback:
+            return _result([], None)
         fallback_sites = _edt_surface_sites(
             receptor_pdbqt,
             origin,
@@ -2329,9 +2544,7 @@ def detect_maps_hotspots(
     E_fav = np.clip(-np.clip(E, -50.0, 0.0) / 50.0, 0.0, 1.0).astype(np.float32)
     D_fav = _positive_signal_unit_interval(np.abs(D))
 
-    weights = _normalize_positive_weights(
-        {"C": MAPS_C_WEIGHT, "E": MAPS_E_WEIGHT, "D": MAPS_D_WEIGHT}
-    )
+    weights = _effective_map_weights(map_weights)
     fav = (
         weights["C"] * C_fav
         + weights["E"] * E_fav
@@ -2346,7 +2559,6 @@ def detect_maps_hotspots(
     #   < shell_min: protein interior or steric clash zone
     #   shell_min–shell_max: pocket-contact zone where ligands make wall contacts
     #   > shell_max: bulk solvent — no enclosure, no binding complementarity
-    pocket_min_A, shell_max_A = _maps_pocket_shell_bounds(r_min_A=r_min_A, pocket_max_A=pocket_max_A)
     if edt_grid is not None:
         pocket = (edt_grid >= pocket_min_A) & (edt_grid <= shell_max_A)
     else:
@@ -2360,24 +2572,27 @@ def detect_maps_hotspots(
     # rotationally symmetric, so the score does not depend on how the receptor
     # sits relative to the grid axes.  The truncate value keeps the effective
     # support near MAPS_CONVOLUTION_RADIUS_A.
-    sigma_vox = max(0.5, float(MAPS_GAUSSIAN_SIGMA_A) / sp)
-    truncate = max(
-        2.0,
-        float(MAPS_CONVOLUTION_RADIUS_A) / max(float(MAPS_GAUSSIAN_SIGMA_A), 1e-6),
-    )
-    fav_smooth = gaussian_filter(
-        fav,
-        sigma=sigma_vox,
-        mode="constant",
-        cval=0.0,
-        truncate=truncate,
-    ).astype(np.float32)
+    if regional_scoring:
+        sigma_vox = max(0.5, float(MAPS_GAUSSIAN_SIGMA_A) / sp)
+        truncate = max(
+            2.0,
+            float(MAPS_CONVOLUTION_RADIUS_A) / max(float(MAPS_GAUSSIAN_SIGMA_A), 1e-6),
+        )
+        fav_smooth = gaussian_filter(
+            fav,
+            sigma=sigma_vox,
+            mode="constant",
+            cval=0.0,
+            truncate=truncate,
+        ).astype(np.float32)
+    else:
+        fav_smooth = fav.copy()
 
     # Step 4: continuously reward enclosure/depth inside the allowed pocket
     # shell.  This keeps the hard shell as a safety mask while avoiding a binary
     # all-or-none treatment of shallow grooves versus deep vestibules.
     score = fav_smooth
-    if edt_grid is not None:
+    if continuous_edt_weight and edt_grid is not None:
         score = score * _continuous_edt_weight(
             edt_grid,
             pocket_min_A=pocket_min_A,
@@ -2444,7 +2659,7 @@ def detect_maps_hotspots(
 
     if not np.any(peak_mask):
         print("[maps/hotspots] no peaks found in favorability landscape")
-        if receptor_pdbqt is not None:
+        if allow_edt_fallback and receptor_pdbqt is not None:
             fallback_sites = _edt_surface_sites(
                 receptor_pdbqt,
                 origin,
@@ -2487,7 +2702,7 @@ def detect_maps_hotspots(
             "refinement_component_count": "",
             "refinement_component_size": "",
         }
-        if edt_grid is not None:
+        if edt_refinement and edt_grid is not None:
             refined_ijk, refinement_diagnostics = _refine_surface_hotspot_ijk(
                 ijk,
                 score=score,
@@ -2502,7 +2717,7 @@ def detect_maps_hotspots(
         wp = vox2world(refined_ijk)
         if all(np.linalg.norm(wp - q) >= min_sep_A for q in kept_xyz):
             contact_frac = 1.0
-            if edt_grid is not None:
+            if contact_gate and edt_grid is not None:
                 contact_frac = _surface_contact_fraction(
                     edt_grid,
                     refined_ijk,
@@ -2693,7 +2908,7 @@ def robust_norm(x):
     return (x - med) / mad
 
 
-def site_score(E, C, D, origin, sp, center):
+def site_score(E, C, D, origin, sp, center, map_weights: dict[str, float] | None = None):
     # sample small ball statistics
     valsE, valsC, valsD = [], [], []
     # neighborhood: 2-voxel radius
@@ -2721,8 +2936,17 @@ def site_score(E, C, D, origin, sp, center):
     sE = _sigmoid_stable(-0.7 * Ez)  # more negative E -> higher
     sD = Dn
 
-    # combine
-    F = 0.45 * np.nanmedian(sC) + 0.30 * np.nanmedian(sD) + 0.25 * np.nanmedian(sE)
+    # Preserve the historical internal-cavity weights for the final profile;
+    # explicit ablations use the requested C/E/D channel weights.
+    if map_weights is None:
+        weights = {"C": 0.45, "E": 0.25, "D": 0.30}
+    else:
+        weights = _effective_map_weights(map_weights)
+    F = (
+        weights["C"] * np.nanmedian(sC)
+        + weights["D"] * np.nanmedian(sD)
+        + weights["E"] * np.nanmedian(sE)
+    )
     return float(F), float(np.nanmedian(sC)), float(np.nanmedian(sD)), float(np.nanmedian(sE))
 
 
@@ -2817,7 +3041,9 @@ def pick_centers(
     min_sep_A=5.0,
     k_box=4.0,
     max_sites=6,
-    inflate_A=0.0
+    inflate_A=0.0,
+    scoring_mode="combined",
+    map_weights: dict[str, float] | None = None,
 ):
     atoms = pdbqt_atoms(pdbqt)
 
@@ -2867,7 +3093,18 @@ def pick_centers(
         if search_r_min is not None and r_peak < search_r_min:
             continue
         cx, cy, cz = voxel_to_world((i, j, k), (ox, oy, oz), sp)
-        F, sC, sD, sE = site_score(maps["E"], maps["C"], maps["D"], map_origin, map_spacing, (cx, cy, cz))
+        if str(scoring_mode).strip().lower().replace("_", "-") == "geometry-only":
+            F = float(r_peak)
+        else:
+            F, sC, sD, sE = site_score(
+                maps["E"],
+                maps["C"],
+                maps["D"],
+                map_origin,
+                map_spacing,
+                (cx, cy, cz),
+                map_weights=map_weights,
+            )
         # simple gates
         # if sD < 0.45 or sC < 0.55: continue ##################fix these thresholds
         candidates.append((np.array([cx, cy, cz]), r_peak, F))
@@ -3002,7 +3239,9 @@ def load_fld_or_map_meta(fld_or_dir):
     # collect labels (in order of appearance)
     labels = []
     for m in re.finditer(r"label\s*=\s*(.+)", txt, flags=re.I):
-        labels.append(m.group(1).strip())  # e.g., "C-affinity", "Electrostatics", "Desolvation"
+        # AutoGrid appends an inline component comment after the label. Strip it
+        # before type validation and label-to-variable matching.
+        labels.append(m.group(1).split("#", 1)[0].strip())
     affinity_types = []
     suffix = "-affinity"
     for label in labels:
