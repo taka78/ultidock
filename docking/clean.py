@@ -29,6 +29,7 @@ from pathlib import Path
 import fnmatch
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
 DOCKING_DIR_DEFAULT = SCRIPT_DIR  
 CONFIG_FILE = DOCKING_DIR_DEFAULT / "config.py"
 SENTINEL = ".ultidock_sentinel"
@@ -115,9 +116,9 @@ def _glob_delete(root: Path, patterns: list[str], *, dry: bool, only_files=False
 
 
 def _ensure_inside_repo(p: Path) -> bool:
-    # basic guardrail: don’t allow deleting outside the repo tree
+    # Resolve symlinks and require a descendant of the repository root.
     try:
-        return SCRIPT_DIR in p.resolve().parents or p.resolve() == SCRIPT_DIR
+        return REPO_ROOT in p.resolve().parents
     except Exception:
         return False
 
