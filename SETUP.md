@@ -95,8 +95,8 @@ ultidock doctor
 
 ## Local fpocket and P2Rank boxes
 
-`ultidock setup` and the normal pipeline setup install the local tools
-(fpocket 4.2.3 and P2Rank 2.5) automatically. This needs `git`, `make`,
+`ultidock setup`, the normal pipeline setup, and the first pocket command
+install the local tools (fpocket 4.2.3 and P2Rank 2.5) automatically. This needs `git`, `make`,
 `curl`, and Java 17–23 for P2Rank. To install them without running full setup:
 
 ```bash
