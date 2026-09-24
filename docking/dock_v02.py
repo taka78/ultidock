@@ -200,6 +200,20 @@ def prepare_sites_for_docking(receptor_pdbqt: str, macro_dir: str):
       'spacing': float, 'fld_path': str, 'out_dir': str
     }]
     """
+    # AutoGrid's affinity-map calculation requires a receptor donor hydrogen.
+    # MolGuard canonicalizes existing PDBQT inputs but does not add atoms.
+    has_donor_hydrogen = any(
+        line.startswith(("ATOM  ", "HETATM")) and line[77:79].strip() in {"HD", "HS"}
+        for line in Path(receptor_pdbqt).read_text(encoding="ascii").splitlines()
+    )
+    if not has_donor_hydrogen:
+        raise ValueError(
+            f"AutoGrid cannot build maps for {receptor_pdbqt}: no HD or HS donor "
+            "hydrogens are present. MolGuard only canonicalizes an existing "
+            "PDBQT; prepare a hydrogen-complete receptor from the source PDB "
+            "before docking."
+        )
+
     macro_dir = Path(macro_dir)
     macro_dir.mkdir(parents=True, exist_ok=True)
     centers_tsv_path = Path(CENTERS_TSV)
