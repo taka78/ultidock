@@ -33,6 +33,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip results analysis stage",
     )
+    parser.add_argument(
+        "--keep-artifacts",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Keep original ligand archives (default for docking runs)",
+    )
     return parser
 
 
@@ -68,7 +74,10 @@ def main(argv: list[str] | None = None):
     if not args.skip_extract:
         from extract import main as extract_main
 
-        extract_main()
+        keep_artifacts = (
+            args.keep_artifacts if args.keep_artifacts is not None else not args.benchmark
+        )
+        extract_main(keep_artifacts=keep_artifacts)
 
     if not args.skip_docking:
         from dock_v02 import DockingProcessor

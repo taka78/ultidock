@@ -5,8 +5,8 @@ Ultidock cleaner: nuke build artifacts and run outputs in one go.
 I'm too lazy to write this to relative paths, so it assumes you run it from the docking/ directory. Maybe later I will fix this.
 Usage: python3 clean.py [options]
 
-Default behavior = DRY RUN (prints what it would delete).
-Use -y / --yes to actually delete.
+Default behavior = DRY RUN of build files and Python caches.
+Use -y / --yes to actually delete. Run artifacts require explicit flags.
 
 Categories:
   build    -> autodock-gpu builds (bin/, *.o/*.a etc) + autogrid binary
@@ -231,16 +231,31 @@ def main():
     if args.all:
         args.build = args.results = args.maps = args.pycache = args.db = args.ligands = args.config = True
 
-    # If no flags, default to a safe sweep that won’t destroy DB or ligands.
-    if not any([args.build, args.results, args.maps, args.pycache, args.db, args.ligands]):
-        args.build = args.results = args.maps = args.pycache = True
+    # Preserve run outputs and receptor grids unless their cleanup is requested.
+    if not any([
+        args.build, args.results, args.maps, args.pycache, args.db,
+        args.ligands, args.sidecars, args.config,
+    ]):
+        args.build = args.pycache = True
 
-    # Guardrails: ensure targets are inside repo
-    for k, v in CFG.items():
-        if isinstance(v, Path) and k not in ("NUMWI",):
-            if not _ensure_inside_repo(v) and v.exists():
-                print(f"[ABORT] Refusing to touch path outside repo: {k} -> {v}")
-                return 2
+    # Guard only paths selected for deletion; other configured run locations
+    # may be external even when this command only cleans local build files.
+    selected_paths = {}
+    if args.build:
+        selected_paths["AUTODOCK_GPU_DIR"] = CFG["AUTODOCK_GPU_DIR"]
+    if args.results:
+        selected_paths["DOCKING_DIR"] = CFG["DOCKING_DIR"]
+        selected_paths["ANALYSIS_DIR"] = CFG["ANALYSIS_DIR"]
+    if args.maps or args.sidecars:
+        selected_paths["MACRO_MOL_DIR"] = CFG["MACRO_MOL_DIR"]
+    if args.db:
+        selected_paths["DB_PATH"] = CFG["DB_PATH"]
+    if args.ligands:
+        selected_paths["LIGANDS_DIR"] = CFG["LIGANDS_DIR"]
+    for key, path in selected_paths.items():
+        if path.exists() and not _ensure_inside_repo(path):
+            print(f"[ABORT] Refusing to touch path outside repo: {key} -> {path}")
+            return 2
 
     print(f"== Ultidock clean  (dry-run={dry}) ==")
     print(f"Config:\n  AUTODOCK_GPU_DIR={CFG['AUTODOCK_GPU_DIR']}\n  DOCKING_DIR={CFG['DOCKING_DIR']}\n  ANALYSIS_DIR={CFG['ANALYSIS_DIR']}\n  MACRO_MOL_DIR={CFG['MACRO_MOL_DIR']}\n  RESULTS_DIR={CFG['RESULTS_DIR']}\n  LIGANDS_DIR={CFG['LIGANDS_DIR']}\n  DB_PATH={CFG['DB_PATH']}\n")

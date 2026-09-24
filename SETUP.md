@@ -75,6 +75,30 @@ python run.py --skip-setup --skip-extract   # dock only (config already exists)
 
 ---
 
+## Research run artifacts
+
+The `ultidock cavity`, `ultidock blind`, `ultidock known-site`,
+`ultidock run p2rank`, and `ultidock run fpocket` commands create a separate
+run folder under `docking/RESULTS_DIR/` by default. Each folder keeps its
+configuration, docking outputs, analysis, database and CSV results, and report.
+Pocket runs also keep the staged receptor, predicted sites, raw predictor
+output, and generated grids there. Other modes keep receptor grids in their
+configured `MACRO_MOL_DIR`. Use `--output-dir PATH` on these commands to choose
+a different run folder. Existing folders under the old top-level `runs/`
+location are left in place.
+
+Docking runs also keep original ligand `.gz` archives by default. The temporary
+uncompressed source is removed after splitting because leaving it in
+`LIGANDS_DIR` would dock it as an extra ligand. Benchmarks using `--benchmark`
+retain their lean archive behavior; `--no-keep-artifacts` selects that behavior
+for an ordinary run.
+
+`ultidock clean -y` now removes build files and Python caches only. To remove
+saved poses or grids, request `--results` or `--maps` explicitly; `--all`
+requests the full cleanup.
+
+---
+
 ## Step 4 — Validate inputs with molguard
 
 From **anywhere** (the `ultidock` command is on your PATH after step 1):

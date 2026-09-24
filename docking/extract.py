@@ -9,10 +9,11 @@ import gzip
 from config import LIGANDS_DIR, DOCKING_DIR, ANALYSIS_DIR, VINA_DIR
 
 class ProcessFileThread(threading.Thread):
-    def __init__(self, f, extraction_barrier):
+    def __init__(self, f, extraction_barrier, keep_artifacts=True):
         super().__init__()
         self.f = f  # File path
         self.extraction_barrier = extraction_barrier
+        self.keep_artifacts = keep_artifacts
 
     def run(self):
         # First, extract the archive
@@ -38,9 +39,9 @@ class ProcessFileThread(threading.Thread):
                     shutil.copyfileobj(gz_file, extracted_file)
             print(f"Extracted: {extracted_file_path}")
             
-            # After successful extraction, delete the .gz file
-            os.remove(self.f)
-            print(f"Deleted archive: {self.f}")
+            if not self.keep_artifacts:
+                os.remove(self.f)
+                print(f"Deleted archive: {self.f}")
 
         except Exception as e:
             print(f"Failed to extract {self.f}: {e}")
@@ -54,13 +55,15 @@ class ProcessFileThread(threading.Thread):
         try:
             """Processes the file using vina_split."""
             print(f"Processing {extracted_file_path}")
-            subprocess.run([f"{VINA_DIR}/bin/vina_split", "--input", f"{extracted_file_path}"])
+            subprocess.run([f"{VINA_DIR}/bin/vina_split", "--input", extracted_file_path])
+            # The archive retains this source; leaving it in LIGANDS_DIR would
+            # make the docking stage count it as an additional ligand.
             os.remove(extracted_file_path)
         except Exception as e:
             print(e)
             pass
 
-def main():
+def main(*, keep_artifacts=True):
     print(LIGANDS_DIR)
 
     # Phase 1: Find all .gz files
@@ -72,7 +75,7 @@ def main():
     # Create a thread for each file (both for extraction and split process)
     threads = []
     for f in FILES:
-        t = ProcessFileThread(f, extraction_barrier)
+        t = ProcessFileThread(f, extraction_barrier, keep_artifacts=keep_artifacts)
         threads.append(t)
         t.start()
 

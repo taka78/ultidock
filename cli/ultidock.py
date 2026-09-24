@@ -81,11 +81,11 @@ def _run_python(
 
 
 def _timestamp() -> str:
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
+    return datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 
 
 def _default_run_dir(mode: str) -> Path:
-    return (_repo_root() / "runs" / f"{mode}_{_timestamp()}").resolve()
+    return (_docking_dir() / "RESULTS_DIR" / f"{mode}_{_timestamp()}").resolve()
 
 
 def _split_center(center: str) -> tuple[float, float, float]:
@@ -180,6 +180,7 @@ def _run_pipeline_mode(
     if config_extra:
         config.update(config_extra)
     _write_run_config(run_dir / "run_config.yaml", config)
+    click.echo(f"Run directory: {run_dir}")
 
     if dry_run:
         click.echo("Dry run command:")
@@ -510,7 +511,7 @@ def report_cmd(run_dir: Path) -> None:
 @cli.command("clean", context_settings=FORWARD_CONTEXT)
 @click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
 def clean_cmd(extra_args: tuple[str, ...]) -> None:
-    """Reset compiled binaries and docking outputs."""
+    """Clean build files and caches; run artifacts need explicit flags."""
     _run_python(_docking_dir() / "clean.py", extra_args, cwd=_docking_dir(), topic="troubleshooting")
 
 
