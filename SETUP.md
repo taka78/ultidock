@@ -123,10 +123,12 @@ ultidock p2rank --receptor receptor.pdbqt --autosites 6 --box-size 35 --skip-wge
 ```
 
 The box center is each predictor's reported site center (the fpocket adapter
-uses the centroid of its pocket coordinate file). Box sizing uses the same
-fixed `--box-size` conversion as `known-site`; no CaV-EMPS scoring or docking
-calculation changes. The generated `sites.tsv` and raw predictor output are
-kept in the run directory.
+uses the centroid of its pocket coordinate file). The default 35 Å box and
+0.375 Å grid spacing use the same interval rounding and limits as
+`make_grids.py`; `--box-size` and `--grid-spacing` can override them. No extra
+pocket-specific padding is added. CaV-EMPS scoring and docking calculations are
+unchanged. The generated `sites.tsv` and raw predictor output are kept in the
+run directory.
 
 ---
 

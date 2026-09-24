@@ -310,6 +310,7 @@ def _create_pocket_sites(
     output_tsv: Path,
     work_dir: Path,
     box_size: float,
+    grid_spacing: float,
     autosites: int,
     tool: Path | None,
 ) -> None:
@@ -320,6 +321,7 @@ def _create_pocket_sites(
             output_tsv=output_tsv,
             work_dir=work_dir,
             box_size=box_size,
+            spacing=grid_spacing,
             max_sites=autosites,
             tool=tool,
         )
@@ -333,13 +335,18 @@ def _create_pocket_sites(
 @click.option("--receptor", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
 @click.option("--output", type=click.Path(path_type=Path), required=True, help="Output sites TSV.")
 @click.option("--box-size", type=float, default=35.0, show_default=True, help="Box side in A.")
+@click.option("--grid-spacing", type=float, default=0.375, show_default=True, help="Grid spacing in A.")
 @click.option("--autosites", type=int, default=6, show_default=True, help="Maximum ranked pockets.")
 @click.option("--tool", type=click.Path(path_type=Path), help="Override the local executable path.")
 def pocket_box_cmd(
-    method: str, receptor: Path, output: Path, box_size: float, autosites: int, tool: Path | None
+    method: str, receptor: Path, output: Path, box_size: float, grid_spacing: float,
+    autosites: int, tool: Path | None
 ) -> None:
     """Create docking boxes from local fpocket or P2Rank predictions."""
-    _create_pocket_sites(method, receptor, output, output.parent / "pockets", box_size, autosites, tool)
+    _create_pocket_sites(
+        method, receptor, output, output.parent / "pockets",
+        box_size, grid_spacing, autosites, tool,
+    )
 
 
 def _run_pocket_mode(
@@ -348,6 +355,7 @@ def _run_pocket_mode(
     receptor: Path,
     output_dir: Path | None,
     box_size: float,
+    grid_spacing: float,
     autosites: int,
     tool: Path | None,
     dry_run: bool,
@@ -362,23 +370,30 @@ def _run_pocket_mode(
         shutil.copy2(receptor, staged_receptor)
     centers_tsv = run_dir / "sites.tsv"
     _create_pocket_sites(
-        method, staged_receptor, centers_tsv, run_dir / "pockets", box_size, autosites, tool
+        method, staged_receptor, centers_tsv, run_dir / "pockets",
+        box_size, grid_spacing, autosites, tool
     )
     _run_pipeline_mode(
         public_mode=method,
         grid_mode="centers",
         output_dir=run_dir,
-        extra_args=("--macro-mol-dir", str(input_dir), *extra_args),
+        extra_args=(
+            "--macro-mol-dir", str(input_dir), "--grid-spacing", str(grid_spacing), *extra_args
+        ),
         dry_run=dry_run,
         report=report,
         centers_tsv=centers_tsv,
-        config_extra={"receptor_input": str(staged_receptor), "box_size_a": box_size, "autosites": autosites},
+        config_extra={
+            "receptor_input": str(staged_receptor), "box_size_a": box_size,
+            "grid_spacing_a": grid_spacing, "autosites": autosites,
+        },
     )
 
 
 def _pocket_mode_command(method: str):
     @click.option("--receptor", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
     @click.option("--box-size", type=float, default=35.0, show_default=True, help="Box side in A.")
+    @click.option("--grid-spacing", type=float, default=0.375, show_default=True, help="Grid spacing in A.")
     @click.option("--autosites", type=int, default=6, show_default=True, help="Maximum ranked pockets.")
     @click.option("--tool", type=click.Path(path_type=Path), help="Override the local executable path.")
     @click.option("--output-dir", type=click.Path(path_type=Path), help="Run directory.")
@@ -388,6 +403,7 @@ def _pocket_mode_command(method: str):
     def command(
         receptor: Path,
         box_size: float,
+        grid_spacing: float,
         autosites: int,
         tool: Path | None,
         output_dir: Path | None,
@@ -397,7 +413,7 @@ def _pocket_mode_command(method: str):
     ) -> None:
         _run_pocket_mode(
             method=method, receptor=receptor, output_dir=output_dir, box_size=box_size,
-            autosites=autosites, tool=tool, dry_run=dry_run, report=report, extra_args=extra_args,
+            grid_spacing=grid_spacing, autosites=autosites, tool=tool, dry_run=dry_run, report=report, extra_args=extra_args,
         )
     return command
 

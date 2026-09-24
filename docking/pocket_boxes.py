@@ -46,6 +46,7 @@ def create_pocket_boxes(
     output_tsv: Path,
     work_dir: Path,
     box_size: float = 35.0,
+    spacing: float = 0.375,
     max_sites: int = 6,
     tool: Path | None = None,
 ) -> int:
@@ -54,6 +55,8 @@ def create_pocket_boxes(
         raise ValueError(f"Unknown pocket method: {method}")
     if not math.isfinite(box_size) or box_size <= 0:
         raise ValueError("box_size must be a positive finite number")
+    if not math.isfinite(spacing) or spacing <= 0:
+        raise ValueError("spacing must be a positive finite number")
     if max_sites < 1:
         raise ValueError("max_sites must be at least 1")
     receptor_pdbqt = receptor_pdbqt.expanduser().resolve()
@@ -88,10 +91,11 @@ def create_pocket_boxes(
     if not sites:
         raise ValueError(f"{method} returned no pocket centers for {receptor_pdbqt}")
 
-    spacing = 0.375
-    npts = max(1, int(round(box_size / spacing)))
+    # Match make_grids._npts_for_box_side: ceil, odd, then AutoGrid clamp.
+    npts = int(math.ceil(box_size / spacing))
     if npts % 2 == 0:
         npts += 1
+    npts = max(60, min(255, npts))
     output_tsv = output_tsv.expanduser().resolve()
     output_tsv.parent.mkdir(parents=True, exist_ok=True)
     with output_tsv.open("w", encoding="utf-8") as handle:
