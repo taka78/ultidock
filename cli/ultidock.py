@@ -268,7 +268,29 @@ def setup_cmd(extra_args: tuple[str, ...]) -> None:
 @cli.command("run", context_settings=FORWARD_CONTEXT)
 @click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
 def run_cmd(extra_args: tuple[str, ...]) -> None:
-    """Run the full Ultidock docking pipeline."""
+    """Run the full pipeline, optionally using p2rank or fpocket pockets.
+
+    Use ``ultidock run p2rank`` or ``ultidock run fpocket`` to predict sites
+    from the sole receptor in docking/MACRO_MOL_DIR. Pass --receptor PATH to
+    select another file. See ``ultidock p2rank --help`` or
+    ``ultidock fpocket --help`` for pocket options.
+    """
+    if extra_args and extra_args[0] in ("p2rank", "fpocket"):
+        method = extra_args[0]
+        method_args = list(extra_args[1:])
+        if not any(arg == "--receptor" or arg.startswith("--receptor=") for arg in method_args):
+            receptor_dir = _docking_dir() / "MACRO_MOL_DIR"
+            receptors = sorted(receptor_dir.glob("*.pdbqt"))
+            if len(receptors) != 1:
+                raise click.ClickException(
+                    f"Expected one receptor PDBQT in {receptor_dir}; found {len(receptors)}. "
+                    "Pass --receptor PATH to select one."
+                )
+            method_args = ["--receptor", str(receptors[0]), *method_args]
+        cli.commands[method].main(
+            args=method_args, prog_name=f"ultidock run {method}", standalone_mode=False
+        )
+        return
     _run_python(_docking_dir() / "run.py", extra_args, cwd=_docking_dir(), topic="quick-start")
 
 
@@ -378,7 +400,7 @@ def _run_pocket_mode(
         grid_mode="centers",
         output_dir=run_dir,
         extra_args=(
-            "--macro-mol-dir", str(input_dir), "--grid-spacing", str(grid_spacing), *extra_args
+            *extra_args, "--macro-mol-dir", str(input_dir), "--grid-spacing", str(grid_spacing)
         ),
         dry_run=dry_run,
         report=report,

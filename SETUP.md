@@ -122,6 +122,11 @@ ultidock fpocket --receptor receptor.pdbqt --autosites 6 --box-size 35 --skip-wg
 ultidock p2rank --receptor receptor.pdbqt --autosites 6 --box-size 35 --skip-wget
 ```
 
+`ultidock run fpocket` and `ultidock run p2rank` are equivalent forms. They
+use the sole `.pdbqt` file in `docking/MACRO_MOL_DIR` by default; pass
+`--receptor PATH` when choosing another receptor or when that directory has
+multiple files. Additional docking options such as `--skip-wget` are forwarded.
+
 The box center is each predictor's reported site center (the fpocket adapter
 uses the centroid of its pocket coordinate file). The default 35 Å box and
 0.375 Å grid spacing use the same interval rounding and limits as
