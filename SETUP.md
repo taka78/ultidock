@@ -93,6 +93,43 @@ ultidock doctor
 
 ---
 
+## Local fpocket and P2Rank boxes
+
+`ultidock setup` and the normal pipeline setup install the local tools
+(fpocket 4.2.3 and P2Rank 2.5) automatically. This needs `git`, `make`,
+`curl`, and Java 17–23 for P2Rank. To install them without running full setup:
+
+```bash
+bash scripts/install_pocket_tools.sh
+ultidock doctor
+```
+
+The tools are installed under the ignored `external/` directory. The docking
+commands use these local executables by default and accept `--tool PATH` to
+select another local executable.
+
+To create a docking-box file without running docking:
+
+```bash
+ultidock pocket-box --method fpocket --receptor receptor.pdbqt --output sites.tsv
+ultidock pocket-box --method p2rank --receptor receptor.pdbqt --output sites.tsv
+```
+
+To run the full pipeline with the top ranked pockets:
+
+```bash
+ultidock fpocket --receptor receptor.pdbqt --autosites 6 --box-size 35 --skip-wget
+ultidock p2rank --receptor receptor.pdbqt --autosites 6 --box-size 35 --skip-wget
+```
+
+The box center is each predictor's reported site center (the fpocket adapter
+uses the centroid of its pocket coordinate file). Box sizing uses the same
+fixed `--box-size` conversion as `known-site`; no CaV-EMPS scoring or docking
+calculation changes. The generated `sites.tsv` and raw predictor output are
+kept in the run directory.
+
+---
+
 ## Run tests
 
 From **repo root**:

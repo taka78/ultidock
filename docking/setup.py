@@ -617,10 +617,21 @@ def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI):
             print("AutoDock-GPU binary already compiled and executable.")'''
 
 
+def install_pocket_tools() -> None:
+    """Install the local fpocket and P2Rank executables if needed."""
+    installer = Path(ROOT_DIR) / "scripts" / "install_pocket_tools.sh"
+    if not installer.is_file():
+        raise FileNotFoundError(f"Pocket-tool installer not found: {installer}")
+    print("[setup] checking local fpocket and P2Rank tools...")
+    subprocess.run(["bash", str(installer)], cwd=ROOT_DIR, check=True)
+
+
 def run_setup(args: argparse.Namespace) -> dict:
     print("=" * 50)
     print("Welcome to the Ultidock Setup")
     print("=" * 50)
+
+    install_pocket_tools()
 
     mode = _normalize_mode(args.mode)
 

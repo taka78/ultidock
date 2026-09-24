@@ -183,8 +183,9 @@ def _top_hits(run_dir: Path) -> list[dict[str, str]]:
         return []
 
 
-def _write_centers_pdb(path: Path, sites: list[dict[str, str]]) -> None:
-    lines = ["REMARK CaV-EMPS predicted cavity/site centers"]
+def _write_centers_pdb(path: Path, sites: list[dict[str, str]], method: str = "cav-emps") -> None:
+    label = "CaV-EMPS predicted cavity/site centers" if method == "cav-emps" else f"{method} predicted site centers"
+    lines = [f"REMARK {label}"]
     for index, site in enumerate(sites, start=1):
         try:
             x = float(site.get("cx") or site.get("center_x") or 0.0)
@@ -202,13 +203,15 @@ def _write_centers_pdb(path: Path, sites: list[dict[str, str]]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _write_pymol(path: Path, sites: list[dict[str, str]], centers_name: str) -> None:
+def _write_pymol(
+    path: Path, sites: list[dict[str, str]], centers_name: str, object_name: str = "cavemps_centers"
+) -> None:
     lines = [
-        f"load {centers_name}, cavemps_centers",
-        "hide everything, cavemps_centers",
-        "show spheres, cavemps_centers",
-        "set sphere_scale, 1.2, cavemps_centers",
-        "color cyan, cavemps_centers",
+        f"load {centers_name}, {object_name}",
+        f"hide everything, {object_name}",
+        f"show spheres, {object_name}",
+        f"set sphere_scale, 1.2, {object_name}",
+        f"color cyan, {object_name}",
     ]
     for index, site in enumerate(sites, start=1):
         site_id = site.get("site_id") or f"S{index}"
@@ -226,8 +229,9 @@ def _write_chimerax(path: Path, centers_name: str) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _write_bild(path: Path, sites: list[dict[str, str]]) -> None:
-    lines = [".comment CaV-EMPS predicted cavity/site centers", ".color cyan"]
+def _write_bild(path: Path, sites: list[dict[str, str]], method: str = "cav-emps") -> None:
+    label = "CaV-EMPS predicted cavity/site centers" if method == "cav-emps" else f"{method} predicted site centers"
+    lines = [f".comment {label}", ".color cyan"]
     for site in sites:
         try:
             x = float(site.get("cx") or site.get("center_x") or 0.0)
@@ -239,24 +243,30 @@ def _write_bild(path: Path, sites: list[dict[str, str]]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_visual_exports(run_dir: Path, sites: list[dict[str, str]]) -> dict[str, Path]:
+def write_visual_exports(
+    run_dir: Path, sites: list[dict[str, str]], method: str = "cav-emps"
+) -> dict[str, Path]:
+    cav_emps = method == "cav-emps"
+    centers_name = "cavity_centers.pdb" if cav_emps else "pocket_centers.pdb"
+    sites_name = "cavemps_sites" if cav_emps else "pocket_sites"
+    object_name = "cavemps_centers" if cav_emps else "pocket_centers"
     exports = {
-        "cavity_centers_pdb": run_dir / "cavity_centers.pdb",
-        "cavemps_sites_pml": run_dir / "cavemps_sites.pml",
+        "cavity_centers_pdb": run_dir / centers_name,
+        "cavemps_sites_pml": run_dir / f"{sites_name}.pml",
         "site_boxes_pml": run_dir / "site_boxes.pml",
         "top_poses_pml": run_dir / "top_poses.pml",
-        "chimerax_cxc": run_dir / "cavemps_sites.cxc",
-        "cavity_centers_bild": run_dir / "cavity_centers.bild",
+        "chimerax_cxc": run_dir / f"{sites_name}.cxc",
+        "cavity_centers_bild": run_dir / ("cavity_centers.bild" if cav_emps else "pocket_centers.bild"),
     }
-    _write_centers_pdb(exports["cavity_centers_pdb"], sites)
-    _write_pymol(exports["cavemps_sites_pml"], sites, "cavity_centers.pdb")
-    _write_pymol(exports["site_boxes_pml"], sites, "cavity_centers.pdb")
+    _write_centers_pdb(exports["cavity_centers_pdb"], sites, method)
+    _write_pymol(exports["cavemps_sites_pml"], sites, centers_name, object_name)
+    _write_pymol(exports["site_boxes_pml"], sites, centers_name, object_name)
     exports["top_poses_pml"].write_text(
         "# Load top docking poses here when pose files are present.\n",
         encoding="utf-8",
     )
-    _write_chimerax(exports["chimerax_cxc"], "cavity_centers.pdb")
-    _write_bild(exports["cavity_centers_bild"], sites)
+    _write_chimerax(exports["chimerax_cxc"], centers_name)
+    _write_bild(exports["cavity_centers_bild"], sites, method)
     return exports
 
 
@@ -306,9 +316,10 @@ def generate_report(run_dir: Path) -> dict[str, Path]:
     run_dir.mkdir(parents=True, exist_ok=True)
     sites = _site_rows(run_dir)
     top_hits = _top_hits(run_dir)
-    exports = write_visual_exports(run_dir, sites)
     config_path = _find_first(run_dir, ("run_config.yaml", "run_metadata.json", "summary.json"))
     config = _read_key_values(config_path)
+    method = config.get("site_method", "cav-emps")
+    exports = write_visual_exports(run_dir, sites, method)
     receptor_summary = _pdb_summary(_resolve_path(config.get("receptor_input", ""), base=run_dir))
 
     markdown = [
@@ -319,8 +330,10 @@ def generate_report(run_dir: Path) -> dict[str, Path]:
         f"- Generated: {datetime.now(timezone.utc).isoformat()}",
         f"- Run directory: `{run_dir}`",
         f"- Git commit: `{_git_commit()}`",
-        "- Site method: `cav-emps` (CaV-EMPS: Cavity detection via Electrostatic Map Pocket Scoring)",
-        "- CaV-EMPS scores are ranking scores, not binding affinities.",
+        ("- Site method: `cav-emps` (CaV-EMPS: Cavity detection via Electrostatic Map Pocket Scoring)"
+         if method == "cav-emps" else f"- Site method: `{method}`"),
+        ("- CaV-EMPS scores are ranking scores, not binding affinities."
+         if method == "cav-emps" else "- Site scores are ranking scores, not binding affinities."),
         "",
         "## Reproducibility",
         "",
@@ -331,11 +344,12 @@ def generate_report(run_dir: Path) -> dict[str, Path]:
         "",
         _markdown_table([receptor_summary] if receptor_summary else [], ["path", "atom_count", "chain_count", "chains", "residue_count"], limit=1),
         "",
-        "## CaV-EMPS Sites",
+        f"## {'CaV-EMPS' if method == 'cav-emps' else method} Sites",
         "",
         _markdown_table(
             sites,
-            ["site_id", "cx", "cy", "cz", "F", "raw_F", "family", "portfolio_role"],
+            (["site_id", "cx", "cy", "cz", "F", "raw_F", "family", "portfolio_role"]
+             if method == "cav-emps" else ["site_id", "cx", "cy", "cz", "score", "family"]),
             limit=30,
         ),
         "",

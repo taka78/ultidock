@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -13,6 +14,9 @@ import click
 from cli.report import generate_report
 from cli.readme import readme_hint
 from molguard import __version__
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from docking.pocket_boxes import LOCAL_BINARIES, create_pocket_boxes
 
 FORWARD_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True}
 
@@ -244,6 +248,12 @@ def doctor_cmd() -> None:
         else:
             had_issue = True
             click.echo(f"  [FAIL]  {label:30s} not found", err=True)
+    for method, path in LOCAL_BINARIES.items():
+        if path.is_file() and os.access(path, os.X_OK):
+            click.echo(f"  [OK]    {method:30s} {path}")
+        else:
+            had_issue = True
+            click.echo(f"  [FAIL]  {method:30s} not found at {path}", err=True)
     if had_issue:
         click.echo(f"       {readme_hint('troubleshooting')}", err=True)
 
@@ -292,6 +302,112 @@ def known_site_cmd(
         centers_tsv=centers_tsv,
         config_extra={"known_center": parsed_center, "box_size_a": box_size},
     )
+
+
+def _create_pocket_sites(
+    method: str,
+    receptor: Path,
+    output_tsv: Path,
+    work_dir: Path,
+    box_size: float,
+    autosites: int,
+    tool: Path | None,
+) -> None:
+    try:
+        count = create_pocket_boxes(
+            method=method,
+            receptor_pdbqt=receptor,
+            output_tsv=output_tsv,
+            work_dir=work_dir,
+            box_size=box_size,
+            max_sites=autosites,
+            tool=tool,
+        )
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"{method}: wrote {count} docking boxes to {output_tsv}")
+
+
+@cli.command("pocket-box")
+@click.option("--method", type=click.Choice(["fpocket", "p2rank"]), required=True)
+@click.option("--receptor", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
+@click.option("--output", type=click.Path(path_type=Path), required=True, help="Output sites TSV.")
+@click.option("--box-size", type=float, default=35.0, show_default=True, help="Box side in A.")
+@click.option("--autosites", type=int, default=6, show_default=True, help="Maximum ranked pockets.")
+@click.option("--tool", type=click.Path(path_type=Path), help="Override the local executable path.")
+def pocket_box_cmd(
+    method: str, receptor: Path, output: Path, box_size: float, autosites: int, tool: Path | None
+) -> None:
+    """Create docking boxes from local fpocket or P2Rank predictions."""
+    _create_pocket_sites(method, receptor, output, output.parent / "pockets", box_size, autosites, tool)
+
+
+def _run_pocket_mode(
+    *,
+    method: str,
+    receptor: Path,
+    output_dir: Path | None,
+    box_size: float,
+    autosites: int,
+    tool: Path | None,
+    dry_run: bool,
+    report: bool,
+    extra_args: tuple[str, ...],
+) -> None:
+    run_dir = output_dir.resolve() if output_dir else _default_run_dir(method)
+    input_dir = run_dir / "inputs"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    staged_receptor = input_dir / receptor.name
+    if receptor.resolve() != staged_receptor.resolve():
+        shutil.copy2(receptor, staged_receptor)
+    centers_tsv = run_dir / "sites.tsv"
+    _create_pocket_sites(
+        method, staged_receptor, centers_tsv, run_dir / "pockets", box_size, autosites, tool
+    )
+    _run_pipeline_mode(
+        public_mode=method,
+        grid_mode="centers",
+        output_dir=run_dir,
+        extra_args=("--macro-mol-dir", str(input_dir), *extra_args),
+        dry_run=dry_run,
+        report=report,
+        centers_tsv=centers_tsv,
+        config_extra={"receptor_input": str(staged_receptor), "box_size_a": box_size, "autosites": autosites},
+    )
+
+
+def _pocket_mode_command(method: str):
+    @click.option("--receptor", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
+    @click.option("--box-size", type=float, default=35.0, show_default=True, help="Box side in A.")
+    @click.option("--autosites", type=int, default=6, show_default=True, help="Maximum ranked pockets.")
+    @click.option("--tool", type=click.Path(path_type=Path), help="Override the local executable path.")
+    @click.option("--output-dir", type=click.Path(path_type=Path), help="Run directory.")
+    @click.option("--dry-run", is_flag=True, help="Generate boxes and print the pipeline command.")
+    @click.option("--report/--no-report", default=True, show_default=True)
+    @click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+    def command(
+        receptor: Path,
+        box_size: float,
+        autosites: int,
+        tool: Path | None,
+        output_dir: Path | None,
+        dry_run: bool,
+        report: bool,
+        extra_args: tuple[str, ...],
+    ) -> None:
+        _run_pocket_mode(
+            method=method, receptor=receptor, output_dir=output_dir, box_size=box_size,
+            autosites=autosites, tool=tool, dry_run=dry_run, report=report, extra_args=extra_args,
+        )
+    return command
+
+
+cli.command("fpocket", context_settings=FORWARD_CONTEXT, help="Run local fpocket site docking.")(
+    _pocket_mode_command("fpocket")
+)
+cli.command("p2rank", context_settings=FORWARD_CONTEXT, help="Run local P2Rank site docking.")(
+    _pocket_mode_command("p2rank")
+)
 
 
 @cli.command("cavity", context_settings=FORWARD_CONTEXT)
