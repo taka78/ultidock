@@ -99,3 +99,21 @@ workspace/
 # Local Codex/session state and scratch notes.
 .codex
 .codex/
+
+# Release source archive excludes local generated data and scratch copies.
+results/
+bin/
+docking/MACRO_MOL_DIR/
+docking/*backup*.py
+
+# Legacy one-off prototypes and local download inputs, retained only on disk.
+/dock.py
+/dock_beta.py
+/extract.py
+/output-analyses.py
+/4h10_edited-autodock-with-remark.pdbqt
+/ZINC-charge-neutral-logp2-3.wget
+
+# Superseded docking prototypes; active pipeline uses dock_v02.py.
+docking/dock_beta_old.py
+docking/dock_v01.py

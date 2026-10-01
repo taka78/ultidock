@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from molguard import __version__
+
 
 def _repo_root() -> Path:
     for candidate in [Path(__file__).resolve().parent.parent, Path.cwd(), *Path.cwd().parents]:
@@ -330,6 +332,7 @@ def generate_report(run_dir: Path) -> dict[str, Path]:
         f"- Generated: {datetime.now(timezone.utc).isoformat()}",
         f"- Run directory: `{run_dir}`",
         f"- Git commit: `{_git_commit()}`",
+        f"- Version: `{config.get('version', __version__)}`",
         ("- Site method: `cav-emps` (CaV-EMPS: Cavity detection via Electrostatic Map Pocket Scoring)"
          if method == "cav-emps" else f"- Site method: `{method}`"),
         ("- CaV-EMPS scores are ranking scores, not binding affinities."
@@ -338,7 +341,7 @@ def generate_report(run_dir: Path) -> dict[str, Path]:
         "## Reproducibility",
         "",
         f"- Config/metadata: `{config_path.name if config_path else 'not found'}`",
-        f"- Command: `{os.environ.get('ULTIDOCK_COMMAND', 'not recorded')}`",
+        f"- Command: `{config.get('command') or os.environ.get('ULTIDOCK_COMMAND', 'not recorded')}`",
         "",
         "## Receptor",
         "",

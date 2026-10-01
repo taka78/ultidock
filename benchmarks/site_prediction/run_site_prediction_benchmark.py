@@ -14,6 +14,15 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "benchmarks" / "results" / "site_prediction"
 DEFAULT_RAW_ROOT = REPO_ROOT / "benchmarks" / "site_prediction" / "datasets" / "raw"
+CAV_EMPS_ABLATION_PROFILES = (
+    "combined-final",
+    "geometry-only",
+    "physics-only",
+    "combined-no-d",
+    "combined-no-regional",
+    "combined-v3-ranking",
+    "combined-no-rescue",
+)
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -29,11 +38,12 @@ from benchmarks.site_prediction.runtime_tools import (  # noqa: E402
     first_command_token,
     is_executable_path,
     resolve_autogrid4_bin,
+    resolve_command_path,
 )
 
 
-def _split_csv(value: str) -> list[str]:
-    return [part.strip() for part in value.split(",") if part.strip()]
+def _split_csv(value: str | None) -> list[str]:
+    return [part.strip() for part in (value or "").split(",") if part.strip()]
 
 
 def _default_output_dir() -> Path:
@@ -116,29 +126,41 @@ def _preflight_methods(args: argparse.Namespace, methods: list[str]) -> list[str
 
 def _combine_prediction_files(paths: list[Path], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    wrote_header = False
-    n_rows = 0
-    with output_path.open("w", encoding="utf-8", newline="") as out_handle:
-        writer = None
-        for path in paths:
-            if not path.is_file():
-                raise FileNotFoundError(f"prediction file was not produced: {path}")
-            with path.open("r", encoding="utf-8", newline="") as in_handle:
-                reader = csv.DictReader(in_handle, delimiter="\t")
-                if not reader.fieldnames:
-                    raise ValueError(f"prediction file has no header: {path}")
-                if writer is None:
-                    writer = csv.DictWriter(out_handle, fieldnames=reader.fieldnames, delimiter="\t")
-                if not wrote_header:
-                    writer.writeheader()
-                    wrote_header = True
-                for row in reader:
-                    writer.writerow(row)
-                    n_rows += 1
-    if not wrote_header or n_rows == 0:
-        raise RuntimeError(
-            f"No prediction rows were produced; refusing to evaluate empty predictions at {output_path}"
+    fieldnames: list[str] | None = None
+    rows: list[dict[str, str]] = []
+    for path in paths:
+        if not path.is_file():
+            raise FileNotFoundError(f"prediction file was not produced: {path}")
+        with path.open("r", encoding="utf-8", newline="") as in_handle:
+            reader = csv.DictReader(in_handle, delimiter="\t")
+            if not reader.fieldnames:
+                raise ValueError(f"prediction file has no header: {path}")
+            if fieldnames is None:
+                fieldnames = list(reader.fieldnames)
+            elif list(reader.fieldnames) != fieldnames:
+                raise ValueError(
+                    f"prediction columns differ in {path}: expected {fieldnames}, "
+                    f"found {reader.fieldnames}"
+                )
+            rows.extend(dict(row) for row in reader)
+    if fieldnames is None:
+        raise RuntimeError("No prediction files were selected.")
+
+    # Thread completion order must not change the byte representation of a
+    # benchmark run. Empty method/target outputs are represented downstream by
+    # the evaluator's full method x target matrix, not by synthetic site rows.
+    rows.sort(
+        key=lambda row: (
+            normalize_method_name(str(row.get("method") or "")),
+            str(row.get("target_id") or ""),
+            int(row.get("rank") or 0),
+            str(row.get("site_id") or ""),
         )
+    )
+    with output_path.open("w", encoding="utf-8", newline="") as out_handle:
+        writer = csv.DictWriter(out_handle, fieldnames=fieldnames, delimiter="\t")
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def build_predict_command(
@@ -197,10 +219,16 @@ def build_predict_command(
         command.extend(["--fpocket-cmd", args.fpocket_cmd])
     if args.p2rank_cmd:
         command.extend(["--p2rank-cmd", args.p2rank_cmd])
+    if method == "cav-emps" and args.cav_emps_ablation_profiles:
+        command.extend(
+            ["--cav-emps-ablation-profiles", args.cav_emps_ablation_profiles]
+        )
     return command
 
 
 def run_site_prediction_benchmark(args: argparse.Namespace) -> Path:
+    args.fpocket_cmd = resolve_command_path(args.fpocket_cmd)
+    args.p2rank_cmd = resolve_command_path(args.p2rank_cmd)
     output_dir = Path(args.output_dir).resolve() if args.output_dir else _default_output_dir().resolve()
     raw_root = Path(args.raw_root).resolve()
     normalized_root = Path(args.normalized_root).resolve() if args.normalized_root else output_dir / "normalized"
@@ -215,6 +243,17 @@ def run_site_prediction_benchmark(args: argparse.Namespace) -> Path:
     if unsupported:
         raise SystemExit(f"Unsupported method(s): {', '.join(unsupported)}")
     methods = _preflight_methods(args, methods)
+    ablation_profiles = _split_csv(args.cav_emps_ablation_profiles)
+    if ablation_profiles == ["all"]:
+        ablation_profiles = list(CAV_EMPS_ABLATION_PROFILES)
+    if ablation_profiles and "cav-emps" not in methods:
+        raise SystemExit("--cav-emps-ablation-profiles requires cav-emps in --methods")
+    evaluation_methods = []
+    for method in methods:
+        if method == "cav-emps" and ablation_profiles:
+            evaluation_methods.extend(f"cav-emps-{profile}" for profile in ablation_profiles)
+        else:
+            evaluation_methods.append(method)
 
     print(f"Output dir: {output_dir}")
     print(f"Datasets:   {', '.join(datasets)}")
@@ -263,23 +302,27 @@ def run_site_prediction_benchmark(args: argparse.Namespace) -> Path:
             _combine_prediction_files(prediction_files, combined_predictions)
 
         print(f"\n[{dataset}] evaluating")
-        _run(
-            [
-                sys.executable,
-                str(REPO_ROOT / "benchmarks" / "site_prediction" / "evaluate_predictions.py"),
-                "--dataset",
-                dataset,
-                "--normalized-root",
-                str(normalized_root),
-                "--predictions-tsv",
-                str(combined_predictions),
-                "--output-dir",
-                str(evaluation_root / dataset),
-                "--threshold",
-                str(args.threshold),
-            ],
-            dry_run=bool(args.dry_run),
-        )
+        evaluate_command = [
+            sys.executable,
+            str(REPO_ROOT / "benchmarks" / "site_prediction" / "evaluate_predictions.py"),
+            "--dataset",
+            dataset,
+            "--normalized-root",
+            str(normalized_root),
+            "--predictions-tsv",
+            str(combined_predictions),
+            "--output-dir",
+            str(evaluation_root / dataset),
+            "--threshold",
+            str(args.threshold),
+            "--methods",
+            ",".join(evaluation_methods),
+        ]
+        if args.targets:
+            evaluate_command.extend(["--targets", args.targets])
+        if args.max_targets is not None:
+            evaluate_command.extend(["--max-targets", str(args.max_targets)])
+        _run(evaluate_command, dry_run=bool(args.dry_run))
 
         print(f"\n[{dataset}] reporting")
         _run(
@@ -331,6 +374,13 @@ def build_parser() -> argparse.ArgumentParser:
             "Deprecated compatibility flag. CaV-EMPS benchmarks always generate "
             "full AD4 ligand maps because AutoGrid dsolvmap depends on the "
             "requested ligand type set."
+        ),
+    )
+    parser.add_argument(
+        "--cav-emps-ablation-profiles",
+        help=(
+            "Comma-separated CaV-EMPS profiles, or all. Profiles share one exact "
+            "AutoGrid C/e/d map set per target."
         ),
     )
     parser.add_argument(

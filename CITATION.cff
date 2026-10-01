@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+title: "Ultidock"
+message: "If you use Ultidock, please cite this software release."
+type: software
+authors:
+  - family-names: "Turgut"
+    given-names: "Taha"
+repository-code: "https://github.com/taka78/ultidock"
+abstract: "A cavity-aware virtual screening workflow with CaV-EMPS automatic binding-site proposal, docking orchestration, reporting, and benchmark tooling."
+keywords:
+  - molecular docking
+  - virtual screening
+  - binding site prediction
+  - AutoDock
+  - CaV-EMPS
+license: MIT
+version: "1.1.1"
+date-released: "2026-10-01"

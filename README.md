@@ -1,9 +1,7 @@
-# Ultidock (gmx-dev branch)
+# Ultidock
 
 Ultidock is a high-throughput molecular docking workflow that automates ligand
-staging, grid preparation, AutoDock-GPU execution, and post-processing. The
-`gmx-dev` branch focuses on reproducible automation today and prepares the
-groundwork for future GROMACS-based molecular dynamics integration.
+staging, grid preparation, AutoDock-GPU execution, and post-processing.
 
 This document explains **how to run the pipeline step by step**, details the
 major components, and highlights the features that make Ultidock different from
@@ -602,13 +600,16 @@ It writes `input/receptor.pdb`, `input/reference_ligand.mol2`,
 `run_config.yaml`, `sites.tsv`, `predictions.tsv`, `top_hits.csv`,
 `results.sqlite`, `report.md`, `report.html`, and PyMOL/ChimeraX helper files.
 
-Two curated examples (`gabaa-benzos` and `sert-escitalopram`) showcase the fuller
-docking workflow. Each full example runner performs the same steps a user would
-follow:
+Two curated docking examples (`gabaa-benzos` and `sert-escitalopram`) showcase
+the fuller docking workflow. The separate `gabaa-8dd2-cav-emps` example runs a
+preregistered blind site-recovery case study against five withheld GABA/zolpidem
+sites, including the controlled CaV-EMPS ablations and fpocket/P2Rank comparison.
+Each full example runner follows a documented researcher workflow:
 
 ```bash
 ultidock example list
 ultidock example run sert-escitalopram
+ultidock example run gabaa-8dd2-cav-emps --dry-run
 ```
 
 What the helper (`examples/common.py`) does:
@@ -658,10 +659,9 @@ Use these scripts as blueprints for your own automation or CI workflows.
 
 ## Citation & License
 
-If you use Ultidock in academic or industrial research, please cite:
-
-> Turgut, T. (2025). *Ultidock: A Lightweight Parallelized Docking Pipeline for
-> Ligand Screening*. GitHub Repository. https://github.com/taka78/ultidock
+If you use Ultidock in research, use the version-specific Zenodo DOI when
+available. The release author, title, version, and repository metadata are in
+[CITATION.cff](CITATION.cff).
 
 Ultidock is released under the [MIT License](LICENSE). When applicable, please
 also cite:

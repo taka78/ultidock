@@ -54,6 +54,46 @@ def _markdown_to_html(markdown: str) -> str:
     )
 
 
+def _ablation_summary_rows(
+    summary: list[dict[str, str]],
+    per_target: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    methods = sorted(
+        {
+            str(row.get("method") or "")
+            for row in summary
+            if str(row.get("method") or "").startswith("cav-emps-")
+        }
+    )
+    rows = []
+    for method in methods:
+        rates = {
+            str(row.get("protocol") or ""): str(row.get("success_rate") or "")
+            for row in summary
+            if row.get("method") == method
+        }
+        prediction_counts = [
+            int(row.get("n_predictions") or 0)
+            for row in per_target
+            if row.get("method") == method and int(row.get("n_reference_sites") or 0) > 0
+        ]
+        rows.append(
+            {
+                "configuration": method.removeprefix("cav-emps-"),
+                "method": method,
+                "top_n": rates.get("top_n", ""),
+                "top_n_plus_2": rates.get("top_n_plus_2", ""),
+                "all_emitted_max_6": rates.get("all_sites", ""),
+                "mean_predictions_per_target": (
+                    f"{sum(prediction_counts) / len(prediction_counts):.4f}"
+                    if prediction_counts
+                    else ""
+                ),
+            }
+        )
+    return rows
+
+
 def build_report(evaluation_dir: Path, output_dir: Path) -> dict[str, Path]:
     summary = _read_csv(evaluation_dir / "summary_by_method.csv")
     per_target = _read_csv(evaluation_dir / "per_target.csv")
@@ -66,6 +106,28 @@ def build_report(evaluation_dir: Path, output_dir: Path) -> dict[str, Path]:
         for row in per_site
         if str(row.get("hit", "")).strip().lower() in {"0", "false", "no"}
     ]
+    ablation_summary = _ablation_summary_rows(summary, per_target)
+    ablation_section = []
+    if ablation_summary:
+        ablation_section = [
+            "## CaV-EMPS Ablation Summary",
+            "",
+            "All configurations for one target reuse the same AutoGrid C/e/d arrays.",
+            "`all_emitted_max_6` is ranking-independent recall over every emitted center; "
+            "the no-rescue configuration may emit fewer than six.",
+            "",
+            _table(
+                ablation_summary,
+                [
+                    "configuration",
+                    "top_n",
+                    "top_n_plus_2",
+                    "all_emitted_max_6",
+                    "mean_predictions_per_target",
+                ],
+            ),
+            "",
+        ]
     markdown = [
         "# Site Prediction Benchmark Report",
         "",
@@ -91,11 +153,14 @@ def build_report(evaluation_dir: Path, output_dir: Path) -> dict[str, Path]:
                 "threshold_a",
                 "n_targets",
                 "n_evaluable_targets",
+                "n_targets_with_predictions",
+                "n_empty_targets",
                 "n_reference_sites",
                 "success_rate",
             ],
         ),
         "",
+        *ablation_section,
         "## Per Target",
         "",
         _table(
@@ -104,6 +169,7 @@ def build_report(evaluation_dir: Path, output_dir: Path) -> dict[str, Path]:
                 "dataset",
                 "target_id",
                 "method",
+                "prediction_status",
                 "n_reference_sites",
                 "n_predictions",
                 "top_n_success_rate",
@@ -123,6 +189,13 @@ def build_report(evaluation_dir: Path, output_dir: Path) -> dict[str, Path]:
         "",
     ]
     output_dir.mkdir(parents=True, exist_ok=True)
+    if ablation_summary:
+        with (output_dir / "ablation_summary.csv").open(
+            "w", encoding="utf-8", newline=""
+        ) as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(ablation_summary[0]))
+            writer.writeheader()
+            writer.writerows(ablation_summary)
     report_md = output_dir / "site_benchmark_report.md"
     report_html = output_dir / "site_benchmark_report.html"
     report_md.write_text("\n".join(markdown), encoding="utf-8")

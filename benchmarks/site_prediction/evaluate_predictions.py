@@ -26,6 +26,7 @@ from benchmarks.site_prediction.evaluation.metrics import (  # noqa: E402
 )
 from benchmarks.site_prediction.schema import (  # noqa: E402
     PredictedSite,
+    normalize_method_name,
     prediction_rows_from_tsv,
     target_from_normalized_dir,
 )
@@ -59,57 +60,132 @@ def group_predictions(
     return dict(grouped)
 
 
+def _split_csv(value: str | None) -> list[str]:
+    return [part.strip() for part in str(value or "").split(",") if part.strip()]
+
+
+def _selected_target_ids(
+    *,
+    normalized_root: Path,
+    dataset: str,
+    targets: str | None,
+    max_targets: int | None,
+) -> list[str]:
+    dataset_root = normalized_root / dataset
+    if not dataset_root.is_dir():
+        raise FileNotFoundError(f"normalized dataset not found: {dataset_root}")
+    target_ids = sorted(
+        path.name
+        for path in dataset_root.iterdir()
+        if path.is_dir()
+        and (path / "receptor_input.pdb").is_file()
+        and (path / "labels.json").is_file()
+    )
+    if targets and targets != "all":
+        wanted = set(_split_csv(targets))
+        missing = sorted(wanted - set(target_ids))
+        if missing:
+            raise FileNotFoundError(
+                "selected normalized target(s) not found: " + ", ".join(missing)
+            )
+        target_ids = [target_id for target_id in target_ids if target_id in wanted]
+    if max_targets is not None:
+        target_ids = target_ids[:max_targets]
+    if not target_ids:
+        raise ValueError(f"no normalized targets selected for {dataset}")
+    return target_ids
+
+
 def evaluate_predictions(
     *,
     dataset: str,
     normalized_root: Path,
     predictions_tsv: Path,
     threshold_a: float,
+    methods: list[str] | None = None,
+    targets: str | None = None,
+    max_targets: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     predictions = prediction_rows_from_tsv(predictions_tsv)
     grouped = group_predictions(predictions)
+    selected_methods = list(
+        dict.fromkeys(normalize_method_name(method) for method in (methods or []))
+    )
+    if not selected_methods:
+        selected_methods = sorted({prediction.method for prediction in predictions})
+    if not selected_methods:
+        raise ValueError(
+            "no methods were selected and none could be inferred from the prediction table"
+        )
+    target_ids = _selected_target_ids(
+        normalized_root=normalized_root,
+        dataset=dataset,
+        targets=targets,
+        max_targets=max_targets,
+    )
+    selected_target_ids = set(target_ids)
+    selected_method_ids = set(selected_methods)
+    unexpected = sorted(
+        (method, target_id)
+        for method, target_id in grouped
+        if method not in selected_method_ids or target_id not in selected_target_ids
+    )
+    if unexpected:
+        preview = ", ".join(f"{method}/{target_id}" for method, target_id in unexpected[:10])
+        raise ValueError(
+            f"prediction table contains rows outside the selected method/target set: {preview}"
+        )
+    loaded_targets = {
+        target_id: target_from_normalized_dir(dataset, normalized_root / dataset / target_id)
+        for target_id in target_ids
+    }
     per_site_rows: list[dict[str, Any]] = []
     per_target_rows: list[dict[str, Any]] = []
 
-    for (method, target_id), target_predictions in sorted(grouped.items()):
-        target = target_from_normalized_dir(dataset, normalized_root / dataset / target_id)
-        evaluated = evaluate_target_standard(
-            target_id=target_id,
-            labels=target.labels,
-            predictions=target_predictions,
-            threshold_a=threshold_a,
-        )
-        top_n_hits = evaluated["top_n"]
-        top_n_plus_2_hits = evaluated["top_n_plus_2"]
-        all_sites_hits = evaluated["all_sites"]
-        per_target_rows.append(
-            {
-                "dataset": dataset,
-                "target_id": target_id,
-                "method": method,
-                "n_reference_sites": len(target.labels),
-                "n_predictions": len(target_predictions),
-                "top_n_success_rate": success_rate(top_n_hits),
-                "top_n_plus_2_success_rate": success_rate(top_n_plus_2_hits),
-                "all_sites_success_rate": success_rate(all_sites_hits),
-            }
-        )
-        for protocol, hits in evaluated.items():
-            for hit in hits:
-                per_site_rows.append(
-                    {
-                        "dataset": dataset,
-                        "target_id": target_id,
-                        "method": method,
-                        "protocol": protocol,
-                        "true_site_id": hit.true_site_id,
-                        "top_k": hit.top_k,
-                        "hit": hit.hit,
-                        "dca_a": hit.dca_a,
-                        "matched_site_id": hit.matched_site_id,
-                        "matched_rank": hit.matched_rank,
-                    }
-                )
+    # A missing prediction row is a scientific miss, not permission to remove
+    # that target's reference ligands from the method's denominator.
+    for method in selected_methods:
+        for target_id in target_ids:
+            target_predictions = grouped.get((method, target_id), [])
+            target = loaded_targets[target_id]
+            evaluated = evaluate_target_standard(
+                target_id=target_id,
+                labels=target.labels,
+                predictions=target_predictions,
+                threshold_a=threshold_a,
+            )
+            top_n_hits = evaluated["top_n"]
+            top_n_plus_2_hits = evaluated["top_n_plus_2"]
+            all_sites_hits = evaluated["all_sites"]
+            per_target_rows.append(
+                {
+                    "dataset": dataset,
+                    "target_id": target_id,
+                    "method": method,
+                    "prediction_status": "ok" if target_predictions else "empty",
+                    "n_reference_sites": len(target.labels),
+                    "n_predictions": len(target_predictions),
+                    "top_n_success_rate": success_rate(top_n_hits),
+                    "top_n_plus_2_success_rate": success_rate(top_n_plus_2_hits),
+                    "all_sites_success_rate": success_rate(all_sites_hits),
+                }
+            )
+            for protocol, hits in evaluated.items():
+                for hit in hits:
+                    per_site_rows.append(
+                        {
+                            "dataset": dataset,
+                            "target_id": target_id,
+                            "method": method,
+                            "protocol": protocol,
+                            "true_site_id": hit.true_site_id,
+                            "top_k": hit.top_k,
+                            "hit": hit.hit,
+                            "dca_a": hit.dca_a,
+                            "matched_site_id": hit.matched_site_id,
+                            "matched_rank": hit.matched_rank,
+                        }
+                    )
 
     by_method: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in per_site_rows:
@@ -124,6 +200,7 @@ def evaluate_predictions(
         # Keep zero-reference structures visible for provenance, but exclude
         # them from site-level rates because they have no eligible ground truth.
         n_evaluable_targets = sum(int(row["n_reference_sites"]) > 0 for row in target_rows)
+        n_targets_with_predictions = sum(int(row["n_predictions"]) > 0 for row in target_rows)
         for protocol in ("top_n", "top_n_plus_2", "all_sites"):
             protocol_rows = [row for row in rows if row["protocol"] == protocol]
             if not protocol_rows:
@@ -136,6 +213,8 @@ def evaluate_predictions(
                     "threshold_a": threshold_a,
                     "n_targets": len(target_rows),
                     "n_evaluable_targets": n_evaluable_targets,
+                    "n_targets_with_predictions": n_targets_with_predictions,
+                    "n_empty_targets": len(target_rows) - n_targets_with_predictions,
                     "n_reference_sites": len(protocol_rows),
                     "success_rate": sum(1 for row in protocol_rows if row["hit"]) / len(protocol_rows),
                 }
@@ -157,6 +236,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--predictions-tsv", required=True, help="Normalized predictions TSV.")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="Evaluation output dir.")
     parser.add_argument("--threshold", type=float, default=4.0, help="DCA hit threshold in Angstrom.")
+    parser.add_argument(
+        "--methods",
+        help="Comma-separated methods to evaluate, including methods with empty target outputs.",
+    )
+    parser.add_argument("--targets", help="Comma-separated target IDs or all.")
+    parser.add_argument("--max-targets", type=int)
     return parser
 
 
@@ -170,6 +255,9 @@ def main() -> None:
         normalized_root=normalized_root,
         predictions_tsv=predictions_tsv,
         threshold_a=float(args.threshold),
+        methods=_split_csv(args.methods),
+        targets=args.targets,
+        max_targets=args.max_targets,
     )
 
     label_protocols: set[str] = set()
@@ -193,6 +281,7 @@ def main() -> None:
         "normalized_root": str(normalized_root),
         "predictions_tsv": str(predictions_tsv),
         "threshold_a": float(args.threshold),
+        "methods": list(dict.fromkeys(str(row["method"]) for row in per_target_rows)),
         "distance_metric": "DCA: predicted center to nearest reference-ligand atom",
         "label_protocols": sorted(label_protocols),
         "n_targets": len(reference_site_counts),
@@ -211,6 +300,8 @@ def main() -> None:
             "threshold_a",
             "n_targets",
             "n_evaluable_targets",
+            "n_targets_with_predictions",
+            "n_empty_targets",
             "n_reference_sites",
             "success_rate",
         ],
@@ -222,6 +313,7 @@ def main() -> None:
             "dataset",
             "target_id",
             "method",
+            "prediction_status",
             "n_reference_sites",
             "n_predictions",
             "top_n_success_rate",

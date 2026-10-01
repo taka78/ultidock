@@ -44,6 +44,7 @@ from benchmarks.site_prediction.schema import SITE_PREDICTION_METHODS, normalize
 from benchmarks.site_prediction.runtime_tools import (  # noqa: E402
     command_is_available,
     first_command_token,
+    resolve_command_path,
     resolve_autogrid4_bin,
 )
 from molguard.io.receptor_prep import prepare_receptor_pdbqt, receptor_pdbqt_output_name  # noqa: E402
@@ -156,7 +157,10 @@ def _write_predictions(path: Path, rows: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t")
         writer.writeheader()
-        for row in sorted(rows, key=lambda item: (item["target_id"], int(item["rank"]))):
+        for row in sorted(
+            rows,
+            key=lambda item: (item["target_id"], item["method"], int(item["rank"])),
+        ):
             writer.writerow(row)
 
 
@@ -185,10 +189,84 @@ def _write_failures(path: Path, results: list[dict[str, Any]]) -> None:
             )
 
 
+def _write_ablation_map_controls(output_root: Path, results: list[dict[str, Any]]) -> None:
+    fieldnames = [
+        "target_id",
+        "status",
+        "shared_maps_verified",
+        "profiles",
+        "map_loader",
+        "dsolv_context",
+        "autogrid_ligand_types",
+    ]
+    for channel in ("C", "E", "D"):
+        fieldnames.extend(
+            [
+                f"map_{channel}_filename",
+                f"map_{channel}_sha256",
+                f"map_{channel}_shape",
+                f"map_{channel}_value_count",
+            ]
+        )
+    rows = []
+    for result in sorted(results, key=lambda item: item["target_id"]):
+        control_path = output_root / result["target_id"] / "ablation_map_control.json"
+        control = (
+            json.loads(control_path.read_text(encoding="utf-8"))
+            if control_path.is_file()
+            else {}
+        )
+        fingerprint = control.get("map_fingerprint") or {}
+        row = {
+            "target_id": result["target_id"],
+            "status": result["status"],
+            "shared_maps_verified": bool(control.get("shared_maps_verified", False)),
+            "profiles": ",".join(control.get("profiles") or []),
+        }
+        row.update({key: fingerprint.get(key, "") for key in fieldnames if key.startswith("map_")})
+        row["dsolv_context"] = fingerprint.get("dsolv_context", "")
+        row["autogrid_ligand_types"] = fingerprint.get("autogrid_ligand_types", "")
+        rows.append(row)
+    path = output_root / "map_controls.tsv"
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def _autogenerate_cav_emps_centers(make_grids, *, args: argparse.Namespace, **kwargs: Any) -> None:
     if getattr(args, "cav_emps_supports_map_types", False):
         kwargs["map_types"] = None
     make_grids.autogenerate_centers_tsv(**kwargs)
+
+
+def _cav_emps_profile_method(profile: str) -> str:
+    return f"cav-emps-{profile}"
+
+
+def _cav_emps_map_fingerprint(make_grids, centers_tsv: Path) -> dict[str, str]:
+    metadata = make_grids._parse_centers_metadata(centers_tsv)
+    keys = [
+        "map_loader",
+        "dsolv_context",
+        "autogrid_ligand_types",
+    ]
+    for channel in ("C", "E", "D"):
+        keys.extend(
+            [
+                f"map_{channel}_filename",
+                f"map_{channel}_sha256",
+                f"map_{channel}_shape",
+                f"map_{channel}_value_count",
+            ]
+        )
+    fingerprint = {key: str(metadata.get(key, "")) for key in keys}
+    missing = [key for key, value in fingerprint.items() if not value]
+    if missing:
+        raise RuntimeError(
+            f"{centers_tsv}: missing map-control metadata: {', '.join(missing)}"
+        )
+    return fingerprint
 
 
 def _cav_emps_predictions(target_dir: Path, target_output: Path, args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -206,54 +284,86 @@ def _cav_emps_predictions(target_dir: Path, target_output: Path, args: argparse.
             seed=int(args.seed),
             timestamp="SITE_BENCHMARK",
         )
-    centers_tsv = target_output / "centers.tsv"
-    if args.force and centers_tsv.exists():
-        centers_tsv.unlink()
-    if args.keep_artifacts:
-        _autogenerate_cav_emps_centers(
-            make_grids,
-            args=args,
-            receptor_pdbqt=str(prepared),
-            out_root=str(target_output / "maps"),
-            centers_tsv_path=str(centers_tsv),
-            n_sites=int(args.autosites),
-            autogrid4_bin=str(args.autogrid4_bin),
-            hotspot_box_ang=float(args.hotspot_box_size),
-            mode="receptor_search",
-        )
-    else:
-        work_root = Path(args.work_root)
-        work_root.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix=f"{target_dir.name}-", dir=work_root) as work_dir:
+    profiles = list(getattr(args, "cav_emps_ablation_profiles", []) or [])
+    explicit_ablation = bool(profiles)
+    if not profiles:
+        profiles = ["combined-final"]
+
+    def _generate_from_shared_maps(map_root: Path) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        shared_fingerprint: dict[str, str] | None = None
+        profile_centers: dict[str, str] = {}
+        for profile in profiles:
+            centers_tsv = (
+                target_output / "profiles" / profile / "centers.tsv"
+                if explicit_ablation
+                else target_output / "centers.tsv"
+            )
+            centers_tsv.parent.mkdir(parents=True, exist_ok=True)
+            if args.force and centers_tsv.exists():
+                centers_tsv.unlink()
             _autogenerate_cav_emps_centers(
                 make_grids,
                 args=args,
                 receptor_pdbqt=str(prepared),
-                out_root=str(Path(work_dir) / "maps"),
+                out_root=str(map_root),
                 centers_tsv_path=str(centers_tsv),
                 n_sites=int(args.autosites),
                 autogrid4_bin=str(args.autogrid4_bin),
                 hotspot_box_ang=float(args.hotspot_box_size),
                 mode="receptor_search",
+                ablation_profile=profile,
             )
-    ranked = rank_centers_by_fitness(parse_scored_centers_tsv(centers_tsv))
-    rows = []
-    for rank, site in enumerate(ranked, start=1):
-        x, y, z = site["center"]
-        rows.append(
-            {
+            fingerprint = _cav_emps_map_fingerprint(make_grids, centers_tsv)
+            if shared_fingerprint is None:
+                shared_fingerprint = fingerprint
+            elif fingerprint != shared_fingerprint:
+                raise RuntimeError(
+                    f"{target_dir.name}: profile {profile} did not use the shared C/e/d maps"
+                )
+            profile_centers[profile] = str(centers_tsv.resolve())
+            ranked = rank_centers_by_fitness(parse_scored_centers_tsv(centers_tsv))
+            method = _cav_emps_profile_method(profile) if explicit_ablation else "cav-emps"
+            for rank, site in enumerate(ranked, start=1):
+                x, y, z = site["center"]
+                rows.append(
+                    {
+                        "target_id": target_dir.name,
+                        "method": method,
+                        "rank": rank,
+                        "site_id": site["site_id"],
+                        "center_x": f"{x:.4f}",
+                        "center_y": f"{y:.4f}",
+                        "center_z": f"{z:.4f}",
+                        "score": (
+                            ""
+                            if site.get("fitness_score") is None
+                            else f"{float(site['fitness_score']):.4f}"
+                        ),
+                        "source": str(centers_tsv.resolve()),
+                    }
+                )
+        if explicit_ablation:
+            control = {
                 "target_id": target_dir.name,
-                "method": "cav-emps",
-                "rank": rank,
-                "site_id": site["site_id"],
-                "center_x": f"{x:.4f}",
-                "center_y": f"{y:.4f}",
-                "center_z": f"{z:.4f}",
-                "score": "" if site.get("fitness_score") is None else f"{float(site['fitness_score']):.4f}",
-                "source": str(centers_tsv.resolve()),
+                "profiles": profiles,
+                "shared_maps_verified": True,
+                "map_fingerprint": shared_fingerprint,
+                "centers_tsv": profile_centers,
             }
-        )
-    return rows
+            (target_output / "ablation_map_control.json").write_text(
+                json.dumps(control, indent=2),
+                encoding="utf-8",
+            )
+        return rows
+
+    if args.keep_artifacts:
+        return _generate_from_shared_maps(target_output / "maps")
+
+    work_root = Path(args.work_root)
+    work_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=f"{target_dir.name}-", dir=work_root) as work_dir:
+        return _generate_from_shared_maps(Path(work_dir) / "maps")
 
 
 def _fpocket_predictions(target_dir: Path, target_output: Path, args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -325,8 +435,24 @@ def run_one(target_dir: Path, args: argparse.Namespace) -> dict[str, Any]:
         else:
             raise ValueError(f"unsupported method: {args.method}")
         _write_predictions(target_output / "predictions.tsv", rows)
-        print(f"[OK] {target_dir.name}: {len(rows)} {method} prediction(s)")
-        return {"status": "ok", "target_id": target_dir.name, "method": method, "rows": rows, "error": ""}
+        if rows:
+            print(f"[OK] {target_dir.name}: {len(rows)} {method} prediction(s)")
+            return {
+                "status": "ok",
+                "target_id": target_dir.name,
+                "method": method,
+                "rows": rows,
+                "error": "",
+            }
+        message = f"{method} completed but emitted no site predictions"
+        print(f"[EMPTY] {target_dir.name}: {message}")
+        return {
+            "status": "empty",
+            "target_id": target_dir.name,
+            "method": method,
+            "rows": [],
+            "error": message,
+        }
     except Exception as exc:
         print(f"[FAIL] {target_dir.name}: {exc}", file=sys.stderr)
         return {
@@ -392,6 +518,13 @@ def build_parser() -> argparse.ArgumentParser:
             "on the requested ligand type set."
         ),
     )
+    parser.add_argument(
+        "--cav-emps-ablation-profiles",
+        help=(
+            "Comma-separated benchmark-only CaV-EMPS profiles. All selected profiles "
+            "reuse one exact C/e/d map set per target."
+        ),
+    )
     parser.add_argument("--fpocket-cmd", default="fpocket")
     parser.add_argument("--p2rank-cmd", default="prank predict")
     return parser
@@ -399,6 +532,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def run_predictions(args: argparse.Namespace) -> Path:
     args.method = normalize_method_name(args.method)
+    args.fpocket_cmd = resolve_command_path(args.fpocket_cmd)
+    args.p2rank_cmd = resolve_command_path(args.p2rank_cmd)
     output_root = Path(args.output_dir).resolve() / args.method
     if args.work_root is None:
         args.work_root = output_root / "_runtime" / "work"
@@ -411,8 +546,24 @@ def run_predictions(args: argparse.Namespace) -> Path:
         args.cav_emps_supports_map_types = (
             "map_types" in inspect.signature(args.make_grids_module.autogenerate_centers_tsv).parameters
         )
+        raw_profiles = [
+            part.strip()
+            for part in str(args.cav_emps_ablation_profiles or "").split(",")
+            if part.strip()
+        ]
+        if raw_profiles == ["all"]:
+            raw_profiles = list(args.make_grids_module.CAV_EMPS_ABLATION_PROFILES)
+        args.cav_emps_ablation_profiles = list(
+            dict.fromkeys(
+                args.make_grids_module.normalize_cav_emps_ablation_profile(profile)
+                for profile in raw_profiles
+            )
+        )
     else:
         args.cav_emps_supports_map_types = False
+        if args.cav_emps_ablation_profiles:
+            raise SystemExit("--cav-emps-ablation-profiles requires --method cav-emps")
+        args.cav_emps_ablation_profiles = []
     target_dirs = _target_dirs(Path(args.normalized_root).resolve(), args.dataset, args.targets)
     if args.max_targets is not None:
         target_dirs = target_dirs[: args.max_targets]
@@ -428,14 +579,18 @@ def run_predictions(args: argparse.Namespace) -> Path:
     rows = [row for result in results for row in result["rows"]]
     _write_predictions(output_root / "predictions.tsv", rows)
     _write_failures(output_root / "failures.tsv", results)
+    if args.cav_emps_ablation_profiles:
+        _write_ablation_map_controls(output_root, results)
     n_ok = sum(1 for result in results if result["status"] == "ok")
-    n_failed = sum(1 for result in results if result["status"] != "ok")
+    n_empty = sum(1 for result in results if result["status"] == "empty")
+    n_failed = sum(1 for result in results if result["status"] == "failed")
     metadata = {
         "run_started_at_utc": datetime.now(timezone.utc).isoformat(),
         "dataset": args.dataset,
         "method": args.method,
         "n_targets": len(target_dirs),
         "n_ok": n_ok,
+        "n_empty": n_empty,
         "n_failed": n_failed,
         "n_prediction_rows": len(rows),
         "keep_artifacts": bool(args.keep_artifacts),
@@ -443,21 +598,19 @@ def run_predictions(args: argparse.Namespace) -> Path:
     }
     if args.method == "cav-emps":
         metadata["autogrid_maps"] = "all"
+        if args.cav_emps_ablation_profiles:
+            metadata["ablation_profiles"] = list(args.cav_emps_ablation_profiles)
+            metadata["map_control"] = "shared_per_target_C_e_d_hashes_verified"
         if not args.cav_emps_supports_map_types:
             metadata["autogrid_map_note"] = (
                 "loaded make_grids.py does not support selective map generation"
             )
     output_root.mkdir(parents=True, exist_ok=True)
     (output_root / "run_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-    if n_ok == 0:
+    if n_failed == len(target_dirs):
         raise SystemExit(
-            f"{args.method} produced no successful target predictions for {args.dataset}; "
+            f"{args.method} failed on every selected target for {args.dataset}; "
             f"see {output_root / 'failures.tsv'}"
-        )
-    if not rows:
-        raise SystemExit(
-            f"{args.method} produced zero prediction rows for {args.dataset}; "
-            f"see {output_root / 'run_metadata.json'}"
         )
     print(f"Predictions TSV: {output_root / 'predictions.tsv'}")
     return output_root / "predictions.tsv"

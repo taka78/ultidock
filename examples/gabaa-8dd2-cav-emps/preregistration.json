@@ -1,0 +1,112 @@
+{
+  "case_study_id": "gabaa_8dd2_blind_site_recovery_v1",
+  "title": "Blind recovery of pharmacologically distinct GABAA-receptor binding regions",
+  "structure": {
+    "pdb_id": "8DD2",
+    "pdb_doi": "10.2210/pdb8DD2/pdb",
+    "rcsb_revision_sha256": "29ccb6237682c839856733bbb3e1be6d32c1a2897f006d95153418a167b7a3b9",
+    "resolution_A": 2.9,
+    "predictor_chains": ["A", "B", "C", "D", "E"],
+    "subunits": {
+      "A": "beta2",
+      "B": "alpha1",
+      "C": "beta2",
+      "D": "alpha1",
+      "E": "gamma2"
+    },
+    "excluded_from_predictor": [
+      "all HETATM records",
+      "glycans",
+      "Fab chains I, J, K and L",
+      "the three zolpidem molecules",
+      "the two GABA molecules"
+    ]
+  },
+  "ground_truth_sites": [
+    {
+      "site_id": "GABA_AB_ECD",
+      "display_name": "GABA 1",
+      "ligand": "GABA",
+      "pdb_resname": "ABU",
+      "pdb_chain": "A",
+      "pdb_resseq": 403,
+      "pocket_class": "orthosteric GABA ECD",
+      "interface": "beta2(A)/alpha1(B)",
+      "preregistered_map_expectation": "Relatively strong e and d evidence; geometry may be weaker because the site is polar and surface-accessible."
+    },
+    {
+      "site_id": "GABA_CD_ECD",
+      "display_name": "GABA 2",
+      "ligand": "GABA",
+      "pdb_resname": "ABU",
+      "pdb_chain": "C",
+      "pdb_resseq": 403,
+      "pocket_class": "orthosteric GABA ECD",
+      "interface": "beta2(C)/alpha1(D)",
+      "preregistered_map_expectation": "Relatively strong e and d evidence; geometry may be weaker because the site is polar and surface-accessible."
+    },
+    {
+      "site_id": "ZOLPIDEM_DE_ECD",
+      "display_name": "Zolpidem ECD",
+      "ligand": "zolpidem",
+      "pdb_resname": "R5R",
+      "pdb_chain": "D",
+      "pdb_resseq": 601,
+      "pocket_class": "classical zolpidem/BZD ECD",
+      "interface": "alpha1(D)/gamma2(E)",
+      "preregistered_map_expectation": "Mixed C, e and d evidence from aromatic enclosure and polar contacts."
+    },
+    {
+      "site_id": "ZOLPIDEM_AB_TMD",
+      "display_name": "Zolpidem TMD 1",
+      "ligand": "zolpidem",
+      "pdb_resname": "R5R",
+      "pdb_chain": "A",
+      "pdb_resseq": 402,
+      "pocket_class": "zolpidem beta/alpha TMD",
+      "interface": "beta2(A)/alpha1(B)",
+      "preregistered_map_expectation": "C and EDT/geometry dominant, weaker e evidence, with d potentially sensitive to the missing membrane context."
+    },
+    {
+      "site_id": "ZOLPIDEM_CD_TMD",
+      "display_name": "Zolpidem TMD 2",
+      "ligand": "zolpidem",
+      "pdb_resname": "R5R",
+      "pdb_chain": "C",
+      "pdb_resseq": 402,
+      "pocket_class": "zolpidem beta/alpha TMD",
+      "interface": "beta2(C)/alpha1(D)",
+      "preregistered_map_expectation": "C and EDT/geometry dominant, weaker e evidence, with d potentially sensitive to the missing membrane context."
+    }
+  ],
+  "prediction_protocol": {
+    "portfolio_size": 6,
+    "cav_emps_profiles": [
+      "combined-final",
+      "geometry-only",
+      "physics-only",
+      "combined-no-d",
+      "combined-no-regional",
+      "combined-v3-ranking",
+      "combined-no-rescue"
+    ],
+    "comparators": ["fpocket", "p2rank"],
+    "standardized_box_side_A": 35.625,
+    "native_cav_emps_boxes": true,
+    "full_ligand_face_buffers_A": [0.0, 2.0, 4.0],
+    "primary_endpoint": "full_ligand_axis_aligned_box_containment",
+    "secondary_endpoints": [
+      "ligand-centroid containment",
+      "distance from predicted center to closest ligand atom",
+      "distance from predicted center to ligand centroid"
+    ],
+    "tuning_rule": "Do not modify weights, ranking or portfolio construction after observing this case-study result."
+  },
+  "interpretation_guardrails": [
+    "The C/e/d expectations are preregistered physical hypotheses, not literature-proven AutoGrid behavior.",
+    "The five deposited GABA/zolpidem molecules define the occupied-site truth set.",
+    "A sixth CaV-EMPS prediction is not a false zolpidem label merely because diazepam has been reported at an additional gamma2/beta2 TMD site.",
+    "CaV-EMPS receives no explicit lipid bilayer; partly lipid-facing TMD sites are a deliberate stress test and an acknowledged limitation.",
+    "This case study complements, but does not replace, the Holo4K containment audit."
+  ]
+}

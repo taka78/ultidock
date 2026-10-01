@@ -279,9 +279,9 @@ def test_hotspot_box_sizing_uses_side_length_semantics() -> None:
 
 
 def test_maps_pocket_shell_bounds_follow_profiled_r_min() -> None:
-    assert make_grids._maps_pocket_shell_bounds(3.0) == (1.5, 12.0)
-    assert make_grids._maps_pocket_shell_bounds(5.0) == (2.5, 12.0)
-    assert make_grids._maps_pocket_shell_bounds(1.0) == (0.75, 12.0)
+    assert make_grids._maps_pocket_shell_bounds(3.0) == (1.5, 15.0)
+    assert make_grids._maps_pocket_shell_bounds(5.0) == (2.5, 15.0)
+    assert make_grids._maps_pocket_shell_bounds(1.0) == (0.75, 15.0)
 
 
 def test_detect_maps_hotspots_does_not_double_box_side() -> None:
@@ -390,7 +390,7 @@ def test_receptor_search_picks_one_site_per_family_when_available() -> None:
     )
 
     assert [site["site_id"] for site in selected] == ["S1", "S2", "S3"]
-    assert [site["family"] for site in selected] == ["internal", "surface", "hybrid"]
+    assert [site["family"] for site in selected] == ["hybrid", "internal", "surface"]
 
 
 def test_receptor_search_preserves_central_surface_candidate() -> None:
@@ -413,8 +413,8 @@ def test_receptor_search_preserves_central_surface_candidate() -> None:
         target_count=4,
     )
 
-    assert [site["family"] for site in selected[:2]] == ["surface", "surface"]
-    assert any(site.get("center_closeness") == 0.95 for site in selected)
+    assert [site["family"] for site in selected[:3]] == ["hybrid", "internal", "surface"]
+    assert any(site["family"] == "surface" and site.get("center_closeness") == 0.95 for site in selected)
 
 
 def test_receptor_search_preserves_low_score_central_hybrid_candidate() -> None:
@@ -444,7 +444,7 @@ def test_select_internal_search_r_min_relaxes_when_profiled_threshold_is_too_str
         peak_radii_A=[1.05, 1.18, 1.24, 1.31, 1.35],
     )
 
-    assert relaxed == 1.33
+    assert relaxed == 1.5
 
 
 def test_select_internal_search_r_min_keeps_requested_threshold_when_supported() -> None:

@@ -20,6 +20,14 @@ def first_command_token(command: str) -> str | None:
     return parts[0] if parts else None
 
 
+def resolve_command_path(command: str) -> str:
+    """Keep an explicit executable path valid when a predictor changes cwd."""
+    parts = shlex.split(command)
+    if parts and "/" in parts[0]:
+        parts[0] = str(Path(parts[0]).expanduser().resolve())
+    return shlex.join(parts)
+
+
 def is_executable_path(value: str | Path) -> bool:
     path = Path(value).expanduser()
     return path.is_file() and os.access(path, os.X_OK)
