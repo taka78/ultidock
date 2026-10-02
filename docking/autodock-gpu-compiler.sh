@@ -161,20 +161,6 @@ else
       fi
     fi
 
-    # Quick sanity for OpenCL toolchain
-    if ! command -v clinfo >/dev/null 2>&1 && \
-      [ ! -f "${GPU_INCLUDE_PATH}/CL/cl.h" ] && \
-      ! ldconfig -p 2>/dev/null | grep -q 'libOpenCL\.so'
-    then
-      cat <<EOF
-[ERROR] OpenCL headers/runtime not detected.
-Install OpenCL ICD & headers. On Debian/Ubuntu:
-  sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev clinfo
-For AMD ROCm, ensure /opt/rocm/* contains OpenCL headers/libs.
-EOF
-      exit 1
-    fi
-
     # Already-built?
     OCL_PRESENT=""
     for name in autodock_gpu_ocl autodock_gpu_opencl autodock_gpu_ocl_${NUMWI}wi autodock_gpu_${NUMWI}wi_ocl autodock_gpu; do
@@ -184,6 +170,24 @@ EOF
     if [[ -n "$OCL_PRESENT" ]]; then
       echo "[INFO] OpenCL binary already present: $OCL_PRESENT"
     else
+      # Device discovery (clinfo) does not supply the headers/linker library.
+      # Require development files only when building a new binary.
+      missing_opencl_dev=false
+      for header in CL/opencl.h CL/cl.h; do
+        if [[ ! -f "${GPU_INCLUDE_PATH}/$header" ]]; then
+          echo "[ERROR] Missing OpenCL build header: ${GPU_INCLUDE_PATH}/$header"
+          missing_opencl_dev=true
+        fi
+      done
+      if [[ ! -f "${GPU_LIBRARY_PATH}/libOpenCL.so" ]]; then
+        echo "[ERROR] Missing OpenCL linker library: ${GPU_LIBRARY_PATH}/libOpenCL.so"
+        missing_opencl_dev=true
+      fi
+      if [[ "$missing_opencl_dev" == true ]]; then
+        echo "Install the OpenCL development package (Debian/Ubuntu: sudo apt install ocl-icd-opencl-dev)."
+        echo "For a custom SDK, set GPU_INCLUDE_PATH and GPU_LIBRARY_PATH to its include and library directories."
+        exit 1
+      fi
       mkdir -p ./bin
       echo "[INFO] Running make DEVICE=OCLGPU NUMWI=${NUMWI}…"
       make DEVICE=OCLGPU NUMWI="${NUMWI}" CC=gcc-12 CXX=g++-12 -j"${MAKE_J}"
@@ -242,21 +246,28 @@ if [ "$autogrid_needs_compile" = true ]; then
     cd "$AUTOGRID_DIR" || exit 4
     echo "[INFO] Compiling AutoGrid..."
     echo "[INFO] Preparing AutoGrid build environment..."
-    if [ ! -f configure ]; then
-        echo "[INFO] Running autoreconf to generate configure script..."
-        autoreconf -i
+    # Shipped configure/Makefile.in files can reference another machine's
+    # versioned Automake tools (e.g. aclocal-1.17). Regenerate them even when
+    # configure exists so make uses the locally installed toolchain.
+    for tool in autoreconf autoconf automake aclocal; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            echo "[ERROR] AutoGrid build requires $tool. Install autoconf, automake, m4 and perl."
+            exit 4
+        fi
+    done
+    if ! command -v csh >/dev/null 2>&1; then
+        echo "[ERROR] AutoGrid parameter generation requires csh. Install it (Debian/Ubuntu: sudo apt install csh)."
+        exit 4
     fi
+    echo "[INFO] Regenerating AutoGrid build files with the local Autotools..."
+    autoreconf --force --install
 
     echo "[INFO] Running ./configure..."
-    if [ ! -f configure ]; then
-        echo "[INFO] No configure script found, running autoreconf..."
-        autoreconf -i
-    fi
     ./configure
     echo "[INFO] Cleaning previous build (if any)..."
     make clean || true
     echo "[INFO] Running make..."
-    make -j$(nproc)
+    make -j"${MAKE_J}"
 
     if [ -x "$AUTOGRID_BINARY" ]; then
         echo "[INFO] AutoGrid compilation successful."

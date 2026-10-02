@@ -9,3 +9,7 @@ pandas>=2.0
 
 # ── Command-line interfaces and MolGuard I/O hardening ────────────────────────
 click>=8.1
+tomli>=2.0; python_version < "3.11"
+
+# Native programs and Ubuntu package names are listed in requirements-ubuntu.txt.
+# pip cannot install GPU drivers, AutoGrid, fpocket, or P2Rank.

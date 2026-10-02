@@ -261,3 +261,7 @@ def doctor_cmd() -> None:
             click.echo(f"  [WARN]  {label:24s} not found", err=True)
     if had_missing:
         click.echo(f"       {readme_hint('receptor-inputs')}", err=True)
+
+
+if __name__ == "__main__":
+    cli()

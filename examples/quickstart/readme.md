@@ -2,9 +2,16 @@
 
 This is the recommended first run:
 
+Install the Python dependencies and CLI in [SETUP.md](../../SETUP.md#step-1--install-prerequisites)
+first. From the repository root:
+
 ```bash
 ultidock example run quickstart
 ```
+
+For a source-checkout installation, use
+`/usr/bin/python3 -m cli.ultidock example run quickstart`. This command does
+not need Java, fpocket, P2Rank, AutoGrid, a GPU, or a vendor compute runtime.
 
 The quickstart is intentionally lightweight. It creates the standard Ultidock
 researcher-facing artifact set without requiring a full docking toolchain on the

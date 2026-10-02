@@ -4,11 +4,15 @@ import sys
 import shutil
 import stat
 import argparse
+import re
 from pathlib import Path
 from typing import Iterable, Optional
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+# Allow source-checkout runs with distro Python packages, without pip installation.
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 NUMWI = "128"  # Default number of work items
 CURRENT_DIR = Path(SCRIPT_DIR)
 DEFAULT_LIGANDS_DIR = str((CURRENT_DIR / "LIGANDS_DIR").resolve())
@@ -43,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode",
         choices=["auto", "gpu", "cpu", "cuda", "opencl"],
         default="auto",
-        help="Choose the GPU detection mode",
+        help="Backend: auto allows CPU fallback; gpu requires a detected GPU; cuda/opencl/cpu select explicitly",
     )
     parser.add_argument(
         "--ligands-dir",
@@ -352,30 +356,70 @@ def check_and_fix_receptors(
         print("         Check them with: molguard pdbqt check <file>")
 
 
-def detect_gpu():
-    """Detect the GPU type (NVIDIA, AMD, or CPU fallback)."""
-    
-    # Check for NVIDIA GPU using nvidia-smi
-    has_nvidia = shutil.which("nvidia-smi")
-    has_amd = shutil.which("rocm-smi")
-
-    if has_nvidia:
+def detect_opencl_gpu() -> bool:
+    """Probe devices and enable AMD Rusticl only after a successful retry."""
+    # OpenCL works with AMD, Intel and other vendors without rocm-smi.
+    # A CPU-only OpenCL platform must not count as a GPU.
+    if shutil.which("clinfo"):
         try:
-            subprocess.run(["nvidia-smi"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-            print("NVIDIA GPU detected.")
-            return "CUDA"
-        except subprocess.CalledProcessError:
-            print("NVIDIA GPU detected but inaccessible.")
+            probe_env = {**os.environ, "LC_ALL": "C"}
+            result = subprocess.run(
+                ["clinfo", "--human"], capture_output=True, text=True, check=True,
+                env=probe_env,
+            )
+            gpu_pattern = r"^[ \t]*Device Type[ \t]+[^\n]*\bGPU\b"
+            if re.search(gpu_pattern, result.stdout, re.MULTILINE):
+                return True
+            if (
+                "RUSTICL_ENABLE" not in os.environ
+                and re.search(r"^[ \t]*Platform Name[ \t]+rusticl\b",
+                              result.stdout, re.MULTILINE | re.IGNORECASE)
+            ):
+                print("[setup] Rusticl has no GPU devices; trying its AMD radeonsi driver...")
+                retry_env = {**probe_env, "RUSTICL_ENABLE": "radeonsi"}
+                retry = subprocess.run(
+                    ["clinfo", "--human"], capture_output=True, text=True, check=True,
+                    env=retry_env,
+                )
+                if re.search(gpu_pattern, retry.stdout, re.MULTILINE):
+                    os.environ["RUSTICL_ENABLE"] = "radeonsi"
+                    print("[setup] AMD OpenCL GPU detected; enabling RUSTICL_ENABLE=radeonsi "
+                          "for this run and saved config.")
+                    return True
+            print("[setup] clinfo reports no OpenCL GPU devices.")
+        except (OSError, subprocess.CalledProcessError) as exc:
+            print(f"[setup] OpenCL device detection failed: {exc}")
+    else:
+        print("[setup] clinfo is missing; automatic OpenCL GPU detection is unavailable.")
+    return False
 
-    if has_amd:
+
+def detect_gpu(*, allow_cpu_fallback: bool = True):
+    """Detect CUDA or an OpenCL GPU; only auto mode permits CPU fallback."""
+    if shutil.which("nvidia-smi"):
         try:
-            subprocess.run(["rocm-smi"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-            print("AMD GPU detected.")
-            return "OPENCL"
-        except subprocess.CalledProcessError:
-            print("AMD GPU detected but inaccessible.")
+            result = subprocess.run(
+                ["nvidia-smi", "-L"], capture_output=True, text=True, check=True,
+            )
+            if any(line.startswith("GPU ") for line in result.stdout.splitlines()):
+                print("NVIDIA GPU detected; selecting CUDA.")
+                return "CUDA"
+            print("[setup] nvidia-smi reports no GPU devices.")
+        except (OSError, subprocess.CalledProcessError) as exc:
+            print(f"[setup] NVIDIA device detection failed: {exc}")
 
-    print("No compatible GPU detected. Using CPU mode.")
+    if detect_opencl_gpu():
+        print("OpenCL GPU detected; selecting OPENCL.")
+        return "OPENCL"
+
+    if not allow_cpu_fallback:
+        raise RuntimeError(
+            "--mode gpu requested, but no GPU backend was detected. "
+            "Check nvidia-smi -L (NVIDIA) or clinfo (OpenCL) and the installed GPU runtime. "
+            "Use --mode cuda/opencl to select a backend explicitly, or --mode auto/cpu "
+            "to allow CPU execution."
+        )
+    print("No compatible GPU detected; auto mode is falling back to CPU.")
     return "CPU"
 
 def _normalize_mode(s: str) -> str:
@@ -617,13 +661,19 @@ def detect_and_compile_autodock_gpu(AUTODOCK_GPU_DIR, GPU_TYPE, NUMWI):
             print("AutoDock-GPU binary already compiled and executable.")'''
 
 
-def install_pocket_tools() -> None:
-    """Install the local fpocket and P2Rank executables if needed."""
-    installer = Path(ROOT_DIR) / "scripts" / "install_pocket_tools.sh"
-    if not installer.is_file():
-        raise FileNotFoundError(f"Pocket-tool installer not found: {installer}")
-    print("[setup] checking local fpocket and P2Rank tools...")
-    subprocess.run(["bash", str(installer)], cwd=ROOT_DIR, check=True)
+def check_pocket_tools() -> None:
+    """Report optional pocket-tool availability without installing anything."""
+    external = Path(ROOT_DIR) / "external"
+    binaries = {
+        "fpocket": external / "fpocket" / "bin" / "fpocket",
+        "p2rank": external / "bin" / "prank",
+    }
+    print("[setup] checking optional local fpocket and P2Rank tools...")
+    for method, path in binaries.items():
+        if path.is_file() and os.access(path, os.X_OK):
+            print(f"[setup] {method}: ready ({path})")
+        else:
+            print(f"[setup] {method}: not installed; will install when selected.")
 
 
 def run_setup(args: argparse.Namespace) -> dict:
@@ -631,14 +681,17 @@ def run_setup(args: argparse.Namespace) -> dict:
     print("Welcome to the Ultidock Setup")
     print("=" * 50)
 
-    install_pocket_tools()
+    check_pocket_tools()
 
     mode = _normalize_mode(args.mode)
 
     if mode in ("opencl", "cuda", "cpu"):
         GPU_TYPE = mode.upper()
+        if mode == "opencl":
+            # Keep the explicit backend choice, but also apply the Rusticl retry.
+            detect_opencl_gpu()
     else:  # 'gpu' or 'auto'
-        GPU_TYPE = detect_gpu()
+        GPU_TYPE = detect_gpu(allow_cpu_fallback=(mode == "auto"))
 
     ligands_dir = _resolve_directory(
         "Enter the path for ligand files",
@@ -691,6 +744,7 @@ def run_setup(args: argparse.Namespace) -> dict:
         "MACRO_MOL_DIR": macro_mol_dir,
         "RESULTS_DIR": results_dir,
         "GPU_TYPE": GPU_TYPE,
+        "RUSTICL_ENABLE": os.environ.get("RUSTICL_ENABLE") if GPU_TYPE == "OPENCL" else None,
         "DB_PATH": str(Path(results_dir) / "ultidock_results.db"),
         "NUMWI": NUMWI,
         "GRID_MODE": args.grid_mode,
@@ -735,6 +789,9 @@ def run_setup(args: argparse.Namespace) -> dict:
         ):
             config_file.write(f"{key} = {repr(config_values[key])}\n")
         config_file.write(f"GPU_TYPE = {repr(config_values['GPU_TYPE'])}\n")
+        config_file.write(f"RUSTICL_ENABLE = {config_values['RUSTICL_ENABLE']!r}\n")
+        config_file.write("if RUSTICL_ENABLE is not None:\n")
+        config_file.write("    os.environ.setdefault('RUSTICL_ENABLE', RUSTICL_ENABLE)\n")
         config_file.write(f"DB_PATH = {repr(config_values['DB_PATH'])}\n")
         config_file.write(f"NUMWI = {repr(config_values['NUMWI'])}\n")
         config_file.write(

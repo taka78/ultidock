@@ -36,64 +36,136 @@ Linux container or VM.
 | Component | Requirement |
 |-----------|-------------|
 | CPU       | x86-64 with AVX (for preprocessing and optional CPU docking) |
-| GPU       | NVIDIA GPU with CUDA capability **7.0 or newer** (Ampere, Ada, Hopper, or RTX 40/50). CPU-only mode is supported but slower. |
+| GPU       | NVIDIA CUDA or a supported OpenCL GPU for AutoDock-GPU; CPU-only Vina mode is also available. |
 | RAM       | ≥ 16 GB recommended for large ligand batches |
 | Storage   | ≥ 20 GB free space for ligand archives, grids, and outputs |
 
 ### Operating System
 
-- Ubuntu 22.04+, Debian 12+, Fedora 39+, or a comparable modern Linux distro
+- Ubuntu 26.04 is the documented package path below. Other modern Linux
+  distributions need equivalent native packages and GPU runtimes.
 - Bash shell and coreutils available on `$PATH`
 
 ### System Packages
 
-Install the build toolchain and helper utilities once:
+On **Ubuntu 26.04**, install the native programs listed in
+[`requirements-ubuntu.txt`](requirements-ubuntu.txt) from the repository root:
 
 ```bash
-sudo apt update && sudo apt install -y \
-  automake autoconf libtool m4 perl pkg-config \
-  build-essential gcc g++ gfortran make cmake \
-  unzip tar csh wget git \
-  libstdc++-dev libx11-dev libncurses-dev \
-  python3 python3-venv python3-pip
+sudo apt update
+xargs -a requirements-ubuntu.txt sudo apt install -y
 ```
 
-> **Tip:** Replace `apt` commands with the equivalent package manager commands
-> for your distribution.
+This installs the AutoGrid build tools (`autoconf`, `automake`, `m4`, `perl`,
+`csh`), GCC 12 used by the AutoDock-GPU build script, fpocket's C toolchain and
+NetCDF headers, `curl` for P2Rank, Java 21 for P2Rank 2.5, OpenCL build
+headers, and Open Babel for raw receptor `.pdb` conversion. It does **not**
+install a GPU driver or vendor compute runtime. On another distribution, install
+equivalent packages; package names and available Java versions vary.
 
 ### GPU Runtimes
 
-- **Latest available CUDA Toolkit for your hardware** is required for NVIDIA GPU execution. Install
-  it from [NVIDIA's official downloads](https://developer.nvidia.com/cuda-downloads).
-- Ultidock defaults to AutoDock-GPU. AutoGrid will also be compiled on first run.
+> **Before running GPU setup, install your GPU driver and compute runtime.**
+> Installing Ultidock's Python dependencies or activating a virtual environment
+> does not install GPU drivers. A working desktop display alone does not mean
+> CUDA or OpenCL is available. Ultidock does not install system GPU drivers.
+
+- **NVIDIA/CUDA:** install the NVIDIA driver and a CUDA Toolkit compatible with
+  your GPU and the AutoDock-GPU build. See
+  [NVIDIA's official downloads](https://developer.nvidia.com/cuda-downloads).
+  Check that `nvidia-smi -L` lists your GPU and `nvcc --version` finds the compiler.
+- **AMD/Intel/OpenCL:** install a compatible vendor or Mesa OpenCL runtime,
+  plus the OpenCL development headers and `clinfo`. Check that `clinfo -l`
+  lists your GPU. `Number of platforms 0` means no OpenCL platform is available
+  to that process; the ICD loader alone does not provide a GPU runtime.
+- Ultidock defaults to AutoDock-GPU when a GPU is detected. AutoGrid is built
+  on first use, including CPU mode.
+
+For AMD graphics using Mesa on **Ubuntu 26.04**, the
+[Mesa OpenCL package](https://packages.ubuntu.com/resolute-updates/amd64/mesa-opencl-icd/filelist)
+provides Rusticl. Install it and check device visibility before running Ultidock:
+
+```bash
+sudo apt update
+sudo apt install mesa-opencl-icd ocl-icd-opencl-dev clinfo
+export RUSTICL_ENABLE=radeonsi
+clinfo -l
+```
+
+`mesa-opencl-icd` supplies the runtime for device discovery and execution.
+`ocl-icd-opencl-dev` supplies the OpenCL headers and linker library needed to
+compile AutoDock-GPU. Both are required for a fresh build; a working `clinfo`
+does not prove the development files are installed.
+
+`RUSTICL_ENABLE=radeonsi` enables Mesa's AMD OpenCL devices; see the
+[Mesa environment-variable documentation](https://docs.mesa3d.org/envvars.html#envvar-RUSTICL_ENABLE).
+The manual export above is useful for checking `clinfo` yourself. During setup,
+if Rusticl is present but exposes no GPU and `RUSTICL_ENABLE` is unset, Ultidock
+automatically retries with `radeonsi`. It keeps the setting only if a GPU appears,
+passes it to child processes, and saves it in `docking/config.py` for subsequent
+runs (including `--skip-setup`). Existing user settings are respected. This also
+applies to explicit `--mode opencl` setup. No shell profile is modified.
+
+A Mesa/Rusticl platform name alone does not select the GPU backend: a GPU
+device must actually be reported. Device visibility does not by itself verify AutoDock-GPU
+compatibility. Containers and VMs also need GPU device and runtime access.
+
+`--mode gpu` stops if no GPU is detected. Use `--mode auto` to permit CPU
+fallback, or `--mode cpu` to select CPU docking explicitly.
 
 ### Python Environment
 
-Ultidock requires Python **3.10+**. A virtual environment is recommended:
+Ultidock requires Python **3.10+**. You can use system Python and distro packages
+without a virtual environment or a pip installation of this checkout. On
+Ubuntu 26.04, install the runtime dependencies:
+
+```bash
+sudo apt install python3 python3-click python3-numpy python3-scipy \
+  python3-psutil python3-pandas python3-matplotlib
+```
+
+From the repository root, use `/usr/bin/python3` to select system Python even
+if your terminal currently has a virtual environment activated:
+
+```bash
+/usr/bin/python3 -m cli.ultidock --help
+/usr/bin/python3 -m cli.ultidock example run quickstart
+/usr/bin/python3 -m cli.molguard --help
+```
+
+For this source-checkout installation, replace `ultidock` in the commands below
+with `/usr/bin/python3 -m cli.ultidock` and `molguard` with
+`/usr/bin/python3 -m cli.molguard`, running from the repository root. On other
+distros, package versions must satisfy `pyproject.toml`. GPU drivers, compute
+runtimes and native build tools are still required independently of Python.
+
+Alternatively, use pip in a virtual environment after installing the native
+programs above:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
+python -m pip install --upgrade pip
 ```
 
 Install all required packages plus the `ultidock` and `molguard` CLIs in one step:
 
 ```bash
-pip install -r requirements.txt
-pip install -e .
+python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
 This installs numpy, scipy, psutil, matplotlib, pandas, the `ultidock` workflow
 CLI, and the `molguard` deterministic I/O CLI.
 `pandas` and `matplotlib` are used only by the post-run analysis stage.
 
-If you want Ultidock to prepare raw receptor `.pdb` files automatically, install
-at least one receptor conversion backend:
+If you did not install the Ubuntu package list and want to prepare raw receptor
+`.pdb` files, install at least one receptor conversion backend. In a virtual
+environment, use Meeko; with Ubuntu system Python, install Open Babel:
 
 ```bash
-pip install meeko
-# or install Open Babel through your system package manager
+python -m pip install meeko
+# or: sudo apt install openbabel
 ```
 
 Existing receptor `.pdbqt` files do not need Meeko/Open Babel; they are only
@@ -159,13 +231,17 @@ Follow this checklist whenever you want to run Ultidock from a clean workspace.
    cd ultidock
    ```
 
-2. **Activate your Python environment** and install the requirements (see
-   [Requirements](#requirements)).
+2. **Install the native packages and Python dependencies** in
+   [Requirements](#requirements). Verify the CLI with `ultidock --help` after a
+   pip install, or `/usr/bin/python3 -m cli.ultidock --help` from the checkout.
 
-3. **Reset the docking workspace** to avoid stale binaries and outputs:
+3. **Try the lightweight example** before building the full docking toolchain:
    ```bash
-   python3 docking/clean.py -y --all
+   ultidock example run quickstart
    ```
+   It generates a report from bundled fixtures without a GPU or Java.
+   With source-checkout system Python, use
+   `/usr/bin/python3 -m cli.ultidock example run quickstart`.
 
 4. **Stage inputs:**
    - Copy your receptor(s) to `docking/MACRO_MOL_DIR/`. Ultidock scans files by
@@ -177,22 +253,23 @@ Follow this checklist whenever you want to run Ultidock from a clean workspace.
        (one per line). Ultidock will download, verify, and extract them.
      - Manually place `.pdbqt` or `.pdbqt.gz` files in `docking/LIGANDS_DIR/`.
      - Pass `--skip-wget` when running `setup.py`/`run.py` to skip downloads and
-       rely entirely on pre-populated ligand files.
+       rely entirely on pre-populated ligand files. Keep only the ligands you
+       intend to dock in that directory; the pipeline scans every `*.pdbqt`.
 
 5. **Run the setup + docking pipeline:**
    ```bash
-   python3 docking/run.py --mode gpu
+   ultidock run --mode gpu --skip-wget
    ```
-   - Use `--mode cpu` to skip AutoDock-GPU compilation and rely on AutoGrid
-     + Vina.
-   - Add `--skip-wget` if your ligands are already staged and you want to avoid
-     executing the download manifest.
+   - With the source-checkout installation, use
+     `/usr/bin/python3 -m cli.ultidock run --mode gpu --skip-wget` instead.
+   - Use `--mode cpu` if you have no GPU; this uses AutoGrid and Vina.
+   - Omit `--skip-wget` only when you intend to run the download manifest.
    - Override directories as needed with `--LIGANDS_DIR`, `--MACRO_MOL_DIR`, etc.
      Absolute paths are recommended for scripted automation.
 
 6. **Monitor progress:**
-   - Setup output reports where AutoDock-GPU, AutoGrid, and Vina binaries are
-     compiled or reused.
+   - Setup output reports where AutoDock-GPU and AutoGrid binaries are built or
+     reused. The repository includes static Linux Vina binaries.
    - Docking output prints the number of ligands discovered, grid preparation
      steps, worker launches, and database insertions.
 
@@ -211,7 +288,9 @@ Follow this checklist whenever you want to run Ultidock from a clean workspace.
      downstream MD.
    - Use the notebooks in `data-analyses/` for visualization or scoring audits.
 
-Repeat steps 3–8 for each new batch to ensure deterministic runs.
+For another batch, use new input/output directories or explicitly clean the old
+workspace. `ultidock clean -y --all` deletes build products, generated maps,
+ligands, and results, so inspect `ultidock clean --all` first.
 
 ---
 
@@ -223,10 +302,10 @@ most relevant README section instead of burying the terminal in long guidance.
 | Command | Purpose |
 |---------|---------|
 | `python3 docking/run.py [options]` | Primary entry point. Validates the environment, runs setup, downloads ligands, launches docking, and triggers analysis. |
-| `python3 docking/setup.py [options]` | Runs the setup stage only (directory creation, AutoDock-GPU/AutoGrid/Vina checks). All CLI flags mirror `run.py`. |
+| `python3 docking/setup.py [options]` | Runs the setup stage only (directory creation and AutoDock-GPU/AutoGrid build checks). All CLI flags mirror `run.py`. |
 | `python3 docking/dock_v02.py [options]` | Executes the docking stage against prepared ligands and receptors. Used internally by `run.py`. |
 | `python3 docking/extract.py` | Wrapper around AutoDock Vina's `vina_split` for splitting ligand archives and optional filtering. |
-| `python3 docking/clean.py -y --all` | Removes compiled binaries, cached grids, downloads, and generated configs. Use before starting a fresh run. |
+| `python3 docking/clean.py -y --all` | Removes compiled binaries, cached grids, downloads, and generated configs. Run only when you want a full reset. |
 | `python3 docking/profile_receptors.py` | Generate optional per-receptor `.config.toml` sidecars from receptor geometry. |
 | `python3 benchmarks/cavity_recovery_benchmark.py` | Evaluate receptor-only site finding against co-crystallized ligand centers. Supports target-level `--jobs` parallelism. |
 | `python3 benchmarks/download_dude.py` | Download DUD-E receptor, crystal ligand, active, and decoy files. |
@@ -264,7 +343,7 @@ most relevant README section instead of burying the terminal in long guidance.
 
 | Flag | Description |
 |------|-------------|
-| `--mode {gpu,cpu}` | Select GPU (AutoDock-GPU) or CPU-only (Vina) execution mode. |
+| `--mode {auto,gpu,cuda,opencl,cpu}` | `auto` permits CPU fallback; `gpu` requires a detected NVIDIA/OpenCL GPU. `cuda`, `opencl`, and `cpu` select a backend explicitly. Automatic OpenCL detection requires `clinfo`. |
 | `--skip-setup` | Assume setup has already been run and use the existing config. |
 | `--LIGANDS_DIR PATH` | Override ligand staging directory. |
 | `--MACRO_MOL_DIR PATH` | Override receptor directory. |
@@ -336,7 +415,7 @@ invocation. Edit the file directly (or pass CLI overrides) to fine-tune a run.
 
 | Variable | Description |
 |----------|-------------|
-| `GPU_TYPE` | Which accelerator build to prepare (`CPU`, `CUDA`, or `OCL`). In CPU mode only AutoGrid and Vina are compiled. |
+| `GPU_TYPE` | Which accelerator build to prepare (`CPU`, `CUDA`, or `OCL`). In CPU mode AutoGrid is built and bundled Vina binaries are used. |
 | `NUMWI` | Number of AutoDock-GPU work items queued per ligand batch. Increase to better saturate large GPUs; reduce on memory-constrained devices. |
 | `AUTO_GRID_BIN` | Resolved path to the `autogrid4` binary. Adjust if you provide a prebuilt AutoGrid installation. |
 | `GRID_MODE` | Strategy for identifying grid centers: `ligand`, `residues`, `centers` (hotspot-driven default), or `blind` (whole-protein). |
@@ -609,15 +688,40 @@ Each full example runner follows a documented researcher workflow:
 ```bash
 ultidock example list
 ultidock example run sert-escitalopram
+ultidock example run sert-escitalopram p2rank
+ultidock example run sert-escitalopram fpocket
+ultidock example run sert-escitalopram p2rank --mode cpu  # no GPU runtime
 ultidock example run gabaa-8dd2-cav-emps --dry-run
 ```
 
+The SERT example uses CaV-EMPS by default. Pass `p2rank` or `fpocket` after
+the example name to select that pocket finder. The chosen method generates
+fresh sites from the staged SERT receptor before docking.
+
+Each full docking example prints its own directory under
+`examples/<name>/workspace/<timestamp>/`. Inputs, grids, and results for that
+run stay there; installed AutoDock and Vina binaries are reused. The example
+passes `--skip-wget`, so it docks only its bundled ligands. A new run gets a new
+workspace, and completed workspaces remain available for inspection.
+
+> **P2Rank 2.5 requires Java 17–23.** Java 25 can fail with
+> `Unsupported class file major version 69` while loading P2Rank's Groovy
+> configuration. On Ubuntu, install a compatible runtime with
+> `sudo apt install openjdk-21-jre-headless`. The bundled `external/bin/prank`
+> launcher uses `/usr/lib/jvm/java-21-openjdk-amd64` automatically when
+> `JAVA_HOME` is unset. If `JAVA_HOME` points to an incompatible Java version,
+> set it to the Java 21 directory before running `ultidock ... p2rank`.
+
 What the helper (`examples/common.py`) does:
 
-1. Calls `python3 docking/clean.py -y --all` to ensure a fresh workspace.
-2. Recreates the canonical directories under `docking/`.
-3. Copies the example receptor and ligands into the main pipeline directories.
-4. Executes the same pipeline path as `ultidock run`, with explicit path overrides.
+1. Creates a new example workspace without removing previous runs.
+2. Copies that example's receptor and ligands into the new workspace.
+3. Predicts sites with the selected method, when `p2rank` or `fpocket` is given.
+4. Runs the full pipeline with explicit input/output paths and no ligand download.
+
+P2Rank or fpocket can propose several sites. AutoGrid then builds maps for each
+site sequentially; `[autogrid] prepared N site grids` means that stage finished.
+Docking work grows with the number of ligands times the number of sites.
 
 Use these scripts as blueprints for your own automation or CI workflows.
 
@@ -625,19 +729,57 @@ Use these scripts as blueprints for your own automation or CI workflows.
 
 ## Troubleshooting
 
+- **`ultidock: command not found` or `make install` has no target**
+  - From the repository root, run `python3 -m venv .venv`,
+    `source .venv/bin/activate`, then `python -m pip install -e .`.
+    Activate `.venv` in each new shell. The repository root has no Makefile;
+    the `ultidock` command is installed by pip. The system-Python alternative
+    is in [Python Environment](#python-environment).
+
+- **P2Rank reports `Unsupported class file major version 69`**
+  - The pinned P2Rank 2.5 supports Java 17–23. Install
+    `openjdk-21-jre-headless` on Ubuntu and unset an incompatible `JAVA_HOME`,
+    or set `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64`.
+
+- **fpocket stops compiling at `src/fparams.c` with `strcpy` pointer errors**
+  - Use `bash scripts/install_pocket_tools.sh fpocket` from this checkout. The
+    installer corrects the fpocket 4.2.3 source before compiling it. If you
+    built an older checkout, update it and rerun that command.
+
+- **An example discovers more ligands than it bundled**
+  - Run the updated example command so it creates a new isolated workspace.
+    For a manual run, inspect `docking/LIGANDS_DIR/`: every `*.pdbqt` there is
+    selected for docking. Use a dedicated `--LIGANDS_DIR` for each batch.
+
+- **AutoGrid prints `S1`, `S2`, ... and seems to pause**
+  - It builds a separate map set for each predicted site, one at a time. Check
+    the current site's `grid.glg` in the printed directory. Docking begins after
+    `[autogrid] prepared N site grids`.
+
+- **Build fails with `CL/opencl.h: No such file or directory`**
+  - Install `ocl-icd-opencl-dev` on Debian/Ubuntu, then rerun setup. This provides
+    the headers and linker library; installing only the OpenCL runtime is insufficient.
+    For custom SDKs, check `GPU_INCLUDE_PATH` and `GPU_LIBRARY_PATH`.
+
+- **GPU not detected, or `clinfo` reports zero platforms**
+  - Follow [GPU Runtimes](#gpu-runtimes) to install and verify the system driver
+    and compute runtime. Check from the same terminal or container that runs
+    Ultidock; activating a Python virtual environment does not supply a GPU runtime.
+
 - **SSL errors while downloading ligands**
   - Corporate firewalls or strict TLS inspection can block `files.docking.org`.
     Download the required archives manually and place them in
     `docking/LIGANDS_DIR/` before running the pipeline.
 
 - **AutoDock-GPU compilation failures**
-  - Ensure CUDA 12.8+ is installed and `nvcc --version` reports the expected
-    toolkit. Re-run `python3 docking/clean.py -y --all` followed by
-    `python3 docking/run.py --mode gpu`.
+  - For CUDA, check `nvcc --version`, the driver, and `gcc-12`/`g++-12`.
+    For OpenCL, check `clinfo -l`, `ocl-icd-opencl-dev`, and the vendor runtime.
+    Run `ultidock doctor` and retry setup after fixing the missing dependency.
 
 - **`ultidock doctor` shows `[WARN] not compiled` for AutoGrid or AutoDock-GPU**
   - The source tree is present but the binaries have not been built yet.
-    Run `cd docking && python setup.py` to compile them. After a successful
+    Run `ultidock setup --mode gpu --skip-wget` (or `--mode cpu` without a GPU)
+    to compile them. After a successful
     build, `doctor` will report `[OK]` with the resolved binary path.
 
 - **`molguard pdbqt check` reports `NO_DECIMAL` or `EXPONENT` errors**

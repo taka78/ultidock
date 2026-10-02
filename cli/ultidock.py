@@ -225,11 +225,17 @@ def doctor_cmd() -> None:
         root / "docking" / ".toolshims",
     ]
     tools = [
-        ("autogrid4", "AutoGrid", root / "docking" / "AUTODOCK_GPU_DIR" / "autogrid"),
-        ("autodock4", "AutoDock 4", None),
-        ("autodock_gpu_128wi", "AutoDock-GPU (128wi)", root / "docking" / "AUTODOCK_GPU_DIR"),
-        ("autodock_gpu_64wi", "AutoDock-GPU (64wi)", root / "docking" / "AUTODOCK_GPU_DIR"),
-        ("vina", "AutoDock Vina", None),
+        ("autogrid4", "AutoGrid", root / "docking" / "AUTODOCK_GPU_DIR" / "autogrid", False),
+        ("autodock4", "AutoDock 4", None, True),
+        (
+            "autodock_gpu_128wi", "AutoDock-GPU (128wi)",
+            root / "docking" / "AUTODOCK_GPU_DIR", True,
+        ),
+        (
+            "autodock_gpu_64wi", "AutoDock-GPU (64wi)",
+            root / "docking" / "AUTODOCK_GPU_DIR", True,
+        ),
+        ("vina", "AutoDock Vina", None, False),
     ]
 
     click.echo("-- ultidock environment --------------------------------")
@@ -239,10 +245,12 @@ def doctor_cmd() -> None:
 
     click.echo("-- external tools --------------------------------------")
     had_issue = False
-    for binary, label, source_dir in tools:
+    for binary, label, source_dir, optional in tools:
         found = _find_tool(binary, local_dirs)
         if found:
             click.echo(f"  [OK]    {label:30s} {found}")
+        elif optional:
+            click.echo(f"  [INFO]  {label:30s} optional; not installed")
         elif source_dir is not None and source_dir.is_dir():
             had_issue = True
             click.echo(f"  [WARN]  {label:30s} not compiled  (source: {source_dir})", err=True)
@@ -253,8 +261,7 @@ def doctor_cmd() -> None:
         if path.is_file() and os.access(path, os.X_OK):
             click.echo(f"  [OK]    {method:30s} {path}")
         else:
-            had_issue = True
-            click.echo(f"  [FAIL]  {method:30s} not found at {path}", err=True)
+            click.echo(f"  [INFO]  {method:30s} installs when selected")
     if had_issue:
         click.echo(f"       {readme_hint('troubleshooting')}", err=True)
 
@@ -677,3 +684,7 @@ def example_run_cmd(name: str, extra_args: tuple[str, ...]) -> None:
 
 
 cli.add_command(example_group, "examples")
+
+
+if __name__ == "__main__":
+    cli()

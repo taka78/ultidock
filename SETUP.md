@@ -5,14 +5,15 @@
 ```
 ultidock/                   ← repo root (clone here)
 ├── pyproject.toml          ← molguard package manifest + deps
-├── requirements.txt        ← pip install shortcut (runtime)
+├── requirements.txt        ← Python runtime dependencies
+├── requirements-ubuntu.txt ← native packages for Ubuntu 26.04
 ├── requirements-dev.txt    ← pip install shortcut (runtime + tests)
 ├── molguard/               ← I/O hardening package (ultidock CLI)
 │   ├── io/fixedfmt.py
 │   ├── io/pdbqt.py
 │   ├── grids/check.py
 │   └── tests/
-└── docking/                ← pipeline scripts (run FROM HERE)
+└── docking/                ← pipeline scripts
     ├── setup.py            ← first-time wizard (GPU detect, dirs, ligands)
     ├── run.py              ← full pipeline entry-point
     ├── dock_v02.py
@@ -22,36 +23,108 @@ ultidock/                   ← repo root (clone here)
 
 ---
 
-## Step 1 — Install Python dependencies
+## Step 1 — Install prerequisites
 
-From the **repo root**:
+Run these commands from the **repository root**. On Ubuntu 26.04, the checked
+[`requirements-ubuntu.txt`](requirements-ubuntu.txt) file lists the native
+build tools and programs needed for AutoGrid, AutoDock-GPU, fpocket, P2Rank,
+and raw `.pdb` receptor conversion:
 
 ```bash
-# Standard pip (virtual env recommended)
-pip install -r requirements.txt
-pip install -e .                  # installs molguard + the `ultidock` CLI
-
-# OR on system Python without venv (Ubuntu/Debian)
-pip install --break-system-packages -r requirements.txt
-pip install --break-system-packages -e .
+sudo apt update
+xargs -a requirements-ubuntu.txt sudo apt install -y
 ```
+
+This includes `gcc-12`/`g++-12` because the current AutoDock-GPU build script
+uses them, `libnetcdf-dev` for fpocket, `curl` for the P2Rank download, and
+Java 21 for the pinned P2Rank 2.5. The package list cannot install GPU drivers
+or a vendor compute runtime. Follow [GPU Runtimes](README.md#gpu-runtimes) for
+NVIDIA CUDA or AMD/Intel OpenCL. For CPU docking, no GPU runtime is needed.
+
+For another Linux distribution, install equivalent native packages. The file
+above is an Ubuntu apt list; `requirements.txt` is only for Python packages.
+
+### Python command
+
+**System packages, without a virtual environment (Ubuntu 26.04):**
+
+```bash
+sudo apt install python3 python3-click python3-numpy python3-scipy \
+  python3-psutil python3-pandas python3-matplotlib
+```
+
+From the **repo root**, run the CLI directly from the checkout:
+
+```bash
+/usr/bin/python3 -m cli.ultidock --help
+/usr/bin/python3 -m cli.ultidock example run quickstart
+```
+
+No pip install or activation is needed for this path. Use
+`/usr/bin/python3 -m cli.ultidock` in place of `ultidock` and
+`/usr/bin/python3 -m cli.molguard` in place of `molguard` below, from the repo
+root. `/usr/bin/python3` explicitly selects system Python even if `.venv` is
+active. Other distro versions must meet the dependencies in `pyproject.toml`.
+
+**Alternatively, pip in a virtual environment:**
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pip install -e .         # installs molguard + the `ultidock` CLI
+```
+
+Verify the CLI with `ultidock --help` after pip installation. If the command
+is not found in a new terminal, run `source .venv/bin/activate` again. The repo
+root has no `make install` target. For a source-checkout installation, use
+`/usr/bin/python3 -m cli.ultidock --help` from the repo root instead. Run
+`ultidock doctor` after setup to inspect compiled tools.
 
 ---
 
-## Step 2 — Run the setup wizard
+## Step 2 — Run setup
 
-The pipeline scripts **must be run from inside `docking/`** because they use
-`SCRIPT_DIR`-relative imports and write `config.py` to that directory.
+From the repository root, choose the backend that matches your machine. A
+first run builds AutoGrid and, for GPU mode, AutoDock-GPU; this can take time.
+If your ligands are already present, skip the download manifest:
 
 ```bash
-cd docking/
-python setup.py
+ultidock setup --mode gpu --skip-wget
+# or, without a GPU:
+ultidock setup --mode cpu --skip-wget
 ```
 
-The wizard will ask for:
+With source-checkout system Python, replace `ultidock setup` with
+`/usr/bin/python3 -m cli.ultidock setup`. The lower-level command
+`python3 docking/setup.py --mode cpu --skip-wget` is also available.
+
+If you omit flags, the setup wizard will ask for:
 - Run mode: `auto` / `gpu` / `cpu` / `cuda` / `opencl`
 - Directory paths (or accept defaults — all relative to `docking/`)
 - Path to a `.wget` ligand download file (or skip)
+
+`--mode gpu` requires a detected GPU and stops if detection fails. Only
+`--mode auto` falls back to CPU automatically. NVIDIA detection uses
+`nvidia-smi -L`; OpenCL GPU detection uses `clinfo` (install `clinfo` along with
+your vendor's OpenCL runtime). `--mode cuda`, `--mode opencl`, and `--mode cpu`
+select a backend explicitly. OpenCL setup also checks for the Rusticl case below.
+
+For AMD Mesa/Rusticl, setup automatically tries `RUSTICL_ENABLE=radeonsi` if
+Rusticl reports no GPU and the setting is unset. It selects OpenCL only after
+the retry reports an actual GPU, then passes the setting to subprocesses and
+saves it in `docking/config.py` for future runs, including `--skip-setup`.
+An existing setting is never overwritten. This needs neither a virtual
+environment nor a manual export in your terminal or IDE.
+
+Install the OpenCL runtime first; a platform name with zero devices is not
+enough. See [GPU Runtimes in README](README.md#gpu-runtimes) for driver packages
+and diagnostic commands.
+
+Building AutoDock-GPU with OpenCL also requires development headers and the
+linker library, even when `clinfo` already detects the GPU. On Debian/Ubuntu,
+install `sudo apt install ocl-icd-opencl-dev`. Setup checks for `CL/opencl.h`,
+`CL/cl.h`, and `libOpenCL.so` before compiling.
 
 It will then:
 1. Detect / compile AutoDock-GPU and AutoGrid
@@ -59,19 +132,30 @@ It will then:
 3. Write `docking/config.py` (sourced by all other scripts)
 4. Optionally download ligands via wget
 
-> **Tip:** Use `python setup.py --mode cpu --skip-wget` for a non-interactive
+AutoGrid needs `autoconf`, `automake`, `m4`, Perl, and `csh`; all are in the
+Ubuntu package list above. Its build regenerates Autotools files locally.
+
+> **Tip:** Use `ultidock setup --mode cpu --skip-wget` for a non-interactive
 > run with all default paths.
 
 ---
 
 ## Step 3 — Run the pipeline
 
-Still from **`docking/`**:
+From the repository root, put only the intended receptor(s) under
+`docking/MACRO_MOL_DIR/` and ligands under `docking/LIGANDS_DIR/`. Every
+`*.pdbqt` ligand in that directory is selected. Then run:
 
 ```bash
-python run.py           # full pipeline: setup → extract → dock → analyse
-python run.py --skip-setup --skip-extract   # dock only (config already exists)
+ultidock run --skip-setup --skip-wget
 ```
+
+This uses the GPU or CPU backend saved in step 2, then extracts ligands, docks,
+and analyses results. To do setup and docking in one command instead, use
+`ultidock run --mode gpu --skip-wget` (or `--mode cpu`). After a successful
+run, `ultidock run --skip-setup --skip-extract` reuses the existing config and
+prepared ligands. For source-checkout system Python, use
+`/usr/bin/python3 -m cli.ultidock run` in place of `ultidock run`.
 
 ---
 
@@ -101,15 +185,17 @@ requests the full cleanup.
 
 ## Step 4 — Validate inputs with molguard
 
-From **anywhere** (the `ultidock` command is on your PATH after step 1):
+With a pip installation, `molguard` is available from anywhere. With the
+system-package path, replace `molguard` below with
+`/usr/bin/python3 -m cli.molguard` from the repo root:
 
 ```bash
 # Check a receptor before docking
-ultidock pdbqt check      path/to/receptor.pdbqt
-ultidock pdbqt canonicalize-receptor receptor.pdbqt -o receptor_canon.pdbqt
+molguard pdbqt check path/to/receptor.pdbqt
+molguard receptor canonicalize receptor.pdbqt -o receptor_canon.pdbqt
 
 # Validate AutoGrid maps after grid generation
-ultidock grids check      path/to/receptor.maps.fld
+molguard grids check path/to/receptor.maps.fld
 
 # Sanity-check your environment
 ultidock doctor
@@ -119,14 +205,47 @@ ultidock doctor
 
 ## Local fpocket and P2Rank boxes
 
-`ultidock setup`, the normal pipeline setup, and the first pocket command
-install the local tools (fpocket 4.2.3 and P2Rank 2.5) automatically. This needs `git`, `make`,
-`curl`, and Java 17–23 for P2Rank. To install them without running full setup:
+`ultidock setup` and the normal pipeline setup check whether the local tools
+are available. Missing pocket tools do not block setup. When you select
+`fpocket` or `p2rank` for a pipeline run or `pocket-box` command, only that
+tool is installed automatically if missing. An explicit `--tool PATH` uses
+your executable without installing a local copy.
+
+The pinned versions are fpocket 4.2.3 and P2Rank 2.5. Building fpocket needs
+`git`, `make`, a C/C++ toolchain, and NetCDF headers; P2Rank needs `curl`,
+`tar`, and Java 17–23. These native dependencies are in
+[`requirements-ubuntu.txt`](requirements-ubuntu.txt). The installer fixes a
+GCC 15 pointer-type error in fpocket 4.2.3 before building it.
+To install either tool explicitly without running full setup:
 
 ```bash
-bash scripts/install_pocket_tools.sh
+bash scripts/install_pocket_tools.sh fpocket
+bash scripts/install_pocket_tools.sh p2rank
+# With no argument (or "all"), install both tools.
 ultidock doctor
 ```
+
+Java 25 can stop P2Rank 2.5 with `Unsupported class file major version 69`.
+The local `external/bin/prank` launcher selects Ubuntu's Java 21 when
+`JAVA_HOME` is unset. If it points to Java 25, run
+`export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64` before P2Rank. Verify
+the selected runtime with `"$JAVA_HOME/bin/java" -version` when set.
+
+To try the bundled SERT example from the repository root:
+
+```bash
+ultidock example run quickstart
+ultidock example run sert-escitalopram p2rank
+ultidock example run sert-escitalopram fpocket
+```
+
+The quickstart writes sample report artifacts without running docking. Each
+SERT command stages one receptor and one ligand in a new directory under
+`examples/sert-escitalopram/workspace/`, skips the default ligand download,
+then builds one AutoGrid map set per predicted site before docking. The
+printed workspace path contains that run's inputs and results; old runs remain
+available. For a source-checkout installation, replace `ultidock` with
+`/usr/bin/python3 -m cli.ultidock`.
 
 The tools are installed under the ignored `external/` directory. The docking
 commands use these local executables by default and accept `--tool PATH` to

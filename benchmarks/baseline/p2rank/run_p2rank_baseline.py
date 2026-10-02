@@ -14,10 +14,10 @@ BASELINE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BASELINE_ROOT.parents[1]
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "benchmarks" / "results" / "baseline" / "p2rank"
 
-if str(BASELINE_ROOT) not in sys.path:
-    sys.path.insert(0, str(BASELINE_ROOT))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-from common import (  # noqa: E402
+from benchmarks.baseline.common import (  # noqa: E402
     PredictedSite,
     PredictionResult,
     add_common_args,

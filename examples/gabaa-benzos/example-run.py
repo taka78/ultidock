@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -13,6 +14,15 @@ from common import run_pipeline, stage_inputs
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the GABAA benzodiazepine docking example.")
+    parser.add_argument(
+        "--mode",
+        choices=("auto", "gpu", "cpu", "cuda", "opencl"),
+        default="gpu",
+        help="Docking backend (default: gpu; use cpu when no GPU runtime is available).",
+    )
+    args = parser.parse_args()
+
     receptor = EXAMPLE_DIR / "4COF_edited.pdbqt"
     if not receptor.exists():
         fallback = EXAMPLE_DIR / "4COF.pdbqt"
@@ -32,7 +42,7 @@ def main() -> None:
             raise FileNotFoundError(f"Missing ligand file: {ligand.name}")
 
     workspace_paths = stage_inputs(EXAMPLE_DIR, receptor, ligands)
-    run_pipeline(workspace_paths, mode="gpu")
+    run_pipeline(workspace_paths, mode=args.mode)
 
 
 if __name__ == "__main__":

@@ -125,13 +125,24 @@ Reference URLs:
 
 ## Command Flow
 
-The normal researcher-facing command is the automatic benchmark runner:
+Install the Python and native prerequisites in [SETUP.md](../../SETUP.md),
+then install both optional predictors from the repository root:
+
+```bash
+bash scripts/install_pocket_tools.sh fpocket
+bash scripts/install_pocket_tools.sh p2rank
+```
+
+P2Rank 2.5 needs Java 17–23; the Ubuntu package list installs Java 21. The
+normal researcher-facing command is the automatic benchmark runner:
 
 ```bash
 ultidock benchmark site-prediction \
   --datasets coach420,holo4k \
   --methods cav-emps,fpocket,p2rank \
   --jobs 4 \
+  --fpocket-cmd "$PWD/external/fpocket/bin/fpocket" \
+  --p2rank-cmd "$PWD/external/bin/prank predict" \
   --output-dir benchmarks/results/site_prediction/coach_holo_$(date +%Y%m%d_%H%M)
 ```
 
@@ -141,9 +152,8 @@ writes HTML/Markdown reports.
 
 For `cav-emps`, the runner uses Ultidock's bundled AutoGrid source and will
 compile/check `docking/AUTODOCK_GPU_DIR/autogrid/autogrid4` automatically when
-it is missing. `fpocket` and `p2rank` still require their external executables
-(`fpocket` and `prank`) to be installed or passed with `--fpocket-cmd` /
-`--p2rank-cmd`.
+it is missing. `fpocket` and `p2rank` use the local executables passed above.
+If you use another installation, point `--fpocket-cmd` and `--p2rank-cmd` to it.
 
 CaV-EMPS AutoGrid maps are treated as debug artifacts. By default they are
 created under a temporary work root and deleted after `centers.tsv` and

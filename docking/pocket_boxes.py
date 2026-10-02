@@ -33,7 +33,7 @@ def resolve_binary(method: str, override: Path | None = None) -> Path:
     path = (override or LOCAL_BINARIES[method]).expanduser().resolve()
     if override is None and (not path.is_file() or not os.access(path, os.X_OK)):
         installer = REPO_ROOT / "scripts" / "install_pocket_tools.sh"
-        subprocess.run(["bash", str(installer)], cwd=REPO_ROOT, check=True)
+        subprocess.run(["bash", str(installer), method], cwd=REPO_ROOT, check=True)
     if not path.is_file() or not os.access(path, os.X_OK):
         raise FileNotFoundError(
             f"{method} executable not found: {path}. Install it locally under external/ "

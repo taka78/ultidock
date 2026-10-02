@@ -1,10 +1,21 @@
-source: https://www.nature.com/articles/nature13293
-https://www.ch.ic.ac.uk/rzepa/mim/drugs/html
+# GABAA Benzodiazepine Docking Example
 
-Run the full pipeline with::
+This example stages the prepared 4COF receptor and three bundled ligands. Set
+up Python, AutoGrid, and a docking backend using the [setup guide](../../SETUP.md)
+before starting a full run.
 
-    python3 example-run.py
+From the repository root:
 
-The script stages the receptor/ligands in an isolated workspace and
-invokes ``docking/setup.py`` with explicit ``--LIGANDS_DIR`` and related
-flags so you can inspect or tweak the generated configuration.
+```bash
+ultidock example run gabaa-benzos
+# On a machine without a GPU runtime:
+ultidock example run gabaa-benzos --mode cpu
+```
+
+For a source-checkout installation, replace `ultidock` with
+`/usr/bin/python3 -m cli.ultidock`. The runner creates a new directory under
+`workspace/<timestamp>/`, copies only the bundled receptor and ligands, skips
+the general ligand download manifest, and prints the directory path so you can
+inspect the results. You can also run `python3 example-run.py` from this folder.
+
+Structure source: [PDB 4COF](https://www.rcsb.org/structure/4COF).

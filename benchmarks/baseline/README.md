@@ -23,10 +23,17 @@ the ranking score in `centers.tsv`. Site labels such as `S1` remain names, not
 ranks.
 
 By default, baselines receive the same receptor model as Ultidock: the DUD-E
-receptor is prepared through molguard/Meeko into a canonical PDBQT, then converted
+receptor is prepared through molguard with Meeko or Open Babel into a canonical PDBQT, then converted
 back to PDB coordinate records because P2Rank and fpocket consume PDB input. Use
 `--baseline-receptor-model original` only when you intentionally want a
 third-party-tool-on-raw-DUD-E comparison.
+
+Install the Python and native prerequisites in [SETUP.md](../../SETUP.md), then
+run `bash scripts/install_pocket_tools.sh fpocket` and
+`bash scripts/install_pocket_tools.sh p2rank` from the repository root. The
+baseline commands do not install these tools automatically, so pass the local
+binary paths shown below. P2Rank 2.5 needs Java 17–23; the Ubuntu package list
+installs Java 21.
 
 ## P2Rank
 
@@ -39,10 +46,11 @@ ultidock benchmark baseline-p2rank \
   --autosites 6 \
   --jobs 4 \
   --force \
+  --p2rank-cmd "$PWD/external/bin/prank predict" \
   --output-dir "$OUT"
 ```
 
-If `prank` is not on `PATH`, provide the executable:
+If using another P2Rank installation, provide its executable:
 
 ```bash
 ultidock benchmark baseline-p2rank \
@@ -62,6 +70,7 @@ ultidock benchmark baseline-fpocket \
   --autosites 6 \
   --jobs 4 \
   --force \
+  --fpocket-cmd "$PWD/external/fpocket/bin/fpocket" \
   --output-dir "$OUT"
 ```
 

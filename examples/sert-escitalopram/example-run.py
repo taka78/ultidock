@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -13,6 +14,22 @@ from common import run_pipeline, stage_inputs
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the SERT escitalopram docking example.")
+    parser.add_argument(
+        "site_method",
+        nargs="?",
+        choices=("cav-emps", "p2rank", "fpocket"),
+        default="cav-emps",
+        help="Method used to propose docking sites (default: cav-emps).",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("auto", "gpu", "cpu", "cuda", "opencl"),
+        default="gpu",
+        help="Docking backend (default: gpu; use cpu when no GPU runtime is available).",
+    )
+    args = parser.parse_args()
+
     receptor = EXAMPLE_DIR / "5i6x_edited.pdbqt"
     if not receptor.exists():
         fallback = EXAMPLE_DIR / "5i6x.pdbqt"
@@ -26,7 +43,7 @@ def main() -> None:
         raise FileNotFoundError("Missing ligand file escitalopram-e.pdbqt")
 
     workspace_paths = stage_inputs(EXAMPLE_DIR, receptor, [ligand])
-    run_pipeline(workspace_paths, mode="gpu")
+    run_pipeline(workspace_paths, mode=args.mode, site_method=args.site_method)
 
 
 if __name__ == "__main__":

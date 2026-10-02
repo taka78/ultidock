@@ -26,7 +26,15 @@ are inspected. The seven profiles are the repository's controlled suite:
 
 ## Run
 
-From the repository root:
+Install the Python and native dependencies in [SETUP.md](../../SETUP.md) first.
+The default run includes fpocket 4.2.3 and P2Rank 2.5; install their local
+executables with `bash scripts/install_pocket_tools.sh fpocket` and
+`bash scripts/install_pocket_tools.sh p2rank` from the repository root. P2Rank
+2.5 needs Java 17–23; the Ubuntu package list installs Java 21. This case
+study also needs AutoGrid for CaV-EMPS and network access to download its
+recorded 8DD2 PDB unless you provide `--pdb`.
+
+From the repository root, after installing the CLI with pip:
 
 ```bash
 ultidock example run gabaa-8dd2-cav-emps \
