@@ -76,6 +76,7 @@ docking/AUTODOCK_GPU_DIR/autogrid/ad4_shared/*
 docking/AUTODOCK_GPU_DIR/autogrid/config.status
 docking/AUTODOCK_GPU_DIR/autogrid/default_parameters.h
 docking/AUTODOCK_GPU_DIR/autogrid/Makefile
+docking/AUTODOCK_GPU_DIR/autogrid/*~
 
 
 !docking/autodock-gpu-compiler.sh
