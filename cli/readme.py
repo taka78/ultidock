@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from ultidock.paths import workspace_root
 
 README_TOPICS = {
     "requirements": ("Requirements", "requirements"),
@@ -24,7 +25,7 @@ README_TOPICS = {
 
 
 def _repo_root() -> Path | None:
-    for candidate in [Path(__file__).resolve().parent.parent, Path.cwd(), *Path.cwd().parents]:
+    for candidate in [workspace_root(), Path(__file__).resolve().parent.parent]:
         if (candidate / "README.md").is_file() and (candidate / "docking").is_dir():
             return candidate
     return None

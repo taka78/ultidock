@@ -9,10 +9,11 @@ from pathlib import Path
 import click
 
 from cli.readme import readme_hint
+from ultidock import __version__
 
 
 @click.group()
-@click.version_option(package_name="molguard")
+@click.version_option(version=__version__, prog_name="molguard")
 def cli() -> None:
     """MolGuard: deterministic molecular I/O checks and repair tools."""
 

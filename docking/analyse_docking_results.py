@@ -6,10 +6,11 @@ Query the SQLite docking_results DB and filter:
   • affinity < threshold
   • rmsd_lb < threshold
   • rmsd_ub < threshold
-  • ligand_id appears >1 times
   • model > min_model
 
 Write results by default to a CSV file named "<date>-docking-results.csv" (placed next to the database) and also print all rows to the console.
+Exports retain the stored binding_site for each pose. Unknown sites are blank,
+including results from legacy databases without a binding_site column.
 
 Usage:
     python analyze_docking_results.py \
@@ -26,7 +27,6 @@ import time
 import argparse
 import sqlite3
 import os
-from datetime import date
 from config import DB_PATH
 import pandas as pd
 
@@ -83,8 +83,10 @@ def main():
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
+    columns = {row[1] for row in cur.execute("PRAGMA table_info(docking_results)")}
+    site_expression = "binding_site" if "binding_site" in columns else "NULL"
 
-    query = """
+    query = f"""
     WITH filtered AS (
       SELECT
         ligand_name,
@@ -92,6 +94,7 @@ def main():
         "rmsd_lb (Å)" AS rmsd_lb,
         "rmsd_ub (Å)" AS rmsd_ub,
         "docking_file",
+        {site_expression} AS binding_site,
         CAST(
           substr(
             ligand_name,
@@ -119,7 +122,9 @@ def main():
         args.min_model,
     ))
     rows = [dict(r) for r in cur.fetchall()]
-    df = pd.DataFrame(rows)
+    export_columns = [column[0] for column in cur.description]
+    conn.close()
+    df = pd.DataFrame(rows, columns=export_columns)
 
     # Write to output file
     out_path = args.out

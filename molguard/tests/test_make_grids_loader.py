@@ -60,6 +60,31 @@ def _write_map(path: Path, values: np.ndarray) -> None:
     )
 
 
+def test_known_site_box_applies_to_the_selected_receptor(monkeypatch, tmp_path):
+    from cli.ultidock import _write_known_site_tsv
+
+    grids = _load_make_grids(monkeypatch)
+    centers = tmp_path / "sites.tsv"
+    _write_known_site_tsv(centers, (-36.106, -20.758, 4.897), 20.0)
+
+    rows = grids._parse_centers_tsv(centers, receptor_key="5i6x_edited")
+
+    assert len(rows) == 1
+    assert rows[0]["site_id"] == "S1"
+    assert rows[0]["center"] == (-36.106, -20.758, 4.897)
+
+
+def test_predicted_boxes_still_require_the_matching_receptor(monkeypatch, tmp_path):
+    grids = _load_make_grids(monkeypatch)
+    centers = tmp_path / "sites.tsv"
+    centers.write_text(
+        "# meta policy=provided\n"
+        "known_site\tS1\t1\t2\t3\t95\t95\t95\t0.375\n"
+    )
+
+    assert grids._parse_centers_tsv(centers, receptor_key="5i6x_edited") == []
+
+
 def _pdbqt_atom_line(serial: int, atom_name: str, atom_type: str, x: float = 0.0) -> str:
     line = (
         f"ATOM  {serial:5d} {atom_name:<4s} ALA A{serial:4d}    "

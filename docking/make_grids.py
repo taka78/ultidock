@@ -220,13 +220,17 @@ def _parse_centers_tsv(centers_tsv_path, receptor_key=None, default_spacing=GRID
     Returns list of dicts, one per row (optionally filtered by receptor_key).
     """
     rows = []
+    manual_box = _parse_centers_metadata(centers_tsv_path).get("policy") == "known_site"
     with open(centers_tsv_path, "r", errors="ignore") as f:
         for ln in f:
             ln = ln.strip()
             if not ln or ln.startswith("#"):
                 continue
             parts = ln.split()
-            if receptor_key and parts[0] != receptor_key:
+            if (
+                receptor_key and parts[0] != receptor_key
+                and not (manual_box and parts[0] == "known_site")
+            ):
                 continue
             has_site = len(parts) >= 2 and (not _is_float_token(parts[1]))
             i0 = 2 if has_site else 1

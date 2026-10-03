@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from ultidock.paths import application_root, workspace_root
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -24,16 +25,17 @@ from benchmarks.baseline.p2rank.run_p2rank_baseline import (  # noqa: E402
 )
 
 LOCAL_BINARIES = {
-    "fpocket": REPO_ROOT / "external" / "fpocket" / "bin" / "fpocket",
-    "p2rank": REPO_ROOT / "external" / "bin" / "prank",
+    "fpocket": workspace_root() / "external" / "fpocket" / "bin" / "fpocket",
+    "p2rank": workspace_root() / "external" / "bin" / "prank",
 }
 
 
 def resolve_binary(method: str, override: Path | None = None) -> Path:
     path = (override or LOCAL_BINARIES[method]).expanduser().resolve()
     if override is None and (not path.is_file() or not os.access(path, os.X_OK)):
-        installer = REPO_ROOT / "scripts" / "install_pocket_tools.sh"
-        subprocess.run(["bash", str(installer), method], cwd=REPO_ROOT, check=True)
+        root = application_root()
+        installer = root / "scripts" / "install_pocket_tools.sh"
+        subprocess.run(["bash", str(installer), method], cwd=root, check=True)
     if not path.is_file() or not os.access(path, os.X_OK):
         raise FileNotFoundError(
             f"{method} executable not found: {path}. Install it locally under external/ "

@@ -4,7 +4,8 @@
 
 ```
 ultidock/                   ← repo root (clone here)
-├── pyproject.toml          ← molguard package manifest + deps
+├── pyproject.toml          ← ultidock package manifest + deps
+├── ultidock/               ← public package, CLI and workspace handling
 ├── requirements.txt        ← Python runtime dependencies
 ├── requirements-dev.txt    ← pip install shortcut (runtime + tests)
 ├── molguard/               ← I/O hardening package (ultidock CLI)
@@ -30,7 +31,7 @@ AutoGrid, AutoDock-GPU, fpocket, P2Rank, and raw `.pdb` receptor conversion:
 ```bash
 sudo apt update
 sudo apt install -y \
-  autoconf automake build-essential clinfo cmake csh curl \
+  autoconf automake autodock-vina build-essential clinfo cmake csh curl \
   g++-12 gcc-12 gfortran git libnetcdf-dev libtool libx11-dev \
   m4 make ocl-icd-opencl-dev openbabel openjdk-21-jre-headless \
   perl pkg-config python3 python3-pip python3-venv tar unzip wget
@@ -72,8 +73,8 @@ active. Other distro versions must meet the dependencies in `pyproject.toml`.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m pip install -e .         # installs molguard + the `ultidock` CLI
+python -m pip install .            # installs Ultidock, MolGuard tools and Python dependencies
+python -m ultidock --help
 ```
 
 Verify the CLI with `ultidock --help` after pip installation. If the command
@@ -82,11 +83,38 @@ root has no `make install` target. For a source-checkout installation, use
 `/usr/bin/python3 -m cli.ultidock --help` from the repo root instead. Run
 `ultidock doctor` after setup to inspect compiled tools.
 
+For development, use `python -m pip install -e ".[dev]"` instead. If your
+environment has the old distribution named `molguard`, uninstall it with
+`python -m pip uninstall molguard` before installing `ultidock`. The `molguard`
+command and Python imports are retained by the new package.
+
+### Installed workspace
+
+Regular installs work from any directory. Ultidock prepares a writable
+workspace on first workflow use under `$XDG_DATA_HOME/ultidock`, defaulting to
+`~/.local/share/ultidock`. Set `ULTIDOCK_HOME=/path/to/workspace` to override it.
+`ultidock doctor` prints the active workspace. The examples, benchmark scripts,
+native build sources and setup guides are included in the package, so the
+source checkout is no longer needed after installation. Package upgrades
+refresh managed source files while retaining configuration and results.
+
+Paths below such as `docking/config.py`, `docking/LIGANDS_DIR/`, and
+`examples/<name>/workspace/` are relative to this active workspace for regular
+installs. Editable installs and direct source-checkout commands keep using the
+repository by default and also support `ULTIDOCK_HOME`.
+
+Wheels include native build sources but no machine-specific executables.
+Install `vina` and `vina_split` with `sudo apt install autodock-vina` or put
+them on `PATH`; Ultidock links these tools into the workspace. An available
+`autogrid4` on `PATH` is reused as well. If AutoGrid is unavailable, setup builds
+it locally. GPU runtimes, compilers and Java remain native prerequisites.
+
 ---
 
 ## Step 2 — Run setup
 
-From the repository root, choose the backend that matches your machine. A
+Choose the backend that matches your machine. Regular installs can run from
+any directory; source-checkout commands run from the repository root. A
 first run builds AutoGrid and, for GPU mode, AutoDock-GPU; this can take time.
 If your ligands are already present, skip the download manifest:
 
@@ -143,7 +171,7 @@ Ubuntu package list above. Its build regenerates Autotools files locally.
 
 ## Step 3 — Run the pipeline
 
-From the repository root, put only the intended receptor(s) under
+In the active workspace, put only the intended receptor(s) under
 `docking/MACRO_MOL_DIR/` and ligands under `docking/LIGANDS_DIR/`. Every
 `*.pdbqt` ligand in that directory is selected. Then run:
 

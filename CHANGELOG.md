@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Renamed the Python distribution to `ultidock`, keeping the `molguard` command and imports.
+- Included workflow modules, examples, guides and native build sources in wheels and source archives.
+- Added `python -m ultidock` and a managed user workspace for regular installs, configurable with `ULTIDOCK_HOME`.
+- Added installation checks outside the source checkout and preserved binding-site identifiers in analysis exports.
+- Fixed manual known-site boxes being rejected when the receptor filename differs from the box label.
+
 ## 1.1.1 - 2026-10-01
 
 - Added MolGuard checks and deterministic receptor preparation for molecular input files.

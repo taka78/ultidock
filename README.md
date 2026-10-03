@@ -151,16 +151,39 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 ```
 
-Install all required packages plus the `ultidock` and `molguard` CLIs in one step:
+Install Ultidock and its Python dependencies in one step from the repository:
 
 ```bash
-python -m pip install -r requirements.txt
-python -m pip install -e .
+python -m pip install .
+python -m ultidock --help
 ```
 
 This installs numpy, scipy, psutil, matplotlib, pandas, the `ultidock` workflow
 CLI, and the `molguard` deterministic I/O CLI.
 `pandas` and `matplotlib` are used only by the post-run analysis stage.
+
+The distribution and public Python package are named `ultidock`. The `molguard`
+command and Python imports remain available as part of Ultidock. If upgrading
+an environment that contains the old `molguard` distribution, remove it first
+with `python -m pip uninstall molguard`, then run the installation above.
+For development, use `python -m pip install -e ".[dev]"` instead.
+
+A regular installation works outside the checkout. On first workflow use,
+Ultidock prepares its scripts, examples, and native build sources in
+`$XDG_DATA_HOME/ultidock` (default `~/.local/share/ultidock`). Configuration,
+compiled tools, pocket-tool downloads, and run outputs stay there; installed
+Python files remain untouched. Set `ULTIDOCK_HOME=/path/to/workspace` to choose
+another location. `ultidock doctor` prints the active workspace. Editable and
+direct source-checkout runs keep the existing repository layout by default;
+they also honor `ULTIDOCK_HOME`.
+
+Python wheels do not contain machine-specific docking executables. Install
+[AutoDock Vina](https://packages.ubuntu.com/en/source/resolute/autodock-vina)
+with `sudo apt install autodock-vina`, or put `vina` and `vina_split` on `PATH`.
+Ultidock links available Vina and AutoGrid programs into the managed workspace;
+otherwise setup builds AutoGrid from its included source. Source-checkout runs
+can continue using their bundled Vina binaries. GPU drivers and native build
+dependencies are still installed separately from the Python package.
 
 If you did not run the Ubuntu package command and want to prepare raw receptor
 `.pdb` files, install at least one receptor conversion backend. In a virtual
@@ -284,6 +307,11 @@ Follow this checklist whenever you want to run Ultidock from a clean workspace.
      inspected or queried at any time.
    - If `pandas` is installed, aggregated CSV/JSON summaries will be produced in
      `docking/RESULTS_DIR/`.
+     Analysis CSV and Excel exports include the stored `binding_site` for each
+     pose, so identical ligand/model names from different pockets remain
+     distinguishable. Unknown sites, including those in older databases without
+     that field, are blank. Exports retain column headers even when no poses
+     match the filters.
 
 8. **Optional post-run steps:**
    - Run `python3 docking/extract.py --help` to (re)split ligand archives via

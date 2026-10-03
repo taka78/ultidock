@@ -1,3 +1,3 @@
 """Ultidock — GPU-accelerated docking pipeline."""
 
-__version__ = "1.1.1"
+from ultidock import __version__

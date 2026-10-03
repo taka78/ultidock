@@ -14,6 +14,7 @@ import click
 from cli.report import generate_report
 from cli.readme import readme_hint
 from molguard import __version__
+from ultidock.paths import application_root
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from docking.pocket_boxes import LOCAL_BINARIES, create_pocket_boxes
@@ -22,20 +23,8 @@ FORWARD_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True}
 
 
 def _repo_root() -> Path:
-    """Find the Ultidock repository root from an editable install or cwd."""
-    candidates = [
-        Path(__file__).resolve().parent.parent,
-        Path.cwd(),
-        Path.cwd().parent,
-    ]
-    for candidate in candidates:
-        if (
-            (candidate / "docking").is_dir()
-            and (candidate / "benchmarks").is_dir()
-            and (candidate / "molguard").is_dir()
-        ):
-            return candidate
-    return Path.cwd()
+    """Return the development checkout or the installed application's workspace."""
+    return application_root()
 
 
 def _require_dir(path: Path, label: str, *, topic: str = "quick-start") -> Path:
@@ -241,7 +230,7 @@ def doctor_cmd() -> None:
     click.echo("-- ultidock environment --------------------------------")
     click.echo(f"  {'ultidock':20s} {__version__}")
     click.echo(f"  {'python':20s} {sys.version.split()[0]}")
-    click.echo(f"  {'repo root':20s} {root}")
+    click.echo(f"  {'workspace':20s} {root}")
 
     click.echo("-- external tools --------------------------------------")
     had_issue = False
