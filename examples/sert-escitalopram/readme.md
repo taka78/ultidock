@@ -17,7 +17,7 @@ With a source-checkout installation, replace `ultidock` with
 `/usr/bin/python3 -m cli.ultidock`. If you have no GPU runtime, append
 `--mode cpu` to any of the commands. The optional pocket programs are installed
 locally when first selected; P2Rank needs Java 17–23, and fpocket needs the C
-build dependencies in [requirements-ubuntu.txt](../../requirements-ubuntu.txt).
+build dependencies in the [setup guide](../../SETUP.md#step-1--install-prerequisites).
 
 The runner prints a new directory under `workspace/<timestamp>/` for each
 invocation. It stages only this example's receptor and ligand, skips the

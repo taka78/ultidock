@@ -6,7 +6,6 @@
 ultidock/                   ← repo root (clone here)
 ├── pyproject.toml          ← molguard package manifest + deps
 ├── requirements.txt        ← Python runtime dependencies
-├── requirements-ubuntu.txt ← native packages for Ubuntu 26.04
 ├── requirements-dev.txt    ← pip install shortcut (runtime + tests)
 ├── molguard/               ← I/O hardening package (ultidock CLI)
 │   ├── io/fixedfmt.py
@@ -25,24 +24,26 @@ ultidock/                   ← repo root (clone here)
 
 ## Step 1 — Install prerequisites
 
-Run these commands from the **repository root**. On Ubuntu 26.04, the checked
-[`requirements-ubuntu.txt`](requirements-ubuntu.txt) file lists the native
-build tools and programs needed for AutoGrid, AutoDock-GPU, fpocket, P2Rank,
-and raw `.pdb` receptor conversion:
+On Ubuntu 26.04, install the native build tools and programs needed for
+AutoGrid, AutoDock-GPU, fpocket, P2Rank, and raw `.pdb` receptor conversion:
 
 ```bash
 sudo apt update
-xargs -a requirements-ubuntu.txt sudo apt install -y
+sudo apt install -y \
+  autoconf automake build-essential clinfo cmake csh curl \
+  g++-12 gcc-12 gfortran git libnetcdf-dev libtool libx11-dev \
+  m4 make ocl-icd-opencl-dev openbabel openjdk-21-jre-headless \
+  perl pkg-config python3 python3-pip python3-venv tar unzip wget
 ```
 
 This includes `gcc-12`/`g++-12` because the current AutoDock-GPU build script
 uses them, `libnetcdf-dev` for fpocket, `curl` for the P2Rank download, and
-Java 21 for the pinned P2Rank 2.5. The package list cannot install GPU drivers
+Java 21 for the pinned P2Rank 2.5. This command cannot install GPU drivers
 or a vendor compute runtime. Follow [GPU Runtimes](README.md#gpu-runtimes) for
 NVIDIA CUDA or AMD/Intel OpenCL. For CPU docking, no GPU runtime is needed.
 
-For another Linux distribution, install equivalent native packages. The file
-above is an Ubuntu apt list; `requirements.txt` is only for Python packages.
+For another Linux distribution, install equivalent native packages.
+`requirements.txt` is only for Python packages.
 
 ### Python command
 
@@ -213,8 +214,8 @@ your executable without installing a local copy.
 
 The pinned versions are fpocket 4.2.3 and P2Rank 2.5. Building fpocket needs
 `git`, `make`, a C/C++ toolchain, and NetCDF headers; P2Rank needs `curl`,
-`tar`, and Java 17–23. These native dependencies are in
-[`requirements-ubuntu.txt`](requirements-ubuntu.txt). The installer fixes a
+`tar`, and Java 17–23. These native dependencies are in the
+[Ubuntu install command above](#step-1--install-prerequisites). The installer fixes a
 GCC 15 pointer-type error in fpocket 4.2.3 before building it.
 To install either tool explicitly without running full setup:
 

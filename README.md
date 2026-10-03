@@ -48,12 +48,15 @@ Linux container or VM.
 
 ### System Packages
 
-On **Ubuntu 26.04**, install the native programs listed in
-[`requirements-ubuntu.txt`](requirements-ubuntu.txt) from the repository root:
+On **Ubuntu 26.04**, install the native programs with:
 
 ```bash
 sudo apt update
-xargs -a requirements-ubuntu.txt sudo apt install -y
+sudo apt install -y \
+  autoconf automake build-essential clinfo cmake csh curl \
+  g++-12 gcc-12 gfortran git libnetcdf-dev libtool libx11-dev \
+  m4 make ocl-icd-opencl-dev openbabel openjdk-21-jre-headless \
+  perl pkg-config python3 python3-pip python3-venv tar unzip wget
 ```
 
 This installs the AutoGrid build tools (`autoconf`, `automake`, `m4`, `perl`,
@@ -159,7 +162,7 @@ This installs numpy, scipy, psutil, matplotlib, pandas, the `ultidock` workflow
 CLI, and the `molguard` deterministic I/O CLI.
 `pandas` and `matplotlib` are used only by the post-run analysis stage.
 
-If you did not install the Ubuntu package list and want to prepare raw receptor
+If you did not run the Ubuntu package command and want to prepare raw receptor
 `.pdb` files, install at least one receptor conversion backend. In a virtual
 environment, use Meeko; with Ubuntu system Python, install Open Babel:
 

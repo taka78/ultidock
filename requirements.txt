@@ -11,5 +11,5 @@ pandas>=2.0
 click>=8.1
 tomli>=2.0; python_version < "3.11"
 
-# Native programs and Ubuntu package names are listed in requirements-ubuntu.txt.
+# Native programs and Ubuntu package names are listed in README.md.
 # pip cannot install GPU drivers, AutoGrid, fpocket, or P2Rank.
