@@ -42,6 +42,54 @@ def _load_make_grids(monkeypatch):
     return importlib.import_module("make_grids")
 
 
+@pytest.mark.parametrize("case", ["empty", "solid", "enclosed", "open", "diagonal", "boundary", "random", "thin"])
+def test_internal_cavity_flood_preserves_geometry(monkeypatch, case):
+    from scipy.ndimage import binary_dilation, distance_transform_edt, label, generate_binary_structure
+
+    grids = _load_make_grids(monkeypatch)
+    occ = np.ones((13, 15, 17), dtype=bool)
+    if case == "empty":
+        occ[:] = False
+    elif case in {"enclosed", "open", "diagonal", "boundary"}:
+        occ[3:10, 3:12, 3:14] = False
+        if case == "open":
+            occ[:4, 6, 6] = False
+        elif case == "diagonal":
+            for i in range(4):
+                occ[i, i, i] = False
+        elif case == "boundary":
+            # Legacy boundary seeds include occupied voxels; preserve this
+            # convention even when a cavity touches their immediate neighbors.
+            occ[1:4, 6, 6] = False
+    elif case == "random":
+        occ = np.random.default_rng(42).random(occ.shape) < 0.7
+    elif case == "thin":
+        occ = np.random.default_rng(42).random((1, 15, 17)) < 0.7
+
+    free = ~occ
+    boundary = np.zeros_like(free)
+    boundary[[0, -1], :, :] = True
+    boundary[:, [0, -1], :] = True
+    boundary[:, :, [0, -1]] = True
+    exterior = boundary & free
+    while True:
+        grown = (binary_dilation(exterior, structure=np.ones((3, 3, 3))) & free) | exterior | boundary
+        if np.array_equal(grown, exterior):
+            break
+        exterior = grown
+    internal = free & ~exterior
+    expected_labels, expected_count = label(internal, structure=generate_binary_structure(3, 2))
+
+    distance, components, count = grids.internal_cavities(occ)
+    np.testing.assert_array_equal(distance, distance_transform_edt(internal))
+    np.testing.assert_array_equal(components, expected_labels)
+    assert count == expected_count
+    if case == "enclosed":
+        assert count == 1
+    elif case in {"empty", "solid", "open", "diagonal", "boundary", "thin"}:
+        assert count == 0
+
+
 def _write_map(path: Path, values: np.ndarray) -> None:
     path.write_text(
         "\n".join(

@@ -38,6 +38,9 @@ def test_sdist_wheel_installs_and_runs_outside_checkout(tmp_path):
     results = source / "examples/sert-escitalopram/workspace/old/results.csv"
     results.parent.mkdir(parents=True)
     results.write_text("DO_NOT_SHIP\n")
+    md_environment = source / "md-simulation/tools/env/lib/local_dependency.py"
+    md_environment.parent.mkdir(parents=True)
+    md_environment.write_text("DO_NOT_SHIP = True\n")
 
     dist = tmp_path / "dist"
     dist.mkdir()
@@ -59,6 +62,7 @@ def test_sdist_wheel_installs_and_runs_outside_checkout(tmp_path):
         assert not any(
             name.endswith("docking/config.py") or "/workspace/" in name for name in names
         )
+        assert not any("/md-simulation/tools/" in name for name in names)
 
     _run(
         [
@@ -84,17 +88,20 @@ def test_sdist_wheel_installs_and_runs_outside_checkout(tmp_path):
         assert not any(name.startswith("molguard/tests/") for name in names)
         with zipfile.ZipFile(io.BytesIO(archive.read("ultidock/runtime.zip"))) as runtime:
             assert "examples/quickstart/data/receptor.pdb" in runtime.namelist()
+            assert "md-simulation/workflow.py" in runtime.namelist()
+            assert "md-simulation/examples/membrane.json" in runtime.namelist()
             assert (
                 "docking/AUTODOCK_GPU_DIR/autogrid/ad4_shared/paramdat2h.csh" in runtime.namelist()
             )
             assert not any(
                 "/workspace/" in name or name.endswith("config.py") for name in runtime.namelist()
             )
+            assert not any(name.startswith("md-simulation/tools/") for name in runtime.namelist())
 
     venv = tmp_path / "venv"
     _run([sys.executable, "-m", "venv", "--system-site-packages", str(venv)], cwd=tmp_path)
     python = str(venv / "bin/python")
-    _run([python, "-m", "pip", "install", "--no-deps", str(wheel)], cwd=tmp_path)
+    _run([python, "-m", "pip", "install", "--no-deps", "--ignore-installed", str(wheel)], cwd=tmp_path)
     outside = tmp_path / "outside"
     outside.mkdir()
     home = tmp_path / "managed_home"
@@ -124,6 +131,11 @@ def test_sdist_wheel_installs_and_runs_outside_checkout(tmp_path):
     assert "version 1.1.1" in _run([python, "-m", "ultidock", "--version"], cwd=outside, env=env)
     assert "version 1.1.1" in _run([str(venv / "bin/molguard"), "--version"], cwd=outside, env=env)
     assert "sert-escitalopram" in _run([ultidock, "example", "list"], cwd=outside, env=env)
+    assert "prepare" in _run([ultidock, "md", "--help"], cwd=outside, env=env)
+    doctor = _run([ultidock, "doctor"], cwd=outside, env=env)
+    assert "external tools" in doctor and "GROMACS" in doctor and "Python rdkit" in doctor
+    assert str(home / "md-simulation/workspace") in doctor
+    assert (home / "md-simulation/workflow.py").is_file()
     _run([ultidock, "example", "run", "quickstart"], cwd=outside, env=env)
     quickstart = home / "examples/quickstart/workspace/quickstart_run"
     assert (quickstart / "report.html").is_file()

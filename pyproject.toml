@@ -21,6 +21,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+md = [
+    "rdkit>=2024.3",
+    "acpype>=2023.10.27",
+]
 dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
@@ -49,7 +53,7 @@ exclude = ["molguard.tests*"]
 build_py = "ultidock._build.BuildPy"
 
 [tool.pytest.ini_options]
-testpaths = ["molguard/tests"]
+testpaths = ["molguard/tests", "md-simulation/tests"]
 addopts   = "-v --tb=short"
 
 [tool.ruff]

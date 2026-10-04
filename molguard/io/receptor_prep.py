@@ -634,6 +634,7 @@ def prepare_receptors_in_directory(
     seed: int = 42,
     timestamp: str = "PIPELINE",
     force: bool = False,
+    on_error=None,
 ) -> list[ReceptorPrepRecord]:
     """
     Prepare/canonicalize every receptor input in ``macro_dir``.
@@ -692,6 +693,8 @@ def prepare_receptors_in_directory(
             )
         except Exception as exc:
             print(f"  [receptor-prep] FAIL {source.name}: {exc}")
+            if on_error is not None:
+                on_error(source, output, exc)
             continue
         records.append(
             ReceptorPrepRecord(

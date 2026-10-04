@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import shutil
+import shlex
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -12,11 +13,33 @@ from typing import Iterable, Mapping
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCKING_DIR = REPO_ROOT / "docking"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 
-def _ensure_workspace(example_root: Path) -> dict[str, Path]:
+def add_pipeline_options(parser):
+    from docking.run import add_md_arguments
+    add_md_arguments(parser)
+    parser.add_argument("--output-dir", type=Path, help="New, isolated example workspace")
+    parser.add_argument("--dry-run", action="store_true", help="Stage inputs and print the command without running tools")
+
+
+def pipeline_options(args):
+    forwarded = []
+    for name in ("md_config", "md_through", "md_work_dir", "md_gmx", "md_acpype", "md_obabel"):
+        value = getattr(args, name)
+        if value is not None:
+            if name in {"md_config", "md_work_dir"} or (name.startswith("md_") and "/" in str(value)):
+                value = Path(value).expanduser().resolve()
+            forwarded.extend(["--" + name.replace("_", "-"), str(value)])
+    return {**({"extra_args": forwarded} if forwarded else {}),
+            **({"dry_run": True} if args.dry_run else {})}
+
+
+def _ensure_workspace(example_root: Path, output_dir: Path | None = None) -> dict[str, Path]:
     run_name = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
-    workspace = example_root / "workspace" / run_name
+    workspace = output_dir.expanduser().resolve() if output_dir else example_root / "workspace" / run_name
+    workspace.mkdir(parents=True, exist_ok=False)
     paths = {
         "workspace": workspace,
         "ligands": workspace / "LIGANDS_DIR",
@@ -32,10 +55,10 @@ def _ensure_workspace(example_root: Path) -> dict[str, Path]:
     return paths
 
 
-def stage_inputs(example_root: Path, receptor: Path, ligands: Iterable[Path]) -> dict[str, Path]:
+def stage_inputs(example_root: Path, receptor: Path, ligands: Iterable[Path], *, output_dir=None) -> dict[str, Path]:
     """Prepare an isolated workspace for an example run."""
 
-    paths = _ensure_workspace(example_root)
+    paths = _ensure_workspace(example_root, output_dir)
     print(f"Example workspace: {paths['workspace']}")
     receptor_target = paths["macro"] / receptor.name
     shutil.copy2(receptor, receptor_target)
@@ -53,7 +76,8 @@ def stage_inputs(example_root: Path, receptor: Path, ligands: Iterable[Path]) ->
 
 
 def run_pipeline(
-    paths: Mapping[str, Path], *, mode: str = "cpu", site_method: str = "cav-emps"
+    paths: Mapping[str, Path], *, mode: str = "cpu", site_method: str = "cav-emps",
+    extra_args=(), dry_run=False,
 ) -> None:
     """Execute the full Ultidock pipeline using the staged workspace."""
 
@@ -62,6 +86,7 @@ def run_pipeline(
 
     run_cmd = [
         sys.executable,
+        "-u",
         "run.py",
         "--mode",
         mode,
@@ -83,7 +108,7 @@ def run_pipeline(
     ]
 
     centers_tsv = paths["results"] / f"{site_method}-sites.tsv"
-    if site_method in {"p2rank", "fpocket"}:
+    if site_method in {"p2rank", "fpocket"} and not dry_run:
         if str(REPO_ROOT) not in sys.path:
             sys.path.insert(0, str(REPO_ROOT))
         from docking.pocket_boxes import create_pocket_boxes
@@ -96,5 +121,10 @@ def run_pipeline(
         )
 
     run_cmd.extend(["--grid-mode", "centers", "--centers-tsv", str(centers_tsv.resolve())])
+    run_cmd.extend(extra_args)
+    if dry_run:
+        print(f"Site method: {site_method}")
+        print(f"Pipeline command (from {DOCKING_DIR}): {shlex.join(run_cmd)}")
+        return
 
     subprocess.run(run_cmd, check=True, cwd=DOCKING_DIR)

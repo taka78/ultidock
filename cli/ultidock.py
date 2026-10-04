@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
 
 import click
@@ -20,6 +21,55 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from docking.pocket_boxes import LOCAL_BINARIES, create_pocket_boxes
 
 FORWARD_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True}
+
+
+def _pipeline_paths(args: tuple[str, ...]) -> tuple[str, ...]:
+    """Resolve caller-supplied paths before the pipeline switches to docking/."""
+    paths = {"--md-config", "--md", "--md-work-dir", "--wget", "--centers-tsv", "--output-dir", "--pdb",
+             "--ref-ligand-pdb", "--ligands-dir", "--docking-dir", "--analysis-dir",
+             "--results-dir", "--macro-mol-dir", "--vina-dir", "--autodock-gpu-dir",
+             "--LIGANDS_DIR", "--DOCKING_DIR", "--ANALYSIS_DIR", "--RESULTS_DIR",
+             "--MACRO_MOL_DIR", "--VINA_DIR", "--AUTODOCK_GPU_DIR"}
+    tools = {"--md-gmx", "--md-acpype", "--md-obabel", "--autogrid4-bin", "--fpocket-cmd"}
+    result, pending = [], None
+    def resolve(option, value):
+        if option in paths or (option in tools and ("/" in value or value.startswith("~"))):
+            return str(Path(value).expanduser().resolve())
+        return value
+    for arg in args:
+        if pending is not None:
+            result.append(resolve(pending, arg) if not arg.startswith("--") else arg)
+            pending = None
+        elif "=" in arg:
+            option, value = arg.split("=", 1)
+            result.append(f"{option}={resolve(option, value)}")
+        else:
+            result.append(arg)
+            if arg in paths | tools:
+                pending = arg
+    return tuple(result)
+
+
+def _md_options(function):
+    """Expose the same MD continuation options on every public docking mode."""
+    names = ("md_config", "md_through", "md_work_dir", "md_gmx", "md_acpype", "md_obabel")
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        extra = list(kwargs.get("extra_args", ()))
+        for name in names:
+            value = kwargs.pop(name, None)
+            if value is not None:
+                extra.extend(["--" + name.replace("_", "-"), str(value)])
+        kwargs["extra_args"] = _pipeline_paths(tuple(extra))
+        return function(*args, **kwargs)
+    for tool in ("obabel", "acpype", "gmx"):
+        wrapped = click.option(f"--md-{tool}", help=f"MD {tool} executable override.")(wrapped)
+    wrapped = click.option("--md-work-dir", type=click.Path(path_type=Path),
+                           help="New MD job directory under md-simulation/.")(wrapped)
+    wrapped = click.option("--md-through", type=click.Choice(["prepare", "build", "em", "nvt", "npt"]),
+                           help="Last stage for a new MD job; defaults to npt.")(wrapped)
+    return click.option("--md-config", "--md", type=click.Path(path_type=Path, exists=True, dir_okay=False),
+                        help="Continue docking into MD using this protocol JSON.")(wrapped)
 
 
 def _repo_root() -> Path:
@@ -156,7 +206,7 @@ def _run_pipeline_mode(
         str(dirs["analysis"]),
         "--results-dir",
         str(dirs["results"]),
-        *extra_args,
+        *_pipeline_paths(extra_args),
     ]
     config = {
         "workflow": public_mode,
@@ -203,9 +253,19 @@ def cli() -> None:
     """Ultidock: run docking workflows, examples, and benchmarks."""
 
 
+@cli.command("md", context_settings=FORWARD_CONTEXT, add_help_option=False)
+@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+def md_cmd(args: tuple[str, ...]) -> None:
+    """Select docked poses, prepare systems and run GROMACS simulations."""
+    _run_python(_repo_root() / "md-simulation" / "workflow.py", args, cwd=Path.cwd())
+
+
 @cli.command("doctor")
-def doctor_cmd() -> None:
-    """Print Ultidock tool paths and environment diagnostics."""
+@click.option("--gmx", default="gmx", show_default=True, help="GROMACS executable to check.")
+@click.option("--acpype", default="acpype", show_default=True, help="ACPYPE executable to check.")
+@click.option("--obabel", default="obabel", show_default=True, help="Open Babel executable to check.")
+def doctor_cmd(gmx: str, acpype: str, obabel: str) -> None:
+    """Print docking, receptor preparation and MD environment diagnostics."""
     root = _repo_root()
     local_dirs: list[Path] = [
         root / "docking" / "AUTODOCK_GPU_DIR" / "autogrid",
@@ -229,7 +289,9 @@ def doctor_cmd() -> None:
 
     click.echo("-- ultidock environment --------------------------------")
     click.echo(f"  {'ultidock':20s} {__version__}")
+    click.echo(f"  {'molguard':20s} {__version__}")
     click.echo(f"  {'python':20s} {sys.version.split()[0]}")
+    click.echo(f"  {'python executable':20s} {sys.executable}")
     click.echo(f"  {'workspace':20s} {root}")
 
     click.echo("-- external tools --------------------------------------")
@@ -251,6 +313,23 @@ def doctor_cmd() -> None:
             click.echo(f"  [OK]    {method:30s} {path}")
         else:
             click.echo(f"  [INFO]  {method:30s} installs when selected")
+    click.echo("-- receptor preparation --------------------------------")
+    meeko = (_find_tool("mk_prepare_receptor.py", local_dirs) or
+             _find_tool("mk_prepare_receptor", local_dirs))
+    if meeko:
+        click.echo(f"  [OK]    {'Meeko receptor prep':30s} {meeko}")
+    else:
+        click.echo(f"  [INFO]  {'Meeko receptor prep':30s} optional; not installed")
+    click.echo("-- molecular dynamics ----------------------------------")
+    diagnostics = root / "md-simulation" / "diagnostics.py"
+    result = subprocess.run(
+        [sys.executable, str(diagnostics), "--gmx", gmx, "--acpype", acpype, "--obabel", obabel],
+        capture_output=True, text=True,
+    )
+    if result.stdout:
+        click.echo(result.stdout, nl=False)
+    if result.stderr:
+        click.echo(result.stderr, err=True, nl=False)
     if had_issue:
         click.echo(f"       {readme_hint('troubleshooting')}", err=True)
 
@@ -263,6 +342,7 @@ def setup_cmd(extra_args: tuple[str, ...]) -> None:
 
 
 @cli.command("run", context_settings=FORWARD_CONTEXT)
+@_md_options
 @click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
 def run_cmd(extra_args: tuple[str, ...]) -> None:
     """Run the full pipeline, optionally using p2rank or fpocket pockets.
@@ -292,6 +372,7 @@ def run_cmd(extra_args: tuple[str, ...]) -> None:
 
 
 @cli.command("known-site", context_settings=FORWARD_CONTEXT)
+@_md_options
 @click.option("--center", required=True, help="Known binding-site center as x,y,z.")
 @click.option("--box-size", default=35.0, show_default=True, help="Manual docking box side in A.")
 @click.option("--output-dir", type=click.Path(path_type=Path), help="Run directory.")
@@ -410,6 +491,7 @@ def _run_pocket_mode(
 
 
 def _pocket_mode_command(method: str):
+    @_md_options
     @click.option("--receptor", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
     @click.option("--box-size", type=float, default=35.0, show_default=True, help="Box side in A.")
     @click.option("--grid-spacing", type=float, default=0.375, show_default=True, help="Grid spacing in A.")
@@ -446,6 +528,7 @@ cli.command("p2rank", context_settings=FORWARD_CONTEXT, help="Run local P2Rank s
 
 
 @cli.command("cavity", context_settings=FORWARD_CONTEXT)
+@_md_options
 @click.option("--autosites", default=6, show_default=True, help="Number of CaV-EMPS sites.")
 @click.option("--output-dir", type=click.Path(path_type=Path), help="Run directory.")
 @click.option("--dry-run", is_flag=True, help="Write config and print the pipeline command only.")
@@ -471,6 +554,7 @@ def cavity_cmd(
 
 
 @cli.command("blind", context_settings=FORWARD_CONTEXT)
+@_md_options
 @click.option("--grid-cap", default=150.0, show_default=True, help="Blind box cap in A.")
 @click.option("--output-dir", type=click.Path(path_type=Path), help="Run directory.")
 @click.option("--dry-run", is_flag=True, help="Write config and print the pipeline command only.")
@@ -669,7 +753,7 @@ def example_run_cmd(name: str, extra_args: tuple[str, ...]) -> None:
         click.echo(f"Available examples: {available}", err=True)
         click.echo(f"       {readme_hint('examples')}", err=True)
         raise SystemExit(1)
-    _run_python(matches[0] / "example-run.py", extra_args, cwd=matches[0], topic="examples")
+    _run_python(matches[0] / "example-run.py", _pipeline_paths(extra_args), cwd=matches[0], topic="examples")
 
 
 cli.add_command(example_group, "examples")

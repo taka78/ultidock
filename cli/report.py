@@ -367,6 +367,26 @@ def generate_report(run_dir: Path) -> dict[str, Path]:
         markdown.append(f"- `{path.name}`")
     markdown.append("")
 
+    manifests = sorted({path for folder in (run_dir, run_dir / "docking", run_dir / "DOCKING_DIR")
+                        for path in folder.glob("docking-run-*.json")
+                        if not path.name.endswith(".md.json")})
+    if manifests:
+        markdown.extend(["## Screening outcomes", ""])
+        for path in manifests:
+            data = json.loads(path.read_text())
+            failures = data.get("failures", [])
+            markdown.extend([
+                f"- Run: `{path.relative_to(run_dir)}`",
+                f"- Status: {data.get('status', 'complete')}; "
+                f"successful outputs: {len(data['outputs'])}; failed cases: {len(failures)}.",
+                f"- Full failure report: `{data.get('failure_report', 'not recorded')}`", "",
+            ])
+            if failures:
+                rows = [{key: str(value or "").replace("\n", " ").replace("|", "/")
+                         for key, value in failure.items()} for failure in failures]
+                markdown.extend([_markdown_table(rows, ["stage", "receptor_id", "ligand_id",
+                                                        "binding_site", "error"], limit=20), ""])
+
     report_md = run_dir / "report.md"
     report_html = run_dir / "report.html"
     report_md.write_text("\n".join(markdown), encoding="utf-8")

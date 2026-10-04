@@ -43,6 +43,7 @@ from config import (
 )
 import config as _config
 from db_manager import DockingDatabaseManager
+from pose_provenance import record_pose_provenance
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
@@ -321,21 +322,36 @@ def prepare_sites_for_docking(receptor_pdbqt: str, macro_dir: str):
         )
     return sites
 
-def load_receptor_sites(macro_dir: str, site_loader=prepare_sites_for_docking):
+def load_receptor_sites(macro_dir: str, site_loader=prepare_sites_for_docking, *, failures=None):
     """Return a list of (Path to receptor, [sites]) pairs for all PDBQT receptors."""
     macro_path = Path(macro_dir)
     receptors = sorted(macro_path.glob("*.pdbqt"))
     pairs = []
+    excluded = {entry["receptor_id"] for entry in (failures or [])
+                if entry.get("stage") == "receptor-preparation"}
     for receptor in receptors:
+        if receptor.stem in excluded:
+            continue
         receptor_grid_dir = macro_path / receptor.stem
-        sites = site_loader(str(receptor), macro_dir=str(receptor_grid_dir))
-        if not sites:
-            raise RuntimeError(f"No docking sites generated for receptor {receptor}")
+        try:
+            sites = site_loader(str(receptor), macro_dir=str(receptor_grid_dir))
+            if not sites:
+                raise RuntimeError(f"No docking sites generated for receptor {receptor}")
+            for site in sites:
+                if not Path(site["fld_path"]).is_file():
+                    raise FileNotFoundError(f"Missing FLD: {site['fld_path']}")
+        except Exception as exc:
+            if failures is None:
+                raise
+            failures.append({"stage": "receptor-grids", "receptor_id": receptor.stem,
+                             "error": str(exc)})
+            print(f"[WARN] Skipping receptor {receptor.stem}: {exc}")
+            continue
         pairs.append((receptor, sites))
     return pairs
 
 
-def _canonicalize_receptors(macro_dir: str) -> dict[str, str]:
+def _canonicalize_receptors(macro_dir: str, failures=None) -> dict[str, str]:
     """Prepare/canonicalize all receptor inputs in macro_dir via molguard.
 
     Returns a dict mapping filename -> SHA-256 digest of the canonical output.
@@ -357,12 +373,18 @@ def _canonicalize_receptors(macro_dir: str) -> dict[str, str]:
     seed = int(getattr(_config, "RECEPTOR_PREP_SEED", 42))
     force = bool(getattr(_config, "RECEPTOR_PREP_FORCE", False))
 
+    def failed(source, output, exc):
+        if failures is not None:
+            failures.append({"stage": "receptor-preparation", "receptor_id": output.stem,
+                             "error": str(exc)})
+
     records = prepare_receptors_in_directory(
         macro_path,
         prepare_command=prepare_command,
         seed=seed,
         timestamp="PIPELINE",
         force=force,
+        on_error=failed,
     )
     if records:
         print(f"[MOLGUARD] Prepared/canonicalized {len(records)} receptor input(s) in {macro_dir}")
@@ -396,6 +418,8 @@ class DockingProcessor:
     def __init__(self):
         self.FILES = glob.glob(f"{LIGANDS_DIR}/*.pdbqt")
         print(f"[INIT] ligands discovered: {len(self.FILES)} in {LIGANDS_DIR}")
+        if not self.FILES:
+            raise FileNotFoundError(f"No ligand .pdbqt found in {LIGANDS_DIR}")
         print(f"[INIT] backend: {BACKEND}  workers: {N_WORKERS}  OMP/worker: {_OMP_PER_WORKER}")
         if IS_GPU:
             print(f"[INIT] GPU IDs: {GPU_IDS}  slots/device: {GPU_SLOTS_PER_DEV}")
@@ -403,27 +427,22 @@ class DockingProcessor:
         macro_dir = Path(MACRO_MOL_DIR)
         macro_dir.mkdir(parents=True, exist_ok=True)
         self.MACRO_MOL_DIR = str(macro_dir)
+        self.failures = []
 
         # ── Molguard: canonicalize receptors for deterministic docking ──
-        self.receptor_digests = _canonicalize_receptors(self.MACRO_MOL_DIR)
+        self.receptor_digests = _canonicalize_receptors(self.MACRO_MOL_DIR, self.failures)
 
-        self.receptor_sites = load_receptor_sites(self.MACRO_MOL_DIR)
-        if not self.receptor_sites:
+        self.receptor_sites = load_receptor_sites(self.MACRO_MOL_DIR, failures=self.failures)
+        if not self.receptor_sites and not self.failures:
             raise FileNotFoundError(f"No receptor .pdbqt found in {self.MACRO_MOL_DIR}")
 
-        self.MACRO_MOL     = str(self.receptor_sites[0][0])
+        self.MACRO_MOL     = str(self.receptor_sites[0][0]) if self.receptor_sites else ""
         self.RECEPTOR_STEM = Path(self.MACRO_MOL).stem
         self.GRID_ROOT     = self.MACRO_MOL_DIR
         os.makedirs(self.GRID_ROOT, exist_ok=True)
 
         self.SITES = []
         for receptor_path, sites in self.receptor_sites:
-            for site in sites:
-                fld = site["fld_path"]
-                if not os.path.exists(fld):
-                    raise FileNotFoundError(
-                        f"[preflight] Missing FLD: {fld}\nLog: {os.path.join(site['out_dir'], 'grid.glg')}"
-                    )
             self.SITES.extend(sites)
 
         self.barrier = None
@@ -433,6 +452,7 @@ class DockingProcessor:
         self.vina_sem = Semaphore(N_WORKERS)
 
         self.db_manager = DockingDatabaseManager(DB_PATH)
+        self.db_errors = []
         self.db_queue   = queue.Queue()
         self.db_thread  = threading.Thread(target=self._db_worker, daemon=False)
         self.db_thread.start()
@@ -441,51 +461,40 @@ class DockingProcessor:
         print("DB worker started")
         buffer = []
 
+        def flush():
+            if buffer:
+                try:
+                    self.db_manager.insert_bulk(buffer)
+                except Exception as exc:
+                    self.db_errors.append(str(exc))
+                    print(f"[DB] failed to write {len(buffer)} records: {exc}")
+                finally:
+                    buffer.clear()
+
         while True:
             try:
                 item = self.db_queue.get(timeout=10)
-
+            except queue.Empty:
+                flush()
+                continue
+            try:
                 if item == "INIT":
                     self.db_manager.insert_bulk([])
-                    self.db_queue.task_done()
                     continue
-
                 elif item == "SHUTDOWN":
-                    if buffer:
-                        self.db_manager.insert_bulk(buffer)
-                    self.db_queue.task_done()
+                    flush()
                     break
-
-                if isinstance(item, list):
-                    for rec in item:
-                        if isinstance(rec, tuple) and len(rec) == 6:
-                            buffer.append(rec)
-                        else:
-                            print(f"[DB] skipping bad sub-record: {rec}")
-                elif isinstance(item, tuple) and len(item) == 6:
-                    buffer.append(item)
-                else:
-                    print(f"[DB] skipping malformed record: {item}")
-
-                self.db_queue.task_done()
-
+                records = item if isinstance(item, list) else [item]
+                for rec in records:
+                    if not isinstance(rec, tuple) or len(rec) != 6:
+                        raise ValueError(f"Malformed docking record: {rec}")
+                    buffer.append(rec)
                 if len(buffer) >= 500:
-                    try:
-                        print(f"[DB] flushing {len(buffer)} records")
-                        self.db_manager.insert_bulk(buffer)
-                        buffer.clear()
-                    except Exception as e:
-                        print(f"[DB] insert_bulk failed on batch of {len(buffer)}: {e}")
-                        buffer.clear()
-
-            except queue.Empty:
-                if buffer:
-                    try:
-                        print(f"[DB] timeout flush: writing {len(buffer)} records")
-                        self.db_manager.insert_bulk(buffer)
-                    except Exception as e:
-                        print(f"[DB] timeout flush failed on {len(buffer)} records: {e}")
-                    buffer.clear()
+                    flush()
+            except Exception as exc:
+                self.db_errors.append(str(exc))
+            finally:
+                self.db_queue.task_done()
 
     def memory_monitor(self, threshold):
         while True:
@@ -498,6 +507,7 @@ class DockingProcessor:
         total     = len(self.FILES)
         completed = 0
         start     = time.time()
+        outputs = []
 
         # FIX 2: fixed-size worker pool — no more one-thread-per-ligand
         with concurrent.futures.ThreadPoolExecutor(
@@ -505,7 +515,7 @@ class DockingProcessor:
             thread_name_prefix="docking-worker",
         ) as pool:
             futures = {}
-            for ligand_file in self.FILES:
+            for ligand_file in (self.FILES if self.receptor_sites else []):
                 thread = ProcessFileThread(
                     [ligand_file],
                     self.barrier,
@@ -518,14 +528,18 @@ class DockingProcessor:
                 thread._parent        = self
                 thread.MACRO_MOL_DIR  = self.MACRO_MOL_DIR
                 fut = pool.submit(thread.run)
-                futures[fut] = ligand_file
+                futures[fut] = (ligand_file, thread)
 
             for fut in concurrent.futures.as_completed(futures):
-                ligand = futures[fut]
+                ligand, thread = futures[fut]
                 try:
                     fut.result()
                 except Exception as exc:
                     print(f"[ERROR] {Path(ligand).stem}: {exc}")
+                    self.failures.append({"stage": "worker", "ligand_id": Path(ligand).stem,
+                                          "error": str(exc)})
+                outputs.extend(getattr(thread, "outputs", []))
+                self.failures.extend(getattr(thread, "failures", []))
                 completed += 1
                 elapsed = time.time() - start
                 rate    = completed / elapsed if elapsed > 0 else 0
@@ -543,6 +557,11 @@ class DockingProcessor:
 
         gc.collect()
         self.check_memory()
+        self.failures.extend({"stage": "database", "error": error} for error in self.db_errors)
+        if self.failures:
+            print(f"[WARN] Screening completed with {len(self.failures)} failed cases; "
+                  f"continuing with {len(outputs)} successful docking outputs.")
+        return outputs
 
     def check_memory(self):
         bunch = []
@@ -554,7 +573,7 @@ class DockingProcessor:
             break
 
     def run(self):
-        self.process_files()
+        return self.process_files()
 
 
 '''
@@ -634,7 +653,7 @@ class ProcessFileThread(threading.Thread):
             if inside_model_block and (current_model is not None) and (current_affinity is not None):
                 lid = current_ligand_id or Path(ligand_file).stem or "ligand"
                 tag = f"{lid}-Model{current_model}-{receptor_name}"
-                results.append((tag, current_affinity, current_rmsd_lb, current_rmsd_ub, ligand_file, binding_site))
+                results.append((tag, current_affinity, current_rmsd_lb, current_rmsd_ub, str(Path(filepath).resolve()), binding_site))
             current_model     = None
             current_affinity  = None
             current_rmsd_lb   = None
@@ -703,7 +722,7 @@ class ProcessFileThread(threading.Thread):
                 except ValueError:
                     continue
                 tag = f"{ligand_id}-Model{run_id}-{receptor_name}"
-                results.append((tag, affinity, None, None, ligand_file_fallback, binding_site))
+                results.append((tag, affinity, None, None, str(Path(xml_path).with_suffix('.dlg').resolve()), binding_site))
         except Exception as e:
             print(f"[XML-parse] Failed on {xml_path}: {e}")
         return results
@@ -711,204 +730,199 @@ class ProcessFileThread(threading.Thread):
     def run(self):
         parent = getattr(self, "_parent", None)
         if parent is None:
-            print("[WARN] Missing parent reference; cannot access precomputed grids.")
-            return
-
-        receptor_sites = getattr(parent, "receptor_sites", None)
-        if not receptor_sites:
-            print("[WARN] No receptor sites available; ensure DockingProcessor initialized correctly.")
-            return
-
+            raise RuntimeError("Missing parent reference; cannot access precomputed grids")
+        self.outputs, self.failures = [], []
+        Path(DOCKING_DIR).mkdir(parents=True, exist_ok=True)
         try:
-            buffer     = []
-            BATCH_SIZE = 500
-            Path(DOCKING_DIR).mkdir(parents=True, exist_ok=True)
-
             for ligand_file in self.bunch:
-                ligand_path = Path(ligand_file)
-                ligand_stem = ligand_path.stem
-
-                # ── Molguard: normalize ligand numeric columns ──
-                _normalize_ligand(ligand_path)
-
-                for receptor_path, sites in receptor_sites:
-                    receptor_name = Path(receptor_path).stem
-
+                if not _normalize_ligand(Path(ligand_file)):
+                    self._failed("ligand-preparation", ligand_file, error="PDBQT normalization failed")
+                    continue
+                for receptor_path, sites in parent.receptor_sites:
                     for site in sites:
-                        cx, cy, cz = site["center"]
-                        nx, ny, nz = site["npts"]
-                        sp = float(site["spacing"])
-
-                        size_x  = (nx - 1) * sp
-                        size_y  = (ny - 1) * sp
-                        size_z  = (nz - 1) * sp
-                        site_id = site["site_id"]
-                        center  = tuple(float(x) for x in site["center"])
-                        npts    = np.array(site["npts"], dtype=float)
-                        box_xyz = tuple((npts * sp).tolist())
-                        fld_file = site["fld_path"]
-
-                        out_stem = Path(DOCKING_DIR) / f"{receptor_name}__{site_id}__{ligand_stem}_{uuid.uuid4().hex[:8]}"
-                        xml_out  = f"{out_stem}.xml"
-                        vina_out = f"{out_stem}.pdbqt"
-
-                        # FIX 3: fair OMP thread budget per worker
-                        env = os.environ.copy()
-                        omp_str = str(_OMP_PER_WORKER)
-                        env["OMP_NUM_THREADS"]      = omp_str
-                        env["MKL_NUM_THREADS"]      = omp_str
-                        env["OPENBLAS_NUM_THREADS"]  = omp_str
-
-                        site_dir = os.path.dirname(fld_file)
-                        fld_base = os.path.basename(fld_file)
-
-                        print("Using grid:", fld_file)
                         try:
-                            # FIX 1: IS_CUDA / IS_OPENCL flags normalised at module level
-                            if IS_CUDA:
-                                sem = _get_gpu_semaphore(self.gpu_id)
-                                ctx = sem if sem is not None else nullcontext()
-                                with ctx:
-                                    print(ligand_file)
-                                    result = subprocess.run(
-                                        [
-                                            f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_cuda_{NUMWI}wi",
-                                            "--lfile",     str(Path(ligand_file).resolve()),
-                                            "--ffile",     fld_base,
-                                            "--nrun",      "64",
-                                        #   "--nev",       "5000000",
-                                            "--gbest",     "5",
-                                            "--xmloutput", "1",
-                                            "--resnam",    str(out_stem),
-                                            "--devnum",    str(int(self.gpu_id) + 1),
-                                        #    "--lsrat",   "80.0",
-                                        #    "--lsmet",   "sw",
-                                        #    "--initswgens", "80",
-                                        #    "--stopstd", "0.02",
-                                        #    "--psize",  "150",
-                                        #    "--dang",   "5",
-                                        #    "--dmov",   "0.2",
-                                        #    "--mrat",   "5",
-                                        #    "--autostop", "0",
-                                        #    "--lsit",   "300",
-                                        ],
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE,
-                                        text=True,
-                                        cwd=site_dir,
-                                        env=env,
-                                        timeout=10000,
-                                    )
-                                    print(f"[AutoDock-GPU stdout]\n{result.stdout}")
-                                    print(f"[AutoDock-GPU stderr]\n{result.stderr}")
+                            output, rows = self._dock_site(ligand_file, receptor_path, site)
+                            self.db_queue.put(rows)
+                            self.outputs.append(output)
+                        except Exception as exc:
+                            self._failed("docking", ligand_file, receptor_path, site["site_id"], str(exc))
+        finally:
+            gc.collect()
+            del self.bunch
+            self.callback()
+        return self.outputs
 
-                            elif IS_OPENCL:
-                                sem = _get_gpu_semaphore(self.gpu_id)
-                                ctx = sem if sem is not None else nullcontext()
-                                with ctx:
-                                    result = subprocess.run(
-                                        [
-                                            f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_ocl_{NUMWI}wi",
-                                            "--lfile",     str(Path(ligand_file).resolve()),
-                                            "--ffile",     fld_base,
-                                            "--nrun",      "64",
-                                        #   "--nev",       "5000000",
-                                            "--gbest",     "5",
-                                            "--xmloutput", "1",
-                                            "--resnam",    str(out_stem),
-                                            "--devnum",    str(int(self.gpu_id) + 1),
-                                        #    "--lsrat",   "80.0",
-                                        #    "--lsmet",   "sw",
-                                        #    "--initswgens", "80",
-                                        #    "--stopstd", "0.02",
-                                        #    "--psize",  "150",
-                                        #    "--dang",   "5",
-                                        #    "--dmov",   "0.2",
-                                        #    "--mrat",   "5",
-                                        #    "--autostop", "0",
-                                        #    "--lsit",   "300",
-                                        ],
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE,
-                                        text=True,
-                                        cwd=site_dir,
-                                        env=env,
-                                        timeout=10000,
-                                    )
-                                    print(f"[AutoDock-GPU stdout]\n{result.stdout}")
-                                    print(f"[AutoDock-GPU stderr]\n{result.stderr}")
+    def _failed(self, stage, ligand, receptor=None, site=None, error=""):
+        entry = {"stage": stage, "ligand_id": Path(ligand).stem,
+                 "receptor_id": Path(receptor).stem if receptor else None,
+                 "binding_site": str(site).removeprefix("S") if site is not None else None,
+                 "error": error}
+        self.failures.append(entry)
+        print(f"[WARN] Skipping {entry['ligand_id']} / {entry['receptor_id']} / {site}: {error}")
 
-                            else:  # CPU / Vina fallback
-                                with self.vina_sem:
-                                    print(
-                                        f"[VINA/{site_id}] center:",
-                                        tuple(f"{v:.3f}" for v in center),
-                                        " size:",
-                                        tuple(f"{v:.3f}" for v in box_xyz),
-                                    )
-                                    result = subprocess.run(
-                                        [
-                                            f"{VINA_DIR}/bin/vina",
-                                            "--receptor",       str(Path(receptor_path).resolve()),
-                                            "--ligand",         str(Path(ligand_file).resolve()),
-                                            "--center_x",       f"{cx:.3f}",
-                                            "--center_y",       f"{cy:.3f}",
-                                            "--center_z",       f"{cz:.3f}",
-                                            "--size_x",         f"{size_x:.3f}",
-                                            "--size_y",         f"{size_y:.3f}",
-                                            "--size_z",         f"{size_z:.3f}",
-                                            "--cpu",            str(VINA_CPU),
-                                            "--exhaustiveness", str(VINA_EXHAUSTIVENESS),
-                                            "--num_modes",      str(VINA_NUM_MODES),
-                                            "--out",            str(vina_out),
-                                        ]
-                                        + (["--seed", str(VINA_SEED)] if VINA_SEED is not None else []),
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE,
-                                        text=True,
-                                        timeout=12000,
-                                    )
+    def _dock_site(self, ligand_file, receptor_path, site):
+        ligand_stem = Path(ligand_file).stem
+        receptor_name = Path(receptor_path).stem
+        cx, cy, cz = site["center"]
+        nx, ny, nz = site["npts"]
+        sp = float(site["spacing"])
 
-                        except subprocess.TimeoutExpired:
-                            print(f"Docking timed out for: {ligand_file}")
-                            continue
+        size_x  = (nx - 1) * sp
+        size_y  = (ny - 1) * sp
+        size_z  = (nz - 1) * sp
+        site_id = site["site_id"]
+        center  = tuple(float(x) for x in site["center"])
+        npts    = np.array(site["npts"], dtype=float)
+        box_xyz = tuple((npts * sp).tolist())
+        fld_file = site["fld_path"]
 
-                        if result.returncode != 0:
-                            print(f"Docking failed for: {ligand_file}")
-                            print(f"STDOUT:\n{result.stdout.strip()}")
-                            print(f"STDERR:\n{result.stderr.strip()}")
-                            continue
+        out_stem = Path(DOCKING_DIR) / f"{receptor_name}__{site_id}__{ligand_stem}_{uuid.uuid4().hex[:8]}"
+        xml_out  = f"{out_stem}.xml"
+        vina_out = f"{out_stem}.pdbqt"
 
-                        if IS_GPU:
-                            parsed_results = self.parse_adgpu_xml(xml_out, receptor_name, ligand_file)
-                        else:
-                            parsed_results = self.parse_vina_output_file(vina_out, receptor_name, ligand_file)
+        # FIX 3: fair OMP thread budget per worker
+        env = os.environ.copy()
+        omp_str = str(_OMP_PER_WORKER)
+        env["OMP_NUM_THREADS"]      = omp_str
+        env["MKL_NUM_THREADS"]      = omp_str
+        env["OPENBLAS_NUM_THREADS"]  = omp_str
 
-                        if not parsed_results:
-                            print(f"No valid docking data for: {ligand_file}")
-                            continue
+        site_dir = os.path.dirname(fld_file)
+        fld_base = os.path.basename(fld_file)
 
-                        buffer.extend(parsed_results)
+        print("Using grid:", fld_file)
+        try:
+            # FIX 1: IS_CUDA / IS_OPENCL flags normalised at module level
+            if IS_CUDA:
+                sem = _get_gpu_semaphore(self.gpu_id)
+                ctx = sem if sem is not None else nullcontext()
+                with ctx:
+                    print(ligand_file)
+                    result = subprocess.run(
+                        [
+                            f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_cuda_{NUMWI}wi",
+                            "--lfile",     str(Path(ligand_file).resolve()),
+                            "--ffile",     fld_base,
+                            "--nrun",      "64",
+                        #   "--nev",       "5000000",
+                            "--gbest",     "5",
+                            "--xmloutput", "1",
+                            "--resnam",    str(out_stem),
+                            "--devnum",    str(int(self.gpu_id) + 1),
+                        #    "--lsrat",   "80.0",
+                        #    "--lsmet",   "sw",
+                        #    "--initswgens", "80",
+                        #    "--stopstd", "0.02",
+                        #    "--psize",  "150",
+                        #    "--dang",   "5",
+                        #    "--dmov",   "0.2",
+                        #    "--mrat",   "5",
+                        #    "--autostop", "0",
+                        #    "--lsit",   "300",
+                        ],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        cwd=site_dir,
+                        env=env,
+                        timeout=10000,
+                    )
+                    print(f"[AutoDock-GPU stdout]\n{result.stdout}")
+                    print(f"[AutoDock-GPU stderr]\n{result.stderr}")
 
-                        if len(buffer) >= BATCH_SIZE:
-                            self.db_queue.put(buffer.copy())
-                            buffer.clear()
+            elif IS_OPENCL:
+                sem = _get_gpu_semaphore(self.gpu_id)
+                ctx = sem if sem is not None else nullcontext()
+                with ctx:
+                    result = subprocess.run(
+                        [
+                            f"{AUTODOCK_GPU_DIR}/bin/autodock_gpu_ocl_{NUMWI}wi",
+                            "--lfile",     str(Path(ligand_file).resolve()),
+                            "--ffile",     fld_base,
+                            "--nrun",      "64",
+                        #   "--nev",       "5000000",
+                            "--gbest",     "5",
+                            "--xmloutput", "1",
+                            "--resnam",    str(out_stem),
+                            "--devnum",    str(int(self.gpu_id) + 1),
+                        #    "--lsrat",   "80.0",
+                        #    "--lsmet",   "sw",
+                        #    "--initswgens", "80",
+                        #    "--stopstd", "0.02",
+                        #    "--psize",  "150",
+                        #    "--dang",   "5",
+                        #    "--dmov",   "0.2",
+                        #    "--mrat",   "5",
+                        #    "--autostop", "0",
+                        #    "--lsit",   "300",
+                        ],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        cwd=site_dir,
+                        env=env,
+                        timeout=10000,
+                    )
+                    print(f"[AutoDock-GPU stdout]\n{result.stdout}")
+                    print(f"[AutoDock-GPU stderr]\n{result.stderr}")
 
-                        memory_info = psutil.Process().memory_info()
-                        print(f"Memory usage: {memory_info.rss / (1024 * 1024):.2f} MB")
+            else:  # CPU / Vina fallback
+                with self.vina_sem:
+                    print(
+                        f"[VINA/{site_id}] center:",
+                        tuple(f"{v:.3f}" for v in center),
+                        " size:",
+                        tuple(f"{v:.3f}" for v in box_xyz),
+                    )
+                    result = subprocess.run(
+                        [
+                            f"{VINA_DIR}/bin/vina",
+                            "--receptor",       str(Path(receptor_path).resolve()),
+                            "--ligand",         str(Path(ligand_file).resolve()),
+                            "--center_x",       f"{cx:.3f}",
+                            "--center_y",       f"{cy:.3f}",
+                            "--center_z",       f"{cz:.3f}",
+                            "--size_x",         f"{size_x:.3f}",
+                            "--size_y",         f"{size_y:.3f}",
+                            "--size_z",         f"{size_z:.3f}",
+                            "--cpu",            str(VINA_CPU),
+                            "--exhaustiveness", str(VINA_EXHAUSTIVENESS),
+                            "--num_modes",      str(VINA_NUM_MODES),
+                            "--out",            str(vina_out),
+                        ]
+                        + (["--seed", str(VINA_SEED)] if VINA_SEED is not None else []),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=12000,
+                    )
 
-                        if memory_info.rss > 2252800000000:
-                            print("Memory usage exceeded the limit.")
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"Docking timed out for {ligand_file}, "
+                               f"{receptor_name}/{site_id}") from None
 
-            if buffer:
-                self.db_queue.put(buffer)
+        if result.returncode != 0:
+            print(f"Docking failed for: {ligand_file}")
+            print(f"STDOUT:\n{result.stdout.strip()}")
+            print(f"STDERR:\n{result.stderr.strip()}")
+            raise RuntimeError(f"Docking failed for {ligand_file}, "
+                               f"{receptor_name}/{site_id} (exit {result.returncode}): "
+                               f"{(result.stderr.strip() or result.stdout.strip())[-4000:]}")
 
-        except Exception as e:
-            print(e)
+        if IS_GPU:
+            parsed_results = self.parse_adgpu_xml(xml_out, receptor_name, ligand_file)
+        else:
+            parsed_results = self.parse_vina_output_file(vina_out, receptor_name, ligand_file)
 
-        gc.collect()
-        del self.bunch
-        self.callback()
+        if not parsed_results:
+            raise RuntimeError(f"No valid docking data for {ligand_file}, "
+                               f"{receptor_name}/{site_id}")
+
+        record_pose_provenance(
+            xml_out if IS_GPU else vina_out, ligand_file, receptor_path,
+            receptor_name, site_id, "adgpu" if IS_GPU else "vina",
+        )
+        return str(Path(xml_out if IS_GPU else vina_out).resolve()), parsed_results
 
 
 if __name__ == "__main__":

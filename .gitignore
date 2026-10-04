@@ -96,6 +96,8 @@ benchmarks/site_prediction/manifests/*.jsonl
 # External tool checkouts and researcher quickstart output.
 external/
 workspace/
+md-simulation/workspace/
+md-simulation/tools/
 
 # Local Codex/session state and scratch notes.
 .codex

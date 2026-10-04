@@ -2831,15 +2831,13 @@ def internal_cavities(occ):
     ext[:, [0, -1], :] = True
     ext[:, :, [0, -1]] = True
 
-    from scipy.ndimage import binary_dilation
-    prev = np.zeros_like(free, bool)
-    cur = ext & free
-    while True:
-        nxt = (binary_dilation(cur, structure=np.ones((3, 3, 3))) & free) | cur | ext
-        if np.array_equal(nxt, cur):
-            break
-        cur = nxt
-    exterior = cur
+    from scipy.ndimage import binary_propagation
+    # Track the advancing flood frontier instead of scanning the full grid
+    # once per dilation. Keep the original 26-neighbor connectivity and its
+    # boundary seeds (including occupied boundary voxels) exactly.
+    exterior = binary_propagation(
+        ext, structure=np.ones((3, 3, 3), bool), mask=free | ext
+    )
     internal = free & (~exterior)
 
     # distance (in voxels)
@@ -3800,11 +3798,18 @@ def ensure_whole_protein_maps(
 
     log_path = out_root / "grid.glg"
     cmd = [autogrid4_bin, "-p", gpf_path.name, "-l", log_path.name]
+    print(
+        f"[autogrid] whole-receptor maps for {rec_stem}: "
+        f"{tuple(int(n) + 1 for n in npts)} grid points, spacing={sp:.3f} Å. "
+        f"Progress log: {log_path.resolve()}",
+        flush=True,
+    )
     res = subprocess.run(cmd, cwd=out_root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if res.returncode != 0:
         raise RuntimeError(
             f"autogrid whole-protein failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
         )
+    print(f"[autogrid] whole-receptor maps completed for {rec_stem}", flush=True)
 
     expected_fld = out_root / f"{rec_stem}.maps.fld"
     if not expected_fld.exists():

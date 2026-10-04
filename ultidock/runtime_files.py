@@ -59,6 +59,7 @@ def runtime_files(root: Path) -> list[Path]:
         "benchmarks",
         "examples",
         "scripts",
+        "md-simulation",
     ):
         for path in (root / directory).rglob("*"):
             relative = path.relative_to(root)
@@ -67,6 +68,8 @@ def runtime_files(root: Path) -> list[Path]:
             if path.is_symlink() and root.resolve() not in path.resolve().parents:
                 continue
             if any(part in excluded_dirs or part.startswith(".") for part in relative.parts):
+                continue
+            if directory == "md-simulation" and "tools" in relative.parts:
                 continue
             if path.name in generated_names or path.suffix in generated_suffixes:
                 continue
@@ -78,6 +81,8 @@ def runtime_files(root: Path) -> list[Path]:
                 if path.suffix not in {".py", ".sh"} and path.name != "LICENSE":
                     continue
             if directory in {"cli", "molguard", "benchmarks"} and path.suffix not in {".py", ".md"}:
+                continue
+            if directory == "md-simulation" and path.suffix not in {".py", ".md", ".json", ".mdp"}:
                 continue
             if directory == "examples" and path.suffix not in {
                 ".py",

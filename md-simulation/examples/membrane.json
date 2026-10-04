@@ -1,0 +1,47 @@
+{
+  "system_type": "membrane",
+  "receptor_id": "5i6x_edited",
+  "engine": "vina",
+  "receptor_pdb": "../inputs/reviewed_sert.pdb",
+  "docking_receptor_pdbqt": "../inputs/docking_receptor.pdbqt",
+  "receptor_reviewed": false,
+  "force_field": "amber99sb-ildn",
+  "water_model": "tip3p",
+  "box_shape": "triclinic",
+  "padding_nm": 1.2,
+  "salt_molar": 0.15,
+  "salt_basis": "water-count",
+  "temperature_k": 310,
+  "production_ns": 100,
+  "nvt_ps": 500,
+  "npt_ps": 10000,
+  "dt_ps": 0.002,
+  "seed": 2026,
+  "threads": 4,
+  "top": 5,
+  "ligands": {
+    "escitalopram-e": {
+      "sdf": "../inputs/escitalopram.sdf",
+      "net_charge": 1,
+      "atom_map": {}
+    }
+  },
+  "membrane": {
+    "gro": "../inputs/lipid_only_bilayer.gro",
+    "topology_dir": "../inputs/compatible_lipid_parameters",
+    "compatible_force_field": "amber99sb-ildn",
+    "include_files": ["lipid_atomtypes.itp", "lipid_molecules.itp"],
+    "molecules": [{"name": "POPC", "count": 256, "atom_count": 134}],
+    "orientation_reviewed": false,
+    "transform": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+    "hydrophobic_z_nm": [4, 7],
+    "water_pores": [],
+    "clash_distance_nm": 0.2,
+    "mdp_nonbonded": {
+      "rvdw": 1.2,
+      "rcoulomb": 1.2,
+      "vdw-modifier": "Potential-shift",
+      "DispCorr": "EnerPres"
+    }
+  }
+}

@@ -88,6 +88,14 @@ environment has the old distribution named `molguard`, uninstall it with
 `python -m pip uninstall molguard` before installing `ultidock`. The `molguard`
 command and Python imports are retained by the new package.
 
+### Molecular dynamics tools
+
+For GROMACS simulations, follow
+[Molecular Dynamics Installation](README.md#molecular-dynamics-installation).
+It covers native GROMACS/Open Babel packages, pip installation of ACPYPE and
+RDKit, standalone AmberTools, and verification with `ultidock doctor`. You can
+use your existing Python environment; Conda is an optional alternative.
+
 ### Installed workspace
 
 Regular installs work from any directory. Ultidock prepares a writable
@@ -185,6 +193,28 @@ and analyses results. To do setup and docking in one command instead, use
 run, `ultidock run --skip-setup --skip-extract` reuses the existing config and
 prepared ligands. For source-checkout system Python, use
 `/usr/bin/python3 -m cli.ultidock run` in place of `ultidock run`.
+
+To continue the same run into GROMACS, complete a
+[soluble or membrane MD protocol](md-simulation/README.md) and add it to the
+pipeline command:
+
+```bash
+ultidock run --skip-setup --skip-wget --md-config ./protocol.json
+```
+
+Ultidock checks MD inputs and tools, docks, selects the top distinct ligands'
+best output poses, then builds, minimizes and equilibrates the complexes
+through NPT. Use `--md-through prepare` to only write the MD job. The handoff
+record beside the docking manifest stores the MD job directory; all MD work
+stays under `md-simulation/`. For existing docking results, use
+`ultidock md run --config ./protocol.json --docking-dir /path/to/docking`.
+See the main [docking-to-MD walkthrough](README.md#docking-through-molecular-dynamics)
+for inputs, run selection and production continuation.
+
+Screening skips failed ligand/receptor/site cases and continues with successful
+outputs. Each docking manifest has a `.failures.csv` report; partial runs are
+labelled explicitly. MD only receives successful output poses for its requested
+receptor. Missing MD dependencies disable that handoff while docking continues.
 
 ---
 

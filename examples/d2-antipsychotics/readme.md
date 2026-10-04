@@ -1,3 +1,10 @@
+# D2 receptor input (not a runnable example)
+
+This directory contains `6CM4-edited.pdbqt` and structural reference notes.
+It has no ligand input or `example-run.py`, so it is intentionally absent
+from `ultidock example list`. Supply prepared ligands and use the main docking
+commands to build a D2 screening run. No complete MD inputs are bundled.
+
 Structure of the D2 dopamine receptor bound to the atypical antipsychotic drug risperidone.
 Wang, S., Che, T., Levit, A., Shoichet, B.K., Wacker, D., Roth, B.L.
 (2018) Nature 555: 269-273

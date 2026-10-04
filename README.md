@@ -1,7 +1,7 @@
 # Ultidock
 
-Ultidock is a high-throughput molecular docking workflow that automates ligand
-staging, grid preparation, AutoDock-GPU execution, and post-processing.
+Ultidock automates ligand staging, grid preparation, AutoDock-GPU or Vina
+docking, analysis, and optional continuation into GROMACS molecular dynamics.
 
 This document explains **how to run the pipeline step by step**, details the
 major components, and highlights the features that make Ultidock different from
@@ -12,17 +12,18 @@ traditional docking scripts.
 ## Table of Contents
 
 1. [Requirements](#requirements)
-2. [Repository Layout](#repository-layout)
-3. [Quick Start: End-to-End Run](#quick-start-end-to-end-run)
-4. [Command Reference](#command-reference)
-5. [Deterministic Receptor Input Handling](#deterministic-receptor-input-handling)
-6. [Configuration Reference](#configuration-reference)
-7. [Pipeline Segments & What Makes Ultidock Different](#pipeline-segments--what-makes-ultidock-different)
-8. [Spotlight: Grid Boxing & Cavity Finder Algorithm](#spotlight-grid-boxing--cavity-finder-algorithm)
-9. [Benchmarking](#benchmarking)
-10. [Working with the Example Pipelines](#working-with-the-example-pipelines)
-11. [Troubleshooting](#troubleshooting)
-12. [Citation & License](#citation--license)
+2. [Molecular Dynamics Installation](#molecular-dynamics-installation)
+3. [Repository Layout](#repository-layout)
+4. [Quick Start: End-to-End Run](#quick-start-end-to-end-run)
+5. [Command Reference](#command-reference)
+6. [Deterministic Receptor Input Handling](#deterministic-receptor-input-handling)
+7. [Configuration Reference](#configuration-reference)
+8. [Pipeline Segments & What Makes Ultidock Different](#pipeline-segments--what-makes-ultidock-different)
+9. [Spotlight: Grid Boxing & Cavity Finder Algorithm](#spotlight-grid-boxing--cavity-finder-algorithm)
+10. [Benchmarking](#benchmarking)
+11. [Working with the Example Pipelines](#working-with-the-example-pipelines)
+12. [Troubleshooting](#troubleshooting)
+13. [Citation & License](#citation--license)
 
 ---
 
@@ -199,6 +200,142 @@ canonicalized by `molguard`.
 
 ---
 
+## Molecular Dynamics Installation
+
+The `ultidock md` workflow needs the following tools in the active environment:
+
+| Dependency | Purpose | Commands checked by `ultidock doctor` |
+| --- | --- | --- |
+| GROMACS 2021+ | Build systems and run minimization, equilibration and production | `gmx` |
+| ACPYPE | Generate GROMACS ligand topologies through AmberTools | `acpype` |
+| AmberTools | Assign GAFF2 parameters and AM1-BCC charges | `antechamber`, `parmchk2`, `tleap`, `sqm` |
+| Open Babel | Convert the chemically complete posed ligand to MOL2 | `obabel` |
+| RDKit, NumPy, SciPy | Restore ligand chemistry, validate coordinates and assemble systems | Python modules |
+
+### Native tools and pip installation
+
+Conda is optional. You can keep your existing Python environment and install
+the native programs separately. On Ubuntu/Debian:
+
+```bash
+sudo apt update
+sudo apt install gromacs openbabel
+```
+
+Use a GROMACS package version of at least 2021. **From the Ultidock repository
+root**, activate your existing Python environment. If you do not have one,
+create a standard Python virtual environment first:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Ubuntu/Debian may require `sudo apt install python3-venv` for that step. Then
+install Ultidock, ACPYPE, RDKit and Open Babel's Python bindings into the same
+Python environment:
+
+```bash
+python -m pip install -e ".[md]" openbabel-wheel
+```
+
+The editable installation makes checkout changes visible to the CLI
+immediately. GROMACS and the standalone AmberTools commands are separate
+native dependencies; the Python extras do not guarantee their availability
+on `PATH`. ACPYPE needs Open Babel's Python bindings in its own Python
+environment, as described in the
+[ACPYPE installation guide](https://github.com/alanwilter/acpype/blob/main/README.md).
+
+### Standalone AmberTools without Conda
+
+If you already have AmberTools installed, source its `amber.sh` and skip the
+build. Otherwise download the source distribution using **Option 2** on
+[Amber's download page](https://ambermd.org/GetAmber.php#ambertools), and follow
+Chapter 2 of the linked reference manual. Install the build dependencies for
+your distribution using the
+[official Ubuntu instructions](https://ambermd.org/InstUbuntu.php), plus
+`cmake` and `python3-tk`. Install the Python build dependencies in your active
+environment:
+
+```bash
+python -m pip install numpy scipy matplotlib cython setuptools
+```
+
+Before running the source tree's `build/run_cmake`, edit its CMake options to
+use these settings (replace the absolute paths with your checkout and active
+Python interpreter):
+
+```text
+-DDOWNLOAD_MINICONDA=FALSE
+-DPYTHON_EXECUTABLE=/absolute/path/to/ultidock/.venv/bin/python
+-DCMAKE_INSTALL_PREFIX=/absolute/path/to/ultidock/md-simulation/tools/ambertools
+```
+
+For an existing environment, obtain its interpreter path with
+`python -c 'import sys; print(sys.executable)'`. Disabling `DOWNLOAD_MINICONDA`
+prevents the Amber build from installing its own Conda environment; these
+options are documented in
+[Amber's CMake options](https://ambermd.org/pmwiki/pmwiki.php/Main/CMake-Common-Options).
+Then, **inside the extracted source tree's `build` directory**, run:
+
+```bash
+./run_cmake
+cmake --build . --parallel 4
+cmake --install .
+```
+
+Return to the Ultidock repository root and load the installed tools:
+
+```bash
+source md-simulation/tools/ambertools/amber.sh
+ultidock doctor
+```
+
+If you used another install prefix, source its `amber.sh` instead. In each new
+terminal, activate the same Python environment and source `amber.sh` again.
+The doctor output should show `[OK]` for the MD tools and `MD dependencies:
+ready`. This checks availability; the build and simulation stages still verify
+the actual inputs and parameters.
+
+### Optional: complete Conda environment
+
+If you prefer prebuilt AmberTools and a single environment for all MD tools,
+you can use [Miniforge](https://conda-forge.org/download/). From the repository
+root, create this optional environment under `md-simulation/tools/`:
+
+```bash
+conda create --prefix ./md-simulation/tools/env \
+  --override-channels --channel conda-forge --strict-channel-priority \
+  python=3.12 pip "gromacs=*=nompi_h*" ambertools acpype openbabel rdkit
+conda activate ./md-simulation/tools/env
+python -m pip install -e .
+ultidock doctor
+```
+
+The GROMACS build selector requests the CPU, single-precision, non-MPI
+package, which supplies `gmx`; see the
+[conda-forge GROMACS build definitions](https://github.com/conda-forge/gromacs-feedstock/blob/main/recipe/meta.yaml).
+AmberTools also provides a
+[prebuilt conda-forge package](https://ambermd.org/GetAmber.php#ambertools).
+In each new terminal, activate this environment using
+`conda activate /path/to/ultidock/md-simulation/tools/env`.
+
+### Custom GROMACS installations
+
+For a source-built or GPU-enabled GROMACS, follow the
+[GROMACS installation guide](https://manual.gromacs.org/current/install-guide/index.html)
+and source the installed `bin/GMXRC`. The current runner uses `gmx` with
+thread-MPI and does not launch external MPI jobs. Custom executable paths can
+be checked with `ultidock doctor --gmx /path/to/gmx --acpype /path/to/acpype
+--obabel /path/to/obabel`; use those same overrides with `ultidock md run`.
+
+Once the dependencies are ready, follow the
+[MD workflow guide](md-simulation/README.md) for ligand atom maps, force-field
+compatibility, membrane inputs and simulation stages. MD working directories
+are under `md-simulation/workspace/`.
+
+---
+
 ## Repository Layout
 
 ```
@@ -237,6 +374,10 @@ ultidock/
 │  ├─ ANALYSIS_DIR/          # Intermediate scoring/aggregation artifacts
 │  └─ RESULTS_DIR/           # Final CSV/JSON summaries
 ├─ benchmarks/               # DUD-E download, preparation, site recovery, and docking benchmarks
+├─ md-simulation/            # Docking-to-GROMACS workflow and protocol templates
+│  ├─ workflow.py            # Select, prepare and run MD jobs
+│  ├─ tools/                 # Local AmberTools build or optional Conda environment
+│  └─ workspace/             # Prepared systems, trajectories and MD logs
 ├─ examples/                 # Self-contained example runners
 └─ data-analyses/, results/  # Optional downstream notebooks & exports
 ```
@@ -292,6 +433,10 @@ Follow this checklist whenever you want to run Ultidock from a clean workspace.
    - Omit `--skip-wget` only when you intend to run the download manifest.
    - Override directories as needed with `--LIGANDS_DIR`, `--MACRO_MOL_DIR`, etc.
      Absolute paths are recommended for scripted automation.
+   - To continue directly into MD, supply a completed MD protocol:
+     `ultidock run --mode cpu --skip-wget --md-config protocol.json`.
+     See [Docking through molecular dynamics](#docking-through-molecular-dynamics)
+     below for the required inputs and continuation stages.
 
 6. **Monitor progress:**
    - Setup output reports where AutoDock-GPU and AutoGrid binaries are built or
@@ -323,6 +468,91 @@ For another batch, use new input/output directories or explicitly clean the old
 workspace. `ultidock clean -y --all` deletes build products, generated maps,
 ligands, and results, so inspect `ultidock clean --all` first.
 
+### Docking through molecular dynamics
+
+`--md-config` makes MD the next stage of the same run. Ultidock checks MD inputs
+and tools, docks, analyses successful results, selects each top ligand's best
+scored output pose, builds the complexes, minimizes them, and runs NVT and NPT
+equilibration. The default is up to five distinct ligands for the receptor
+named in the protocol. A single ligand produces one simulation.
+
+Install the [MD dependencies](#molecular-dynamics-installation), then complete
+[soluble.json](md-simulation/examples/soluble.json) or
+[membrane.json](md-simulation/examples/membrane.json) following the
+[MD input guide](md-simulation/README.md). The protocol must provide:
+
+- The receptor ID (its PDBQT filename stem), reviewed protein PDB and docking
+  receptor PDBQT in the same coordinate frame.
+- The scoring engine: `vina` for `--mode cpu`, or `adgpu` for a GPU backend.
+- A chemically complete SDF, integer net charge and atom map for **every
+  candidate ligand**, keyed by its prepared PDBQT filename stem. The top
+  ligands are only known after docking. Their MD coordinates come from the
+  scored output poses; the SDF supplies chemical identity.
+- Force field, water, box, salt, temperature and durations, plus reviewed lipid
+  parameters, bilayer coordinates and orientation for a membrane protein.
+
+Protocol paths are relative to the JSON file. CLI paths are relative to your
+current directory. For prepared receptor and ligand PDBQT files:
+
+```bash
+ultidock run --mode cpu --skip-wget --skip-extract \
+  --macro-mol-dir ./inputs/receptors --ligands-dir ./inputs/ligands \
+  --docking-dir ./runs/screen/docking --results-dir ./runs/screen/results \
+  --analysis-dir ./runs/screen/analysis \
+  --md-config ./protocol.json
+```
+
+The same `--md-config` option works with `known-site`, `cavity`, `blind`,
+`fpocket`, `p2rank`, and `ultidock run p2rank/fpocket`. `--md PROTOCOL` is an
+alias. Use `--md-through prepare` to validate and write an MD job without
+starting GROMACS, or choose `build`, `em`, `nvt` or `npt` (the default).
+`--skip-analysis` still allows MD to follow docking.
+
+The handoff ranks only successful outputs in that invocation's `docking-run-*.json`
+manifest. Older poses in a reused docking directory are excluded. Failed
+ligand preparations, receptors and docking attempts are recorded and skipped;
+the remaining screening cases continue. A failure at one site does not discard
+a successful pose from another site. The sibling `docking-run-*.failures.csv`
+records the stage, receptor, ligand, site and error for each failed case.
+The console and generated reports label incomplete screens as `partial`.
+Partial screens continue into analysis and MD and return success; a run with
+no successful docking outputs returns failure after writing its report and
+skips analysis/MD. Shared setup failures, such as a missing usable docking
+backend, still stop the run.
+
+If MD preflight fails, docking still proceeds and the MD handoff is marked
+`skipped`. MD also skips a requested receptor with no successful poses, even
+when other receptors docked successfully. The sibling `docking-run-*.md.json` records
+the MD job path, requested stage and success/failure. MD files and logs stay
+under `md-simulation/workspace/`; `--md-work-dir` can select another new
+directory under `md-simulation/`. Installed packages use the managed workspace
+reported by `ultidock doctor`.
+
+For **existing docking results**, select, prepare and run in one command:
+
+```bash
+ultidock md run --config ./protocol.json --docking-dir ./runs/screen/docking
+```
+
+That command considers matching results in the supplied directory. Add
+`--pose-manifest /path/to/docking-run-TIMESTAMP.json` to restrict it to one
+recorded run. Historical results without receptor IDs require the explicit
+legacy option described in the MD guide.
+
+New jobs stop after NPT so you can inspect the built systems and equilibration.
+Use the printed job directory to resume, without redocking or selecting again:
+
+```bash
+ultidock md run /path/to/md-simulation/workspace/JOB --through npt
+# After inspecting the systems and equilibration:
+ultidock md run /path/to/md-simulation/workspace/JOB \
+  --through production --equilibration-reviewed
+```
+
+The current automatic ligand provider supports compatible Amber/GAFF2 force
+fields. Membrane input templates require a reviewed bilayer seed; the bundled
+SERT docking files alone do not supply a complete membrane MD system.
+
 ---
 
 ## Command Reference
@@ -332,8 +562,8 @@ most relevant README section instead of burying the terminal in long guidance.
 
 | Command | Purpose |
 |---------|---------|
-| `python3 docking/run.py [options]` | Primary entry point. Validates the environment, runs setup, downloads ligands, launches docking, and triggers analysis. |
-| `python3 docking/setup.py [options]` | Runs the setup stage only (directory creation and AutoDock-GPU/AutoGrid build checks). All CLI flags mirror `run.py`. |
+| `python3 docking/run.py [options]` | Primary entry point. Runs setup, docking and analysis; `--md-config PROTOCOL` continues into GROMACS. |
+| `python3 docking/setup.py [options]` | Runs the setup stage only (directory creation and AutoDock-GPU/AutoGrid build checks). Shares setup flags with `run.py`. |
 | `python3 docking/dock_v02.py [options]` | Executes the docking stage against prepared ligands and receptors. Used internally by `run.py`. |
 | `python3 docking/extract.py` | Wrapper around AutoDock Vina's `vina_split` for splitting ligand archives and optional filtering. |
 | `python3 docking/clean.py -y --all` | Removes compiled binaries, cached grids, downloads, and generated configs. Run only when you want a full reset. |
@@ -341,6 +571,10 @@ most relevant README section instead of burying the terminal in long guidance.
 | `python3 benchmarks/cavity_recovery_benchmark.py` | Evaluate receptor-only site finding against co-crystallized ligand centers. Supports target-level `--jobs` parallelism. |
 | `python3 benchmarks/download_dude.py` | Download DUD-E receptor, crystal ligand, active, and decoy files. |
 | `ultidock run [options]` | Run the full docking pipeline from anywhere in the repo (no need to `cd docking/`). Forwards all flags to `docking/run.py`. |
+| `ultidock run --md-config PROTOCOL [options]` | Dock and continue into MD through NPT by default, using only this run's output poses. |
+| `ultidock md run --config PROTOCOL --docking-dir PATH` | Select, prepare and simulate existing docking results in one command. |
+| `ultidock md run JOB_DIR [--through STAGE]` | Resume a prepared MD job; production additionally requires `--equilibration-reviewed`. |
+| `ultidock md check --config PROTOCOL` | Check protocol inputs and MD tools before docking. |
 | `ultidock known-site --center x,y,z [options]` | Run docking with a manual/expert site box. |
 | `ultidock cavity [options]` | Run CaV-EMPS automatic binding-site proposal and dock against predicted sites. |
 | `ultidock blind [options]` | Run whole-receptor/blind docking. |
@@ -351,7 +585,7 @@ most relevant README section instead of burying the terminal in long guidance.
 | `ultidock benchmark download-dude [options]` | Download DUD-E receptor, crystal ligand, active, and decoy files. |
 | `ultidock benchmark site-prediction [options]` | Download/normalize COACH420/HOLO4K, run `cav-emps\|fpocket\|p2rank`, evaluate DCC metrics, and generate reports. |
 | `ultidock example list` / `ultidock example run <name>` | Discover and run bundled example pipelines. |
-| `ultidock doctor` | Print tool locations and versions. Distinguishes between binaries not compiled yet (source present) and not found at all. |
+| `ultidock doctor` | Show the Python environment, docking and receptor-preparation tools, MD dependencies and workspace paths in one command. Distinguishes uncompiled docking tools from missing binaries. |
 | `molguard pdbqt check <file>` | Lint a receptor or ligand PDBQT for AutoDock column-format issues (exponent notation, missing decimals, bad atom types). |
 | `molguard pdbqt normalize <file> -o <out>` | Rewrite all numeric columns in a ligand PDBQT through the fixed-width formatter. Torsion tree is left untouched. |
 | `molguard receptor canonicalize <file> -o <out>` | Sort, renumber, and reformat a receptor PDBQT deterministically. Returns a SHA-256 digest for reproducibility checks. |
@@ -388,7 +622,17 @@ most relevant README section instead of burying the terminal in long guidance.
 | `--receptor-prepare-command TEMPLATE` | Override the receptor conversion command. Use `{input}`, `{output}`, and optionally `{seed}`. |
 | `--force-receptor-prep` | Regenerate prepared receptor `.pdbqt` outputs even if sibling outputs already exist. |
 
-All flags are optional; defaults point to directories within `docking/`.
+MD continuation flags:
+
+| Flag | Description |
+| --- | --- |
+| `--md-config PROTOCOL`, `--md PROTOCOL` | Enable automatic docking-to-MD continuation with the supplied protocol JSON. |
+| `--md-through {prepare,build,em,nvt,npt}` | Last MD stage for this new job (default: `npt`). |
+| `--md-work-dir PATH` | Choose a new MD job directory under `md-simulation/`. |
+| `--md-gmx`, `--md-acpype`, `--md-obabel` | Override MD executables; reuse the printed overrides when resuming. |
+
+Docking directory defaults point within `docking/`. MD options require
+`--md-config`; omit it for a docking-only run.
 
 ---
 
@@ -556,8 +800,11 @@ scripts.
   warnings.
 - **Database-native:** every docking job streams its status into the SQLite
   results store, enabling instant post-processing without manual log parsing.
-- **Future-ready:** the branch maintains alignment with planned GROMACS
-  integration by preserving metadata required for MD restarts and analysis.
+- **GROMACS integration:** `ultidock run --md-config protocol.json` continues
+  directly from docking into pose selection, automatic AmberTools/GAFF2 ligand
+  parameterization, system building and equilibration. `ultidock md run` also
+  accepts existing results or resumes a prepared job. See
+  [MD setup and scientific requirements](md-simulation/README.md).
 
 ---
 
@@ -699,6 +946,10 @@ be treated as final validation runs rather than quick smoke tests.
 
 ## Working with the Example Pipelines
 
+See the [example readiness and requirements table](examples/README.md) for
+which entries perform docking, generate demonstration artifacts or run a
+site-recovery study. The D2 directory is receptor data only and has no runner.
+
 Start with the lightweight quickstart to verify the researcher-facing artifact
 flow:
 
@@ -734,6 +985,13 @@ Each full docking example prints its own directory under
 run stay there; installed AutoDock and Vina binaries are reused. The example
 passes `--skip-wget`, so it docks only its bundled ligands. A new run gets a new
 workspace, and completed workspaces remain available for inspection.
+
+The SERT and 4COF docking runners default to `--mode auto`, allowing CPU
+fallback. Use `--dry-run` to stage inputs and preview the command, or
+`--output-dir PATH` to choose a new isolated workspace. They also accept
+`--md-config PROTOCOL` and the main pipeline's MD continuation options.
+None of the bundled examples includes all reviewed chemistry and membrane
+inputs needed for MD; follow the MD guide before enabling that stage.
 
 > **P2Rank 2.5 requires Java 17–23.** Java 25 can fail with
 > `Unsupported class file major version 69` while loading P2Rank's Groovy

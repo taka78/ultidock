@@ -1,0 +1,29 @@
+{
+  "system_type": "soluble",
+  "receptor_id": "protein",
+  "engine": "vina",
+  "receptor_pdb": "../inputs/reviewed_protein.pdb",
+  "docking_receptor_pdbqt": "../inputs/docking_receptor.pdbqt",
+  "receptor_reviewed": false,
+  "force_field": "amber99sb-ildn",
+  "water_model": "tip3p",
+  "box_shape": "dodecahedron",
+  "padding_nm": 1.2,
+  "salt_molar": 0.15,
+  "salt_basis": "box-volume",
+  "temperature_k": 310,
+  "production_ns": 100,
+  "nvt_ps": 100,
+  "npt_ps": 1000,
+  "dt_ps": 0.002,
+  "seed": 2026,
+  "threads": 4,
+  "top": 5,
+  "ligands": {
+    "ligand_id_from_selection": {
+      "sdf": "../inputs/ligand.sdf",
+      "net_charge": 0,
+      "atom_map": {}
+    }
+  }
+}

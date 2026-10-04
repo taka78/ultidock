@@ -1,7 +1,7 @@
 {
   "name": "Example - SERT Escitalopram",
-  "description": "CPU demonstration dataset with escitalopram.",
-  "mode": "gpu",
+  "description": "SERT docking dataset with escitalopram; automatic backend selection permits CPU fallback.",
+  "mode": "auto",
   "receptor": "5i6x_edited.pdbqt",
   "ligands": [
     {

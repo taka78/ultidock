@@ -10,7 +10,7 @@ from pathlib import Path
 EXAMPLE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(EXAMPLE_DIR.parent))
 
-from common import run_pipeline, stage_inputs
+from common import add_pipeline_options, pipeline_options, run_pipeline, stage_inputs
 
 
 def main() -> None:
@@ -18,9 +18,10 @@ def main() -> None:
     parser.add_argument(
         "--mode",
         choices=("auto", "gpu", "cpu", "cuda", "opencl"),
-        default="gpu",
-        help="Docking backend (default: gpu; use cpu when no GPU runtime is available).",
+        default="auto",
+        help="Docking backend (default: auto; CPU fallback when no GPU is detected).",
     )
+    add_pipeline_options(parser)
     args = parser.parse_args()
 
     receptor = EXAMPLE_DIR / "4COF_edited.pdbqt"
@@ -41,8 +42,9 @@ def main() -> None:
         if not ligand.exists():
             raise FileNotFoundError(f"Missing ligand file: {ligand.name}")
 
-    workspace_paths = stage_inputs(EXAMPLE_DIR, receptor, ligands)
-    run_pipeline(workspace_paths, mode=args.mode)
+    staging = {"output_dir": args.output_dir} if args.output_dir else {}
+    workspace_paths = stage_inputs(EXAMPLE_DIR, receptor, ligands, **staging)
+    run_pipeline(workspace_paths, mode=args.mode, **pipeline_options(args))
 
 
 if __name__ == "__main__":

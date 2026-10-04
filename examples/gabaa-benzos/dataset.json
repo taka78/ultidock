@@ -1,7 +1,7 @@
 {
-  "name": "Example - GABAA Benzodiazepines",
-  "description": "CPU demonstration dataset with three ligands mirroring the gabaa-benzos runner.",
-  "mode": "gpu",
+  "name": "Example - GABAA 4COF Mixed Ligands",
+  "description": "4COF docking dataset with aspirin, ibuprofen and morphine; automatic backend selection permits CPU fallback.",
+  "mode": "auto",
   "receptor": "4COF_edited.pdbqt",
   "ligands": [
     {

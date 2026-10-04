@@ -124,7 +124,12 @@ class DockingDatabaseManager:
                 self.connection.rollback()
 
     def insert_bulk(self, records):
-        """Batch-insert a list of (ligand_name, affinity, rmsd_lb, rmsd_ub, docking_file, binding_site)."""
+        """Insert poses; docking_file is the output PDBQT or DLG container.
+
+        The Model/run identifier in ligand_name selects coordinates within that
+        container. Legacy databases may contain input-ligand paths instead;
+        those paths must never be treated as docked poses by the MD handoff.
+        """
         if not records:
             print("ℹinsert_bulk: received empty list, skipping.")
             return
@@ -149,6 +154,7 @@ class DockingDatabaseManager:
             except sqlite3.Error as e:
                 print(f"An error occurred in bulk insert: {e}")
                 self.connection.rollback()
+                raise
 
     def update_metrics_by_ligand_prefix(self, ligand_prefix, binding_site, metrics):
         """Update metrics for all rows whose ligand_name starts with the prefix."""
