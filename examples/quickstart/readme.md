@@ -1,36 +1,35 @@
-# Ultidock Quickstart
-
-This is the recommended first run:
-
-Install the Python dependencies and CLI in [SETUP.md](../../SETUP.md#step-1--install-prerequisites)
-first. From the repository root:
+# Interactive first-run teacher
 
 ```bash
 ultidock example run quickstart
 ```
 
-For a source-checkout installation, use
-`/usr/bin/python3 -m cli.ultidock example run quickstart`. This command does
-not need Java, fpocket, P2Rank, AutoGrid, a GPU, or a vendor compute runtime.
+This opens five short screens: welcome, installation check, receptor/ligand
+preparation, binding sites, and running/reading docking results. Press **Enter**
+to go Next, **b** to go Back, or **q** to exit. Docking starts only when you advance
+past the final Run screen. Missing requirements are explained with installation
+hints; the teacher does not install packages or invoke sudo.
 
-The quickstart is intentionally lightweight. It creates the standard Ultidock
-researcher-facing artifact set without requiring a full docking toolchain on the
-first command:
+The default lesson runs the real D2 example with haloperidol, escitalopram and
+morphine, using CPU Vina and CaV-EMPS. Choose another supported lesson or engine:
 
-- `input/receptor.pdb`
-- `input/reference_ligand.mol2`
-- `run_config.yaml`
-- `sites.tsv`
-- `predictions.tsv`
-- `top_hits.csv`
-- `results.sqlite`
-- `report.md`
-- `report.html`
-- PyMOL and ChimeraX helper files
+```bash
+ultidock example run quickstart --example sert-escitalopram
+ultidock example run quickstart --mode gpu
+ultidock example run quickstart --site-method fpocket
+```
 
-The site method shown in the report is `cav-emps`, the CaV-EMPS method:
-Cavity detection via Electrostatic Map Pocket Scoring.
+Read every screen without running anything:
 
-The bundled receptor and ligand are tiny synthetic public-domain fixtures used
-for artifact and report smoke testing. The ligand is recorded as reference
-metadata only; it is not used as an input to CaV-EMPS site generation.
+```bash
+ultidock example run quickstart --dry-run
+```
+
+For an explicitly unattended run, use `--yes`. Without it, non-interactive input
+is rejected rather than silently starting a long calculation. The selected example
+prints its own timestamped workspace; old outputs are preserved. This replaces the
+old artifact generator and its synthetic scores. No fixture report is generated.
+
+Start with [Installation](../../docs/source/getting-started/installation.md), then
+[First Docking Run](../../docs/source/getting-started/first-docking-run.md). Source-checkout
+users can replace `ultidock` with `/usr/bin/python3 -m cli.ultidock` from the repo root.

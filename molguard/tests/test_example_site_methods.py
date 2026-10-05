@@ -109,3 +109,40 @@ def test_pocket_module_imports_after_example_common():
         "assert common.__file__.endswith('examples/common.py')",
     ]
     subprocess.run(command, cwd=common.REPO_ROOT, check=True)
+
+
+@pytest.mark.parametrize("method", ["cav-emps", "fpocket", "p2rank"])
+def test_d2_stages_manifest_ligands_and_forwards_method(monkeypatch, tmp_path, method):
+    paths = {"results": tmp_path / "results", "docking": tmp_path / "docking"}
+    stage = Mock(return_value=paths)
+    pipeline = Mock()
+    monkeypatch.setitem(sys.modules, "common", common)
+    monkeypatch.setattr(common, "stage_inputs", stage)
+    monkeypatch.setattr(common, "run_pipeline", pipeline)
+    monkeypatch.setattr(sys, "argv", ["example-run.py", method, "--mode", "cpu"])
+
+    runpy.run_path(str(common.REPO_ROOT / "examples/d2-antipsychotics/example-run.py"),
+                   run_name="__main__")
+
+    root, receptor, ligands = stage.call_args.args
+    assert root.name == "d2-antipsychotics"
+    assert receptor.name == "6CM4-edited.pdbqt"
+    assert [path.name for path in ligands] == [
+        "haloperidol.pdbqt", "escitalopram-e.pdbqt", "morphine-e.pdbqt",
+    ]
+    pipeline.assert_called_once_with(paths, mode="cpu", site_method=method)
+
+
+def test_d2_preview_does_not_stage_inputs(monkeypatch):
+    stage = Mock()
+    pipeline = Mock()
+    monkeypatch.setitem(sys.modules, "common", common)
+    monkeypatch.setattr(common, "stage_inputs", stage)
+    monkeypatch.setattr(common, "run_pipeline", pipeline)
+    monkeypatch.setattr(sys, "argv", ["example-run.py", "--dry-run"])
+
+    runpy.run_path(str(common.REPO_ROOT / "examples/d2-antipsychotics/example-run.py"),
+                   run_name="__main__")
+
+    stage.assert_not_called()
+    pipeline.assert_not_called()

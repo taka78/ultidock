@@ -11,8 +11,20 @@ def atom(x):
 
 
 @pytest.fixture
-def worker(monkeypatch):
-    from docking import config
+def worker(monkeypatch, tmp_path):
+    # Pose parsing must not depend on a local setup run or its machine-specific paths.
+    config = ModuleType("config")
+    values = {
+        key: str(tmp_path / key.lower()) for key in (
+            "LIGANDS_DIR", "DOCKING_DIR", "ANALYSIS_DIR", "VINA_DIR",
+            "AUTODOCK_GPU_DIR", "MACRO_MOL_DIR", "RESULTS_DIR", "DB_PATH", "CENTERS_TSV",
+        )
+    }
+    values.update(GPU_TYPE="CPU", NUMWI="128", GRID_MODE="centers", GRID_MARGIN=5.0,
+                  GRID_CAP=150.0, REF_LIGAND_PDB=None, GRID_SPACING=0.375, AUTOSITES=6,
+                  R_MIN_CAVITY_A=None, HOTSPOT_BOX_ANGLE=35.0, HOTSPOT_NMS_MINSEP_A=14.0)
+    for key, value in values.items():
+        setattr(config, key, value)
     monkeypatch.setitem(sys.modules, "config", config)
     grids = ModuleType("make_grids")
     for name in ("HotspotGPFGenerator", "autogenerate_centers_tsv", "ensure_grids_multi_centers",

@@ -1,12 +1,18 @@
 # Changelog
 
-## Unreleased
+## 1.1.2 - 2026-10-05
 
+- Added the complete Read the Docs site using the official tutorial-template layout, with getting-started guides, scientific background, tutorials, reference and development documentation.
+- Replaced the fixture-based quickstart with an interactive Next/Back/Exit teacher and a preview mode that does not run docking.
+- Added the D2 receptor example with haloperidol, escitalopram and morphine, explicit input staging and CPU/GPU engine selection.
+- Linked exported docking scores to the saved best-pose PDBQT, retaining input ligand identity and all parsed engine runs in SQLite.
+- Improved receptor preparation and missing donor-hydrogen recovery, including heavy-atom preservation checks and preparation provenance.
 - Renamed the Python distribution to `ultidock`, keeping the `molguard` command and imports.
 - Included workflow modules, examples, guides and native build sources in wheels and source archives.
 - Added `python -m ultidock` and a managed user workspace for regular installs, configurable with `ULTIDOCK_HOME`.
 - Added installation checks outside the source checkout and preserved binding-site identifiers in analysis exports.
 - Fixed manual known-site boxes being rejected when the receptor filename differs from the box label.
+- Made pose-parsing tests independent of a locally generated docking configuration.
 
 ## 1.1.1 - 2026-10-01
 

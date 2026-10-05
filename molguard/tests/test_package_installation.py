@@ -83,7 +83,10 @@ def test_sdist_wheel_installs_and_runs_outside_checkout(tmp_path):
         assert "docking/config.py" not in names
         assert not any(name.startswith("molguard/tests/") for name in names)
         with zipfile.ZipFile(io.BytesIO(archive.read("ultidock/runtime.zip"))) as runtime:
-            assert "examples/quickstart/data/receptor.pdb" in runtime.namelist()
+            assert "examples/quickstart/example-run.py" in runtime.namelist()
+            for name in ("dataset.json", "6CM4-edited.pdbqt", "haloperidol.pdbqt",
+                         "escitalopram-e.pdbqt", "morphine-e.pdbqt"):
+                assert f"examples/d2-antipsychotics/{name}" in runtime.namelist()
             assert (
                 "docking/AUTODOCK_GPU_DIR/autogrid/ad4_shared/paramdat2h.csh" in runtime.namelist()
             )
@@ -114,20 +117,25 @@ def test_sdist_wheel_installs_and_runs_outside_checkout(tmp_path):
             env=env,
         )
     )
-    assert origins[0] == "1.1.1"
+    assert origins[0] == "1.1.2"
     assert all(str(venv) in origin for origin in origins[1:])
     installed = Path(origins[1]).parents[1]
     initial_files = {path.relative_to(installed) for path in installed.rglob("*") if path.is_file()}
     ultidock = str(venv / "bin/ultidock")
     assert "Commands:" in _run([ultidock, "--help"], cwd=outside, env=env)
     assert not home.exists()
-    assert "version 1.1.1" in _run([python, "-m", "ultidock", "--version"], cwd=outside, env=env)
-    assert "version 1.1.1" in _run([str(venv / "bin/molguard"), "--version"], cwd=outside, env=env)
-    assert "sert-escitalopram" in _run([ultidock, "example", "list"], cwd=outside, env=env)
-    _run([ultidock, "example", "run", "quickstart"], cwd=outside, env=env)
-    quickstart = home / "examples/quickstart/workspace/quickstart_run"
-    assert (quickstart / "report.html").is_file()
-    _run([ultidock, "report", str(quickstart)], cwd=outside, env=env)
+    assert "version 1.1.2" in _run([python, "-m", "ultidock", "--version"], cwd=outside, env=env)
+    assert "version 1.1.2" in _run([str(venv / "bin/molguard"), "--version"], cwd=outside, env=env)
+    examples = _run([ultidock, "example", "list"], cwd=outside, env=env)
+    assert "sert-escitalopram" in examples
+    assert "d2-antipsychotics" in examples
+    preview = _run([ultidock, "example", "run", "quickstart", "--dry-run"], cwd=outside, env=env)
+    assert "Step 5 of 5" in preview
+    assert not (home / "examples/quickstart/workspace").exists()
+    preview = _run([ultidock, "example", "run", "d2-antipsychotics", "--dry-run"],
+                   cwd=outside, env=env)
+    assert "haloperidol.pdbqt" in preview
+    assert not (home / "examples/d2-antipsychotics/workspace").exists()
     for mode in ("known-site", "cavity", "blind"):
         output = home / "runs" / mode
         args = [ultidock, mode, "--output-dir", str(output), "--dry-run"]
@@ -135,8 +143,11 @@ def test_sdist_wheel_installs_and_runs_outside_checkout(tmp_path):
             args += ["--center", "1,2,3"]
         _run(args, cwd=outside, env=env)
         assert (output / "run_config.yaml").is_file()
+    report_dir = home / "runs/known-site"
+    _run([ultidock, "report", str(report_dir)], cwd=outside, env=env)
+    assert (report_dir / "report.html").is_file()
     _run([ultidock, "clean"], cwd=outside, env=env)
-    assert (quickstart / "report.html").is_file()
+    assert (report_dir / "report.html").is_file()
     assert initial_files == {
         path.relative_to(installed) for path in installed.rglob("*") if path.is_file()
     }

@@ -260,21 +260,28 @@ The local `external/bin/prank` launcher selects Ubuntu's Java 21 when
 `export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64` before P2Rank. Verify
 the selected runtime with `"$JAVA_HOME/bin/java" -version` when set.
 
-To try the bundled SERT example from the repository root:
+To learn the workflow and try the bundled D2 or SERT example:
 
 ```bash
 ultidock example run quickstart
+ultidock example run quickstart --dry-run
+ultidock example run d2-antipsychotics --mode cpu
 ultidock example run sert-escitalopram p2rank
 ultidock example run sert-escitalopram fpocket
 ```
 
-The quickstart writes sample report artifacts without running docking. Each
-SERT command stages one receptor and one ligand in a new directory under
-`examples/sert-escitalopram/workspace/`, skips the default ligand download,
+The quickstart is an interactive Next/Back/Exit teacher. It checks prerequisites
+and explains preparation and sites before the final screen launches a real D2
+run. `--dry-run` previews the lessons without running docking. The D2 example
+stages one receptor and three ligands; SERT stages one receptor and one ligand.
+Each uses a new directory under `examples/<name>/workspace/`, skips the ligand download,
 then builds one AutoGrid map set per predicted site before docking. The
 printed workspace path contains that run's inputs and results; old runs remain
 available. For a source-checkout installation, replace `ultidock` with
 `/usr/bin/python3 -m cli.ultidock`.
+
+Continue with the [full documentation](docs/source/index.rst) and
+[First Docking Run](docs/source/getting-started/first-docking-run.md) for output inspection.
 
 The tools are installed under the ignored `external/` directory. The docking
 commands use these local executables by default and accept `--tool PATH` to

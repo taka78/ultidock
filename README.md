@@ -7,6 +7,12 @@ This document explains **how to run the pipeline step by step**, details the
 major components, and highlights the features that make Ultidock different from
 traditional docking scripts.
 
+New users can start with the [documentation](docs/source/index.rst), including
+[installation](docs/source/getting-started/installation.md), an interactive
+[Quick Start teacher](docs/source/getting-started/quick-start.md), and the
+[D2 docking tutorial](docs/source/tutorials/small-molecule-docking.md).
+The documentation is configured for Read the Docs; see [build instructions](docs/README.md).
+
 ---
 
 ## Table of Contents
@@ -261,11 +267,14 @@ Follow this checklist whenever you want to run Ultidock from a clean workspace.
    [Requirements](#requirements). Verify the CLI with `ultidock --help` after a
    pip install, or `/usr/bin/python3 -m cli.ultidock --help` from the checkout.
 
-3. **Try the lightweight example** before building the full docking toolchain:
+3. **Start the interactive teacher:**
    ```bash
    ultidock example run quickstart
    ```
-   It generates a report from bundled fixtures without a GPU or Java.
+   Press Enter for Next, `b` for Back, or `q` to exit. It checks prerequisites,
+   explains inputs and binding sites, then launches the real three-ligand D2
+   example after the final Run screen. Use `--dry-run` to read the lesson without
+   docking. Continue below when you are ready to use your own inputs.
    With source-checkout system Python, use
    `/usr/bin/python3 -m cli.ultidock example run quickstart`.
 
@@ -723,25 +732,28 @@ be treated as final validation runs rather than quick smoke tests.
 
 ## Working with the Example Pipelines
 
-Start with the lightweight quickstart to verify the researcher-facing artifact
-flow:
+Start with the interactive teacher to learn preparation, sites, docking and results:
 
 ```bash
 ultidock example run quickstart
 ```
 
-It writes `input/receptor.pdb`, `input/reference_ligand.mol2`,
-`run_config.yaml`, `sites.tsv`, `predictions.tsv`, `top_hits.csv`,
-`results.sqlite`, `report.md`, `report.html`, and PyMOL/ChimeraX helper files.
+Enter advances, `b` goes back, and `q` exits. The final screen starts a real D2
+run using CPU Vina and CaV-EMPS. Add `--dry-run` to preview all lessons without
+staging inputs or running docking; use `--yes` for an explicitly unattended run.
 
-Two curated docking examples (`gabaa-benzos` and `sert-escitalopram`) showcase
-the fuller docking workflow. The separate `gabaa-8dd2-cav-emps` example runs a
+The `d2-antipsychotics`, `gabaa-benzos`, and `sert-escitalopram` examples showcase
+the docking workflow. D2 uses 6CM4 with haloperidol, escitalopram and morphine;
+its [dataset notes](examples/d2-antipsychotics/readme.md) explain the inputs and
+interpretation. The separate `gabaa-8dd2-cav-emps` example runs a
 preregistered blind site-recovery case study against five withheld GABA/zolpidem
 sites, including the controlled CaV-EMPS ablations and fpocket/P2Rank comparison.
 Each full example runner follows a documented researcher workflow:
 
 ```bash
 ultidock example list
+ultidock example run d2-antipsychotics --dry-run
+ultidock example run d2-antipsychotics --mode cpu
 ultidock example run sert-escitalopram
 ultidock example run sert-escitalopram p2rank
 ultidock example run sert-escitalopram fpocket
@@ -749,9 +761,9 @@ ultidock example run sert-escitalopram p2rank --mode cpu  # no GPU runtime
 ultidock example run gabaa-8dd2-cav-emps --dry-run
 ```
 
-The SERT example uses CaV-EMPS by default. Pass `p2rank` or `fpocket` after
+The D2 and SERT examples use CaV-EMPS by default. Pass `p2rank` or `fpocket` after
 the example name to select that pocket finder. The chosen method generates
-fresh sites from the staged SERT receptor before docking.
+fresh sites from the staged receptor before docking.
 
 Each full docking example prints its own directory under
 `examples/<name>/workspace/<timestamp>/`. Inputs, grids, and results for that

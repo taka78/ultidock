@@ -1,0 +1,13 @@
+{
+  "name": "D2 receptor ligand comparison",
+  "description": "Haloperidol with escitalopram and morphine as comparison ligands; not a validated active/decoy benchmark.",
+  "mode": "cpu",
+  "receptor": "6CM4-edited.pdbqt",
+  "structure_url": "https://www.rcsb.org/structure/6CM4",
+  "structure_publication": "https://doi.org/10.1038/nature25758",
+  "ligands": [
+    {"name": "haloperidol", "source": "haloperidol.pdbqt", "pubchem_cid": 3559},
+    {"name": "escitalopram", "source": "escitalopram-e.pdbqt"},
+    {"name": "morphine", "source": "morphine-e.pdbqt"}
+  ]
+}
