@@ -19,16 +19,19 @@ EXPORT_COLUMNS = [
     "rmsd_lb",
     "rmsd_ub",
     "docking_file",
+    "ligand_file",
     "binding_site",
     "model",
     "zinc_id",
 ]
 
 
-def _export(monkeypatch, tmp_path, rows, *, legacy=False):
+def _export(monkeypatch, tmp_path, rows, *, legacy=False, modern=False):
     database = tmp_path / "results.db"
     output = tmp_path / "results.csv"
     site_column = "" if legacy else ", binding_site TEXT"
+    if modern:
+        site_column += ", ligand_file TEXT, is_best_pose INTEGER"
     with sqlite3.connect(database) as connection:
         connection.execute(
             "CREATE TABLE docking_results ("
@@ -36,7 +39,7 @@ def _export(monkeypatch, tmp_path, rows, *, legacy=False):
             '"rmsd_lb (Å)" REAL, "rmsd_ub (Å)" REAL, docking_file TEXT'
             f"{site_column})"
         )
-        placeholders = ", ".join("?" for _ in range(5 if legacy else 6))
+        placeholders = ", ".join("?" for _ in range(8 if modern else 5 if legacy else 6))
         connection.executemany(f"INSERT INTO docking_results VALUES ({placeholders})", rows)
 
     config = ModuleType("config")
@@ -89,3 +92,19 @@ def test_legacy_database_exports_unknown_site_without_guessing(monkeypatch, tmp_
 
     assert columns == EXPORT_COLUMNS
     assert exported[0]["binding_site"] == ""
+
+
+def test_export_selects_actual_saved_best_pose_and_keeps_input_separate(monkeypatch, tmp_path):
+    source = "/inputs/morphine.pdbqt"
+    best = "/outputs/receptor__S3__morphine-best.pdbqt"
+    rows = [
+        ("morphine-Model19-receptor", -7.15, None, None, "/outputs/run.dlg", "3", source, 0),
+        ("morphine-Model32-receptor", -7.13, None, None, best, "3", source, 1),
+    ]
+    columns, exported = _export(monkeypatch, tmp_path, rows, modern=True)
+    assert columns == EXPORT_COLUMNS
+    assert len(exported) == 1
+    assert exported[0]["docking_file"] == best
+    assert exported[0]["ligand_file"] == source
+    assert exported[0]["model"] == "32"
+    assert float(exported[0]["affinity"]) == -7.13

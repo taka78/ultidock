@@ -454,6 +454,15 @@ def test_unknown_receptor_atom_type_fails(tmp_path: Path, monkeypatch) -> None:
         make_grids.receptor_atom_types(receptor)
 
 
+@pytest.mark.parametrize("atom_type", ["H", "HS", "NS", "OS", "MG", "ZN", "CL"])
+def test_supported_receptor_types_do_not_need_ligand_maps(tmp_path, monkeypatch, atom_type):
+    make_grids = _load_make_grids(monkeypatch)
+    receptor = tmp_path / "receptor.pdbqt"
+    receptor.write_text(_pdbqt_atom_line(1, "X1", atom_type) + "\n")
+    assert make_grids.receptor_atom_types(receptor) == (atom_type,)
+    assert atom_type not in make_grids._AD4_TYPES
+
+
 def test_surface_refinement_stays_in_seed_component(monkeypatch) -> None:
     make_grids = _load_make_grids(monkeypatch)
     shape = (21, 21, 21)

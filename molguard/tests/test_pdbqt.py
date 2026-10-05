@@ -26,6 +26,27 @@ from molguard.io.pdbqt import (
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def test_left_aligned_single_letter_atom_type_without_trailing_space(tmp_path, good_receptor):
+    source = tmp_path / "trimmed.pdbqt"
+    source.write_text("\n".join(line.rstrip() for line in good_receptor.read_text().splitlines()) + "\n")
+    assert pdbqt_check(source).ok
+
+
+def test_altloc_selection_is_per_residue(tmp_path, good_receptor):
+    template = good_receptor.read_text().splitlines()[0]
+    lines = []
+    for serial, resseq, altloc in ((1, 1, "A"), (2, 1, "B"), (3, 2, "B")):
+        line = template[:6] + f"{serial:5d}" + template[11:16] + altloc + template[17:22] + f"{resseq:4d}" + template[26:]
+        lines.append(line)
+    source = tmp_path / "alternate.pdbqt"
+    source.write_text("\n".join(lines) + "\n")
+    with pytest.warns(UserWarning, match="discarded 1 atom"):
+        canonicalize_receptor(source, source, timestamp="TEST")
+    atoms = [line for line in source.read_text().splitlines() if line.startswith("ATOM")]
+    assert [int(line[22:26]) for line in atoms] == [1, 2]
+    assert all(line[16] == " " for line in atoms)
+
+
 # ── pdbqt_check ───────────────────────────────────────────────────────────────
 
 class TestPdbqtCheck:
