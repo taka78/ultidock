@@ -43,6 +43,11 @@ class DockingDatabaseManager:
         ''')
         self.connection.commit()
         self._ensure_binding_site_column()
+        columns = {row[1] for row in self.cursor.execute("PRAGMA table_info(docking_results)")}
+        for name, kind in (("ligand_file", "TEXT"), ("is_best_pose", "INTEGER")):
+            if name not in columns:
+                self.cursor.execute(f"ALTER TABLE docking_results ADD COLUMN {name} {kind}")
+        self.connection.commit()
         self._ensure_metrics_columns()
 
         self._metric_columns = [
@@ -124,7 +129,10 @@ class DockingDatabaseManager:
                 self.connection.rollback()
 
     def insert_bulk(self, records):
-        """Batch-insert a list of (ligand_name, affinity, rmsd_lb, rmsd_ub, docking_file, binding_site)."""
+        """Insert poses with separate output/input paths and best-pose selection.
+
+        Legacy six-field records remain supported, with unknown best-pose status.
+        """
         if not records:
             print("ℹinsert_bulk: received empty list, skipping.")
             return
@@ -139,11 +147,13 @@ class DockingDatabaseManager:
                         "rmsd_lb (Å)",
                         "rmsd_ub (Å)",
                         "docking_file",
-                        binding_site
+                        binding_site,
+                        ligand_file,
+                        is_best_pose
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ''',
-                    records
+                    [(*record, None, None) if len(record) == 6 else record for record in records]
                 )
                 self.connection.commit()
             except sqlite3.Error as e:
