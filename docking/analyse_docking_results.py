@@ -11,6 +11,9 @@ Query the SQLite docking_results DB and filter:
 Write results by default to a CSV file named "<date>-docking-results.csv" (placed next to the database) and also print all rows to the console.
 Exports retain the stored binding_site for each pose. Unknown sites are blank,
 including results from legacy databases without a binding_site column.
+New results export only the engine's saved best pose per ligand/receptor/site;
+docking_file is its PDBQT output, and ligand_file is the prepared input.
+Other poses remain in SQLite. Legacy rows without best-pose status are retained.
 
 Usage:
     python analyze_docking_results.py \
@@ -85,6 +88,8 @@ def main():
     cur = conn.cursor()
     columns = {row[1] for row in cur.execute("PRAGMA table_info(docking_results)")}
     site_expression = "binding_site" if "binding_site" in columns else "NULL"
+    ligand_expression = "ligand_file" if "ligand_file" in columns else "NULL"
+    best_filter = "COALESCE(is_best_pose, 1) = 1" if "is_best_pose" in columns else "1 = 1"
 
     query = f"""
     WITH filtered AS (
@@ -94,6 +99,7 @@ def main():
         "rmsd_lb (Å)" AS rmsd_lb,
         "rmsd_ub (Å)" AS rmsd_ub,
         "docking_file",
+        {ligand_expression} AS ligand_file,
         {site_expression} AS binding_site,
         CAST(
           substr(
@@ -105,7 +111,8 @@ def main():
         substr(ligand_name, 1, instr(ligand_name, '-') - 1) AS zinc_id
       FROM docking_results
       WHERE
-        "binding_affinity (kcal/mol)" < ?
+        {best_filter}
+        AND "binding_affinity (kcal/mol)" < ?
         AND ("rmsd_lb (Å)" IS NULL OR "rmsd_lb (Å)" < ?)
         AND ("rmsd_ub (Å)" IS NULL OR "rmsd_ub (Å)" < ?)
     )
