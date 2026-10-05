@@ -7,7 +7,6 @@ from pathlib import Path
 import re
 
 import numpy as np
-from scipy.spatial import cKDTree
 
 
 @dataclass
@@ -154,6 +153,9 @@ def embed_bilayer(complex_atoms: list[GroAtom], config: dict):
     cutoff = max(membrane["mdp_nonbonded"][k] for k in ("rvdw", "rcoulomb"))
     if not np.allclose(box, np.diag(lengths)) or (lengths <= 2 * cutoff).any():
         raise ValueError("Membrane seed must have an orthorhombic periodic box larger than twice the cutoff")
+    low, high = membrane["hydrophobic_z_nm"]
+    if not (0 < low < high < lengths[2]):
+        raise ValueError("Invalid membrane hydrophobic_z_nm bounds")
     if config["box_shape"] == "cubic" and not np.allclose(lengths, lengths[0]):
         raise ValueError("Requested cubic box does not match the membrane seed box")
     xyz = np.array([a.xyz for a in complex_atoms])
@@ -161,6 +163,7 @@ def embed_bilayer(complex_atoms: list[GroAtom], config: dict):
     if (xyz.min(axis=0) < padding).any() or (xyz.max(axis=0) > lengths - padding).any():
         raise ValueError("Oriented complex lacks the requested periodic padding in the bilayer box")
     heavy = np.array([a.xyz for a in complex_atoms if not a.name.lstrip("0123456789").startswith("H")])
+    from scipy.spatial import cKDTree
     tree = cKDTree(heavy % lengths, boxsize=lengths)
     kept, counts, offset = [], [], 0
     report = []
@@ -183,8 +186,13 @@ def embed_bilayer(complex_atoms: list[GroAtom], config: dict):
             if distances.min() >= membrane["clash_distance_nm"]:
                 kept.extend(molecule)
                 retained += 1
-                midpoint = sum(membrane["hydrophobic_z_nm"]) / 2
-                if np.mean([a.xyz[2] for a in molecule]) > midpoint:
+                midpoint = (low + high) / 2
+                # Keep a molecule whole for leaflet assignment even when its
+                # coordinates straddle the periodic boundary.
+                z = np.array([a.xyz[2] for a in molecule])
+                dz = z - z[0]
+                center_z = (z[0] + np.mean(dz - lengths[2] * np.rint(dz / lengths[2]))) % lengths[2]
+                if center_z > midpoint:
                     upper += 1
                 else:
                     lower += 1
@@ -195,17 +203,24 @@ def embed_bilayer(complex_atoms: list[GroAtom], config: dict):
                        "upper_leaflet": upper, "lower_leaflet": lower})
     if offset != len(lipids):
         raise ValueError("Membrane must contain exactly the specified lipid molecules, no water/ions")
+    if not all(sum(row[key] for row in report) for key in ("upper_leaflet", "lower_leaflet")):
+        raise ValueError("Both membrane leaflets must retain lipids; check orientation and clashes")
     return kept, box, counts, report
 
 
 def remove_membrane_core_water(path: Path, membrane: dict) -> int:
     """Solvate aqueous regions, keeping explicit user-declared pore waters possible."""
     atoms, box = read_gro(path)
+    lengths = np.diag(box)
+    if not np.allclose(box, np.diag(lengths)) or (lengths <= 0).any():
+        raise ValueError("Membrane water filtering requires an orthorhombic periodic box")
     low, high = membrane["hydrophobic_z_nm"]
     if not (0 < low < high < box[2, 2]):
         raise ValueError("Invalid membrane hydrophobic_z_nm bounds")
     kept, waters, i = [], 0, 0
     sites = membrane["water_sites"]
+    if sites not in (3, 4):
+        raise ValueError("Membrane water filtering supports three- or four-site water")
     pores = membrane.get("water_pores", [])
     while i < len(atoms):
         atom = atoms[i]
@@ -214,11 +229,17 @@ def remove_membrane_core_water(path: Path, membrane: dict) -> int:
             i += 1
             continue
         water = atoms[i:i + sites]
-        if len(water) != sites or any(a.resname != "SOL" for a in water):
+        if (len(water) != sites or any(a.resname != "SOL" or a.residue != atom.residue for a in water)
+                or not atom.name.startswith("O") or len({a.name for a in water}) != sites):
             raise ValueError("Solvent atom grouping does not match the selected water model")
-        oxygen = water[0].xyz
-        pore = any(np.linalg.norm(oxygen[:2] - np.asarray(p["xy_nm"])) <= p["radius_nm"]
-                   for p in pores)
+        oxygen = water[0].xyz % lengths
+        pore = False
+        for region in pores:
+            delta = oxygen[:2] - np.asarray(region["xy_nm"])
+            delta -= lengths[:2] * np.rint(delta / lengths[:2])
+            if np.linalg.norm(delta) <= region["radius_nm"]:
+                pore = True
+                break
         if not low < oxygen[2] < high or pore:
             kept.extend(water)
             waters += 1

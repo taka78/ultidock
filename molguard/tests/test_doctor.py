@@ -8,6 +8,22 @@ from click.testing import CliRunner
 from cli import ultidock
 
 
+def test_doctor_reports_autogrid_map_capacity(tmp_path, monkeypatch):
+    repo = Path(__file__).resolve().parents[2]
+    md = tmp_path / "md-simulation"
+    md.mkdir()
+    shutil.copy2(repo / "md-simulation/diagnostics.py", md / "diagnostics.py")
+    autogrid = tmp_path / "docking/AUTODOCK_GPU_DIR/autogrid/autogrid4"
+    autogrid.parent.mkdir(parents=True)
+    autogrid.write_text('#!/bin/sh\necho "Maximum number of maps (MAX_MAPS): 16"\n')
+    autogrid.chmod(0o755)
+    monkeypatch.setattr(ultidock, "_repo_root", lambda: tmp_path)
+    monkeypatch.setenv("PATH", "")
+    result = CliRunner().invoke(ultidock.cli, ["doctor"])
+    assert result.exit_code == 0, result.output
+    assert "16 maps; CaV-EMPS needs 20; setup will rebuild" in result.output
+
+
 def test_doctor_reports_all_workflows_with_missing_md_tools(tmp_path, monkeypatch):
     repo = Path(__file__).resolve().parents[2]
     md = tmp_path / "md-simulation"

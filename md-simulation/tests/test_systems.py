@@ -63,17 +63,20 @@ def test_membrane_removes_whole_overlapping_molecules_and_keeps_pose(tmp_path):
     lipids = [GroAtom(1, "POPC", "C1", np.array([5, 5, 5])),
               GroAtom(1, "POPC", "C2", np.array([5, 5, 5.1])),
               GroAtom(2, "POPC", "C1", np.array([8, 8, 4])),
-              GroAtom(2, "POPC", "C2", np.array([8, 8, 4.1]))]
+              GroAtom(2, "POPC", "C2", np.array([8, 8, 4.1])),
+              GroAtom(3, "POPC", "C1", np.array([8, 8, 6])),
+              GroAtom(3, "POPC", "C2", np.array([8, 8, 6.1]))]
     write_gro(gro, lipids, np.eye(3) * 10)
     solute = [GroAtom(1, "LIG", "C1", np.array([5, 5, 5]))]
     settings = {"box_shape": "triclinic", "padding_nm": 1.2, "membrane": {
         "gro": str(gro), "topology_dir": str(tmp_path), "include_files": [top.name],
-        "molecules": [{"name": "POPC", "count": 2, "atom_count": 2}],
+        "molecules": [{"name": "POPC", "count": 3, "atom_count": 2}],
         "clash_distance_nm": 0.2, "hydrophobic_z_nm": [4, 6],
         "mdp_nonbonded": {"rvdw": 1.2, "rcoulomb": 1.2}}}
     kept, box, counts, report = embed_bilayer(solute, settings)
-    assert len(kept) == 2 and counts == [("POPC", 1)]
-    assert report[0]["retained"] == 1 and report[0]["lower_leaflet"] == 1
+    assert len(kept) == 4 and counts == [("POPC", 2)]
+    assert report[0]["retained"] == 2 and report[0]["lower_leaflet"] == 1
+    assert report[0]["upper_leaflet"] == 1
     assert np.array_equal(solute[0].xyz, [5, 5, 5])
     assert np.array_equal(box, np.eye(3) * 10)
 
@@ -120,6 +123,9 @@ def test_npt_passes_previous_velocities_and_never_bypasses_warnings(tmp_path):
     settings = {**config(), "threads": 1}
     simulate(runner, settings, "npt", "nvt")
     assert "-t" in calls[0] and "nvt.cpt" in calls[0]
+    mdrun = next(args for args in calls if args[0] == "mdrun")
+    assert mdrun[mdrun.index("-ntomp") + 1] == settings["threads"]
+    assert runner.env["OMP_NUM_THREADS"] == str(settings["threads"])
     assert all("-maxwarn" not in args for args in calls)
 
 

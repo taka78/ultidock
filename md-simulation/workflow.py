@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from copy import deepcopy
 from datetime import datetime, timezone
 import fcntl
@@ -21,7 +22,7 @@ import numpy as np
 from chemistry import convert_mol2, posed_molecule, transform_pdb, validate_receptor
 from diagnostics import check_dependencies
 from poses import digest, select_poses
-from protocol import load_protocol, stage_mdp
+from protocol import ligand_input, load_protocol, stage_mdp
 from systems import (add_topology, embed_bilayer, read_gro, remove_membrane_core_water,
                      restore_ligand, set_water_count, split_itp, topology_charge, write_gro)
 
@@ -69,18 +70,18 @@ def preflight(config_path: Path, *, receptor_dir=None, ligands_dir=None, engine=
         ligands = sorted(Path(ligands_dir).glob("*.pdbqt"))
         if not ligands:
             raise ValueError(f"No prepared docking ligands in {ligands_dir}")
-        missing = [p.stem for p in ligands if p.stem not in config["ligands"]]
-        if missing:
-            raise ValueError("Provide MD chemical inputs for every docking candidate before ranking: "
-                             + ", ".join(missing))
         for ligand in ligands:
-            entry = config["ligands"][ligand.stem]
             lines = [line for line in ligand.read_text().splitlines()
                      if line.startswith(("ATOM  ", "HETATM"))]
             # Check chemical identity and atom mapping here; MD placement still comes
             # exclusively from the scored output selected after docking finishes.
-            posed_molecule(Path(entry["sdf"]), entry["atom_map"], lines,
-                           entry["net_charge"], config["transform"])
+            try:
+                entry = ligand_input(config, ligand.stem)
+                posed_molecule(Path(entry["sdf"]), entry["atom_map"], lines,
+                               entry["net_charge"], config["transform"])
+            except (ValueError, TypeError, KeyError, OSError, RuntimeError) as exc:
+                print(f"[WARN] MD chemical input for {ligand.stem}: {exc}; "
+                      "this candidate will be skipped if selected", flush=True)
     for stage in ("ions", "em", "nvt", "npt", "production"):
         stage_mdp(config, stage)
     if tools and not check_dependencies(gmx, acpype, obabel, workspace=ROOT / "workspace"):
@@ -95,19 +96,34 @@ def prepare(config_path: Path, docking_dir: Path, output=None, legacy=False, man
     validate_receptor(receptor, docking_receptor)
     selected = select_poses(docking_dir, config["receptor_id"], config["engine"],
                             config["top"], legacy, manifest)
+    valid = []
+    failures = []
     for pose in selected:
         if pose.receptor_sha256 and pose.receptor_sha256 != digest(docking_receptor):
             raise ValueError("Selected pose was docked to a different receptor preparation")
-        if pose.ligand not in config["ligands"]:
-            raise ValueError(f"Provide chemical inputs for selected ligand {pose.ligand}")
-        entry = config["ligands"][pose.ligand]
-        posed_molecule(Path(entry["sdf"]), entry["atom_map"], pose.coordinates,
-                       entry["net_charge"], config["transform"])
+        try:
+            entry = ligand_input(config, pose.ligand)
+            mol = posed_molecule(Path(entry["sdf"]), entry["atom_map"], pose.coordinates,
+                                 entry["net_charge"], config["transform"])
+            valid.append((pose, mol))
+        except (ValueError, TypeError, KeyError, OSError, RuntimeError) as exc:
+            failures.append({"stage": "md-preparation", "ligand": pose.ligand,
+                             "pose": pose.record(), "error": str(exc)})
+            print(f"[WARN] Skipping MD for {pose.ligand}: {exc}; continuing", flush=True)
     # Validate every template before creating the run directory.
     templates = {stage: stage_mdp(config, stage)
                  for stage in ("ions", "em", "nvt", "npt", "production")}
     output = work_path(output)
     output.mkdir(parents=True, exist_ok=False)
+    save(output / "preparation_failures.json", failures)
+    with (output / "preparation_failures.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["stage", "ligand", "receptor", "binding_site", "error"])
+        writer.writeheader()
+        for failure in failures:
+            writer.writerow({key: failure[key] for key in ("stage", "ligand", "error")} |
+                            {key: failure["pose"].get(key, "") for key in ("receptor", "binding_site")})
+    if not valid:
+        raise ValueError(f"No selected ligands passed MD preparation; see {output / 'preparation_failures.json'}")
     inputs = output / "inputs"
     inputs.mkdir()
     for key in ("receptor_pdb", "docking_receptor_pdbqt", "water_gro", "force_field_dir"):
@@ -132,7 +148,7 @@ def prepare(config_path: Path, docking_dir: Path, output=None, legacy=False, man
                 raise ValueError("Supply flattened lipid include files with all parameter dependencies")
             split_itp(file.read_text())
     entries = []
-    for rank, pose in enumerate(selected, 1):
+    for rank, (pose, mol) in enumerate(valid, 1):
         safe = re.sub(r"[^A-Za-z0-9_.-]", "_", pose.ligand)[:80]
         system = output / f"{rank:02d}_{safe}"
         system.mkdir()
@@ -157,6 +173,7 @@ def prepare(config_path: Path, docking_dir: Path, output=None, legacy=False, man
         snapshot(manifest, output / "docking_manifest.json")
     immutable = {p.relative_to(output).as_posix(): digest(p) for p in output.rglob("*") if p.is_file()}
     job = {"schema": 1, "config": config, "systems": entries, "immutable_inputs": immutable,
+           "preparation_failures": failures,
            "created_utc": datetime.now(timezone.utc).isoformat(),
            "workflow_sha256": {p.name: digest(p) for p in ROOT.glob("*.py")}}
     save(output / "job.json", job)
@@ -182,6 +199,8 @@ def start(config_path: Path, docking_dir: Path, *, through="npt", output=None,
         status["status"] = "preparing"
         record()
         jobdir = prepare(config_path, docking_dir, output, legacy, manifest, config=config)
+        status["preparation_failures"] = json.loads((jobdir / "preparation_failures.json").read_text())
+        status["partial"] = bool(status["preparation_failures"])
         status.update(job_dir=str(jobdir), status="prepared" if through == "prepare" else "running")
         record()
         print(f"MD job: {jobdir}", flush=True)
@@ -393,7 +412,10 @@ def simulate(runner: Runner, config: dict, stage: str, previous: str):
             raise ValueError("Checkpoint has no matching TPR")
         elif runner.state[stage].get("tpr_sha256") != digest(runner.system / f"{stage}.tpr"):
             raise ValueError("TPR changed or does not belong to this checkpointed stage")
-        args = ["mdrun", "-deffnm", stage, "-nt", config["threads"]]
+        # GROMACS rejects conflicting environment and command-line budgets.
+        runner.env["OMP_NUM_THREADS"] = str(config["threads"])
+        args = ["mdrun", "-deffnm", stage, "-nt", config["threads"],
+                "-ntomp", config["threads"]]
         if checkpoint.exists():
             args += ["-cpi", checkpoint.name, "-append"]
         runner.gmx(stage, *args)
@@ -438,7 +460,8 @@ def run(jobdir: Path, through: str, reviewed: bool, *, gmx="gmx", acpype="acpype
             if not path.is_relative_to(jobdir) or not path.is_file() or digest(path) != expected:
                 raise ValueError(f"Input changed or missing: {name}; prepare a fresh job")
         stages = ["build", "em", "nvt", "npt", "production"]
-        summary = {"through": through, "completed": [], "failed": []}
+        summary = {"through": through, "completed": [], "failed": [],
+                   "preparation_failures": job.get("preparation_failures", [])}
         for entry in job["systems"]:
             try:
                 runner = Runner(jobdir / entry["directory"], gmx=gmx, acpype=acpype, obabel=obabel)

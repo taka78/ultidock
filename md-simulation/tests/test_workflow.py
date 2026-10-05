@@ -115,6 +115,59 @@ def test_failed_md_system_does_not_cancel_other_prepared_systems(tmp_path, monke
     assert summary["failed"] == [{"system": "01_ethanol", "error": "parameterization failed"}]
 
 
+@pytest.mark.parametrize("fault", ["map", "missing-entry", "missing-file", "charge"])
+def test_bad_chemical_input_is_reported_without_cancelling_other_ligands(tmp_path, monkeypatch, fault):
+    root = tmp_path / "md-simulation"
+    root.mkdir()
+    monkeypatch.setattr(workflow, "ROOT", root)
+    path, docking, config = protocol_inputs(tmp_path)
+    original = next(docking.glob("*.pdbqt"))
+    (docking / "protein__S1__bad_12345678.pdbqt").write_text(original.read_text())
+    entry = dict(config["ligands"]["ethanol"])
+    if fault == "map":
+        entry["atom_map"] = {}
+    elif fault == "missing-file":
+        entry["sdf"] = "missing.sdf"
+    elif fault == "charge":
+        entry["net_charge"] = "unknown"
+    if fault != "missing-entry":
+        config["ligands"]["bad"] = entry
+    path.write_text(json.dumps(config))
+    handoff = tmp_path / "handoff.json"
+    jobdir = workflow.start(path, docking, through="prepare", result_file=handoff)
+    job = json.loads((jobdir / "job.json").read_text())
+    assert [entry["pose"]["ligand"] for entry in job["systems"]] == ["ethanol"]
+    failure, = job["preparation_failures"]
+    assert failure["ligand"] == "bad" and failure["error"]
+    assert failure["pose"]["binding_site"] == "1"
+    assert json.loads(handoff.read_text())["partial"] is True
+    import csv
+    with (jobdir / "preparation_failures.csv").open() as handle:
+        row, = list(csv.DictReader(handle))
+    assert row["ligand"] == "bad" and row["receptor"] == "protein"
+    attempted = []
+    monkeypatch.setattr(workflow, "check_dependencies", lambda *a, **kw: True)
+    monkeypatch.setattr(workflow, "build_system", lambda runner, job, entry: attempted.append(entry["directory"]))
+    workflow.run(jobdir, "build", False)
+    assert attempted == ["01_ethanol"]
+    assert json.loads((jobdir / "run_summary.json").read_text())["preparation_failures"] == [failure]
+
+
+def test_all_bad_chemical_inputs_leave_failure_report(tmp_path, monkeypatch):
+    root = tmp_path / "md-simulation"
+    root.mkdir()
+    monkeypatch.setattr(workflow, "ROOT", root)
+    path, docking, config = protocol_inputs(tmp_path)
+    config["ligands"]["ethanol"]["atom_map"] = {}
+    path.write_text(json.dumps(config))
+    output = root / "failed-job"
+    with pytest.raises(ValueError, match="No selected ligands passed"):
+        workflow.prepare(path, docking, output=output)
+    assert not (output / "job.json").exists()
+    failure, = json.loads((output / "preparation_failures.json").read_text())
+    assert failure["ligand"] == "ethanol" and "atom_map" in failure["error"]
+
+
 @pytest.mark.skipif(os.environ.get("ULTIDOCK_MD_NATIVE_TEST") != "1",
                     reason="Opt-in test requires actual GROMACS and AmberTools/ACPYPE")
 def test_real_ambertools_gromacs_through_short_production(tmp_path, monkeypatch):

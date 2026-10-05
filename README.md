@@ -522,7 +522,11 @@ backend, still stop the run.
 
 If MD preflight fails, docking still proceeds and the MD handoff is marked
 `skipped`. MD also skips a requested receptor with no successful poses, even
-when other receptors docked successfully. The sibling `docking-run-*.md.json` records
+if other receptors succeeded. Invalid chemistry or atom maps skip only the
+affected selected ligands; the MD job writes `preparation_failures.json` and
+`.csv`, and the handoff records the partial result. If all selected ligands
+fail preparation, MD returns failure with the report path.
+The sibling `docking-run-*.md.json` records
 the MD job path, requested stage and success/failure. MD files and logs stay
 under `md-simulation/workspace/`; `--md-work-dir` can select another new
 directory under `md-simulation/`. Installed packages use the managed workspace

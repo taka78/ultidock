@@ -11,6 +11,14 @@ from molguard.io.receptor_prep import (
 )
 
 
+def test_auto_meeko_command_uses_builtin_pdb_reader(monkeypatch):
+    from molguard.io import receptor_prep
+    monkeypatch.setattr(receptor_prep.shutil, "which", lambda name: "/bin/mk_prepare_receptor.py")
+    command = receptor_prep._auto_receptor_prepare_command()
+    assert "--read_pdb {input}" in command
+    assert " -i " not in command
+
+
 def test_sanitize_pdb_for_meeko_assigns_blank_chain_segments(tmp_path: Path) -> None:
     input_pdb = tmp_path / "receptor.pdb"
     output_pdb = tmp_path / "receptor.sanitized.pdb"

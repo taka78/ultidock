@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -299,6 +300,20 @@ def doctor_cmd(gmx: str, acpype: str, obabel: str) -> None:
     for binary, label, source_dir, optional in tools:
         found = _find_tool(binary, local_dirs)
         if found:
+            if binary == "autogrid4":
+                try:
+                    version = subprocess.run([found, "--version"], capture_output=True,
+                                             text=True, timeout=10)
+                    capacity = re.search(r"MAX_MAPS\):\s*(\d+)", version.stdout + version.stderr)
+                    if capacity and int(capacity.group(1)) < 20:
+                        had_issue = True
+                        click.echo(f"  [WARN]  {label:30s} {found} "
+                                   f"({capacity.group(1)} maps; CaV-EMPS needs 20; setup will rebuild)")
+                        continue
+                except (OSError, subprocess.TimeoutExpired):
+                    had_issue = True
+                    click.echo(f"  [WARN]  {label:30s} {found} (version check failed)")
+                    continue
             click.echo(f"  [OK]    {label:30s} {found}")
         elif optional:
             click.echo(f"  [INFO]  {label:30s} optional; not installed")

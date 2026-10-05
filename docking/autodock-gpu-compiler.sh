@@ -229,7 +229,13 @@ if [ -x "$AUTOGRID_BINARY" ]; then
         echo "[WARN] AutoGrid binary is not responding. Will recompile."
         autogrid_needs_compile=true
     else
-        echo "[INFO] AutoGrid binary is functional."
+        autogrid_version=$("$AUTOGRID_BINARY" --version 2>&1 || true)
+        if [[ "$autogrid_version" =~ MAX_MAPS\):[[:space:]]+([0-9]+) ]] && (( BASH_REMATCH[1] < 20 )); then
+            echo "[WARN] AutoGrid supports only ${BASH_REMATCH[1]} maps; CaV-EMPS requires 20. Will compile the bundled source."
+            autogrid_needs_compile=true
+        else
+            echo "[INFO] AutoGrid binary is functional."
+        fi
     fi
 else
     echo "[INFO] AutoGrid binary not found or not executable."
@@ -244,6 +250,10 @@ if [ "$autogrid_needs_compile" = true ]; then
     fi
 
     cd "$AUTOGRID_DIR" || exit 4
+    # A managed installation may link a system executable. Rebuild locally.
+    if [ -L "$AUTOGRID_BINARY" ]; then
+        rm -- "$AUTOGRID_BINARY"
+    fi
     echo "[INFO] Compiling AutoGrid..."
     echo "[INFO] Preparing AutoGrid build environment..."
     # Shipped configure/Makefile.in files can reference another machine's

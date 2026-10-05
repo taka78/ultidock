@@ -53,6 +53,13 @@ finish and the MD handoff is marked `skipped`. An MD preflight failure also
 disables MD without cancelling docking. A failure during MD execution returns
 a failure exit status and preserves the job for diagnosis.
 
+Missing or invalid chemistry for an individual selected ligand skips only that
+ligand. Other selected ligands continue into MD. The job records the reason,
+score and pocket in `preparation_failures.json` and `preparation_failures.csv`;
+the handoff manifest records these failures and `partial: true`. Invalid
+candidates are not replaced by lower-ranked candidates. If none of the selected
+ligands can be prepared, preparation returns failure with the report path.
+
 All public docking modes (`known-site`, `cavity`, `blind`, `fpocket`, `p2rank`
 and `run p2rank/fpocket`) accept `--md-config` (alias `--md`), `--md-through`,
 `--md-work-dir`, and `--md-gmx/--md-acpype/--md-obabel`. The default MD endpoint
@@ -107,7 +114,8 @@ are copied into the job. Inputs and workflow code are checked for changes
 before execution; changed inputs require a fresh job. Logs and command
 arguments are recorded per ligand. A failed MD system stops its own stages;
 the runner continues other prepared systems, writes `run_summary.json` and
-returns failure after processing the batch if any system failed. Shared input
+returns failure after processing the batch if any system failed.
+Preparation failures are also retained in `run_summary.json`. Shared input
 integrity or dependency failures stop execution before simulation. The runner
 never passes `-maxwarn` to GROMACS.
 
@@ -214,6 +222,11 @@ Inspect lipid packing, leaflet balance and area per lipid: removing lipids
 creates a starting configuration that needs equilibration. The user supplies
 `mdp_nonbonded` settings from the lipid parameter authors; the workflow does
 not apply a universal dispersion treatment to every lipid force field.
+
+Both leaflets must retain lipids. Pore-water selection uses periodic distances
+in the membrane plane and keeps complete three- or four-site water molecules.
+See [membrane testing](MEMBRANE_TESTING.md) for regression coverage and the
+reproducible, opt-in native POPC/glycophorin software smoke test.
 
 ## Salt, equilibration and restart
 

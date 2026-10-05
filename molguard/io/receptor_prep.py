@@ -394,9 +394,9 @@ def sanitize_pdb_for_meeko(input_path: Path, output_path: Path) -> Path:
 def _auto_receptor_prepare_command() -> str | None:
     """Auto-detect a receptor .pdb -> .pdbqt conversion tool."""
     if shutil.which("mk_prepare_receptor.py"):
-        return "mk_prepare_receptor.py -i {input} -p {output} --allow_bad_res --default_altloc A"
+        return "mk_prepare_receptor.py --read_pdb {input} -p {output} --allow_bad_res --default_altloc A"
     if shutil.which("mk_prepare_receptor"):
-        return "mk_prepare_receptor -i {input} -p {output} --allow_bad_res --default_altloc A"
+        return "mk_prepare_receptor --read_pdb {input} -p {output} --allow_bad_res --default_altloc A"
 
     try:
         subprocess.run(
@@ -407,7 +407,7 @@ def _auto_receptor_prepare_command() -> str | None:
         )
         return (
             f"{sys.executable} -m meeko.cli.mk_prepare_receptor "
-            "-i {input} -p {output} --allow_bad_res --default_altloc A"
+            "--read_pdb {input} -p {output} --allow_bad_res --default_altloc A"
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass

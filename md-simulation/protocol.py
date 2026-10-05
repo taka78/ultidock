@@ -74,11 +74,10 @@ def load_protocol(path: Path) -> dict:
     if water.startswith("opc") and "water_gro" not in config:
         raise ValueError("OPC models require a matching water_gro solvent coordinate template")
     for ligand, entry in config["ligands"].items():
-        file("sdf", entry)
-        if not isinstance(entry.get("net_charge"), int) or isinstance(entry["net_charge"], bool):
-            raise ValueError(f"Provide an integer net_charge for {ligand}")
-        if not isinstance(entry.get("atom_map"), dict):
-            raise ValueError(f"Provide an explicit docking-serial -> SDF-index atom_map for {ligand}")
+        # Candidate-specific errors must not disable MD for the whole screen.
+        # Validate chemistry when a candidate is checked or selected for MD.
+        if isinstance(entry, dict) and isinstance(entry.get("sdf"), str):
+            entry["sdf"] = str((base / entry["sdf"]).resolve())
 
     transform = np.eye(4)
     if config["system_type"] == "membrane":
@@ -134,6 +133,19 @@ def load_protocol(path: Path) -> dict:
         raise ValueError("Membrane transform must preserve distances and handedness")
     config["transform"] = transform.tolist()
     return config
+
+
+def ligand_input(config: dict, ligand: str) -> dict:
+    entry = config["ligands"].get(ligand)
+    if not isinstance(entry, dict):
+        raise ValueError(f"Provide chemical inputs for selected ligand {ligand}")
+    if not isinstance(entry.get("sdf"), str) or not Path(entry["sdf"]).is_file():
+        raise ValueError(f"Missing input sdf for {ligand}: {entry.get('sdf')}")
+    if not isinstance(entry.get("net_charge"), int) or isinstance(entry["net_charge"], bool):
+        raise ValueError(f"Provide an integer net_charge for {ligand}")
+    if not isinstance(entry.get("atom_map"), dict):
+        raise ValueError(f"Provide an explicit docking-serial -> SDF-index atom_map for {ligand}")
+    return entry
 
 
 def stage_mdp(config: dict, stage: str) -> str:
