@@ -272,7 +272,8 @@ Follow this checklist whenever you want to run Ultidock from a clean workspace.
 4. **Stage inputs:**
    - Copy your receptor(s) to `docking/MACRO_MOL_DIR/`. Ultidock scans files by
      extension: each `*.pdb` is sanitized and converted to `<input-stem>.pdbqt`,
-     and each `*.pdbqt` is only canonicalized. Generated receptor folders use
+     and each `*.pdbqt` is validated, recovered if donor hydrogens are absent,
+     and canonicalized. Generated receptor folders use
      the same discovered stem, matching the `dock_v02.py`/`make_grids.py` flow.
    - Provide ligands via one of the following:
      - Populate `docking/ligands.wget` with direct links to `.pdbqt.gz` archives
@@ -312,6 +313,13 @@ Follow this checklist whenever you want to run Ultidock from a clean workspace.
      distinguishable. Unknown sites, including those in older databases without
      that field, are blank. Exports retain column headers even when no poses
      match the filters.
+   - For new runs, analysis exports the saved **best pose per ligand, receptor,
+     and site**. `docking_file` points to `DOCKING_DIR/*-best.pdbqt`;
+     `ligand_file` records the input separately. Other runs remain in SQLite.
+     AutoDock-GPU's best PDBQT is matched to its DLG coordinates to select the
+     corresponding score and run ID: its total-score winner can differ from
+     the lowest binding-energy XML row. Vina's best model is extracted to a
+     separate PDBQT. Legacy rows without best-pose metadata remain exportable.
 
 8. **Optional post-run steps:**
    - Run `python3 docking/extract.py --help` to (re)split ligand archives via
@@ -355,7 +363,7 @@ most relevant README section instead of burying the terminal in long guidance.
 | `molguard pdbqt check <file>` | Lint a receptor or ligand PDBQT for AutoDock column-format issues (exponent notation, missing decimals, bad atom types). |
 | `molguard pdbqt normalize <file> -o <out>` | Rewrite all numeric columns in a ligand PDBQT through the fixed-width formatter. Torsion tree is left untouched. |
 | `molguard receptor canonicalize <file> -o <out>` | Sort, renumber, and reformat a receptor PDBQT deterministically. Returns a SHA-256 digest for reproducibility checks. |
-| `molguard receptor prepare <file> -o <out>` | Run the shared receptor-prep path. `.pdbqt` is canonicalized; `.pdb` is sanitized, converted, then canonicalized. |
+| `molguard receptor prepare <file> -o <out>` | Validate and prepare a receptor; recover missing donor hydrogens in PDBQT with Open Babel, or sanitize/convert source PDB. |
 | `molguard grids check <maps.fld>` | Validate AutoGrid output: checks for all-zero maps, NaN/Inf energies, missing files, and atom-type mismatches. |
 | `molguard doctor` | Print MolGuard version and optional receptor-conversion backend availability. |
 
@@ -403,14 +411,29 @@ names.
 The shared receptor-prep path lives in `molguard.io.receptor_prep` and is used
 by both regular pipeline runs and benchmark scripts:
 
-- `*.pdbqt` inputs are not reconverted. They are canonicalized through
-  `molguard` so atom ordering, numbering, fixed-width numeric fields, and the
-  resulting SHA-256 digest are deterministic.
+- Prepared `*.pdbqt` inputs are validated and canonicalized through `molguard`
+  so atom ordering, numbering, fixed-width numeric fields, and the resulting
+  SHA-256 digest are deterministic. Representable numeric formatting is repaired;
+  missing coordinates/charges, non-finite values, unknown AD4 types, multiple
+  models, and ligand/flexible-receptor torsion records are rejected before docking.
+- If a PDBQT has **no HD/HS donor hydrogens**, automatic preparation uses
+  Open Babel (`obabel`) to infer bonds from the existing heavy-atom coordinates,
+  add hydrogens, and recalculate atom types and Gasteiger charges. The candidate
+  must preserve every heavy atom's identity, element, and coordinates and pass
+  validation before replacing the receptor. The original is saved under
+  `.molguard-backups/`; `<stem>.prep.json` records hashes, converter diagnostics,
+  and recovery details. Already prepared receptors are not re-protonated.
+  This recovery does **not** establish correct protonation, repair missing heavy
+  atoms, or detect every partially hydrogenated receptor. Review bond-perception
+  warnings; a curated source structure remains preferable for scientific use.
 - `*.pdb` inputs are sanitized for receptor-conversion tools, converted to
   `<input-stem>.pdbqt`, then canonicalized through the same PDBQT path.
 - Multiple receptor files can live in `MACRO_MOL_DIR`; each receptor keeps its
   own discovered stem. If both raw and prepared forms exist for the same stem,
-  the existing `.pdbqt` is preferred unless receptor prep is forced.
+  the existing `.pdbqt` is preferred unless receptor prep is forced. Each stem is
+  processed once (PDB before MOL2 when both raw forms exist). Gzip inputs retain
+  their format suffix during conversion. Failures are collected and stop the run
+  before grid generation, rather than leaving failed receptors in the docking queue.
 - Drastic rescue actions, such as deleting residues after a Meeko excess-bond
   failure, print a loud warning because they change the receptor model and must
   be reported with benchmark or docking results.
@@ -499,7 +522,8 @@ scripts.
    - Detects GPU availability and compiles AutoDock-GPU/AutoGrid with the
      correct compute capabilities.
    - Runs shared receptor preparation through `molguard`: existing `.pdbqt`
-     receptors are canonicalized, while raw `.pdb` receptors are sanitized,
+     receptors are validated (with missing-donor recovery) and canonicalized,
+     while raw `.pdb` receptors are sanitized,
      converted, and then canonicalized.
    - Respects explicit CLI paths so scripted runs can reuse shared toolchains.
 
