@@ -237,7 +237,7 @@ def pdbqt_check(path: Path) -> LintReport:
                 pass  # already caught by _check_numeric_field
 
         # ── AD atom type (must not be blank) ──────────────────────────────────
-        atom_type = line[77:79].strip() if len(line) >= 79 else ""
+        atom_type = line[77:79].strip()
         if not atom_type:
             report.errors.append(LintIssue(
                 i, "atom_type", "",
@@ -385,22 +385,27 @@ def _parse_receptor_atoms(path: Path) -> list[ReceptorAtom]:
 
 def _filter_altloc(atoms: list[ReceptorAtom]) -> list[ReceptorAtom]:
     """
-    If any atom has a non-space AltLoc, keep only the first (alphabetically
-    lowest) altloc letter; discard all others.
+    For each residue, keep its first (alphabetically lowest) non-space altloc
+    letter; discard other conformations of that residue.
 
     Atoms with altloc=' ' (space) are always kept.
     Rationale: AutoDock-GPU does not model alternate conformations; both copies
     would confuse the grid generator and inflate atom counts.
     """
-    present = sorted({a.alt_loc for a in atoms if a.alt_loc.strip()})
-    if not present:
-        return atoms
-    keep_loc = present[0]   # e.g. 'A'
-    result = [a for a in atoms if not a.alt_loc.strip() or a.alt_loc == keep_loc]
-    # Normalise the kept altloc to space so output is clean
-    for a in result:
-        if a.alt_loc == keep_loc:
-            a.alt_loc = " "
+    def residue_key(atom):
+        return atom.chain_id, atom.res_seq, atom.i_code, atom.res_name
+
+    choices: dict[tuple, set[str]] = {}
+    for atom in atoms:
+        if atom.alt_loc.strip():
+            choices.setdefault(residue_key(atom), set()).add(atom.alt_loc)
+    selected = {key: min(values) for key, values in choices.items()}
+    result = []
+    for atom in atoms:
+        if atom.alt_loc.strip() and atom.alt_loc != selected[residue_key(atom)]:
+            continue
+        atom.alt_loc = " "
+        result.append(atom)
     return result
 
 

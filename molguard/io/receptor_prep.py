@@ -10,6 +10,8 @@ everywhere unless a caller explicitly provides different options.
 from __future__ import annotations
 
 import gzip
+import hashlib
+import json
 import os
 import re
 import shlex
@@ -22,6 +24,10 @@ from pathlib import Path
 from typing import Iterable
 
 from molguard.io.pdbqt import canonicalize_receptor
+from molguard.io.receptor_checks import (
+    has_donor_hydrogens, normalize_receptor_input, recover_donor_hydrogens,
+    validate_receptor,
+)
 
 SUPPORTED_RECEPTOR_SUFFIXES = {".pdbqt", ".pdb", ".mol2"}
 
@@ -55,7 +61,7 @@ def _materialize_if_gz(input_path: Path, tmp_dir: Path) -> Path:
     """Unpack a gzipped file into tmp_dir, otherwise return the original path."""
     if input_path.suffix.lower() != ".gz":
         return input_path
-    unpacked = tmp_dir / _stem_without_gz(input_path)
+    unpacked = tmp_dir / input_path.stem
     with gzip.open(input_path, "rb") as src, unpacked.open("wb") as dst:
         dst.write(src.read())
     return unpacked
@@ -391,8 +397,14 @@ def sanitize_pdb_for_meeko(input_path: Path, output_path: Path) -> Path:
     return output_path
 
 
-def _auto_receptor_prepare_command() -> str | None:
+def _auto_receptor_prepare_command(input_suffix: str = ".pdb") -> str | None:
     """Auto-detect a receptor .pdb -> .pdbqt conversion tool."""
+    # Meeko's receptor CLI reads PDB/mmCIF, not MOL2. Open Babel keeps MOL2
+    # connectivity available instead of guessing bonds from a PDB intermediate.
+    if input_suffix == ".mol2":
+        if shutil.which("obabel"):
+            return 'obabel "{input}" -O "{output}" -xr -xn -h --partialcharge gasteiger'
+        return None
     if shutil.which("mk_prepare_receptor.py"):
         return "mk_prepare_receptor.py -i {input} -p {output} --allow_bad_res --default_altloc A"
     if shutil.which("mk_prepare_receptor"):
@@ -413,7 +425,7 @@ def _auto_receptor_prepare_command() -> str | None:
         pass
 
     if shutil.which("obabel"):
-        return "obabel {input} -O {output} -xr"
+        return 'obabel "{input}" -O "{output}" -xr -xn -h --partialcharge gasteiger'
     return None
 
 
@@ -430,14 +442,16 @@ def deterministic_env(seed: int) -> dict[str, str]:
 
 def format_command_template(template: str, input_path: Path, output_path: Path, seed: int) -> list[str]:
     """Expand a user-provided command template into argv."""
-    rendered = template.format(
+    # Split before substitution: filenames containing spaces or quotes remain
+    # single arguments, and no shell is involved.
+    values = dict(
         input=str(input_path),
         output=str(output_path),
         seed=seed,
         input_stem=input_path.stem,
         output_stem=output_path.stem,
     )
-    return shlex.split(rendered)
+    return [arg.format(**values) for arg in shlex.split(template)]
 
 
 def _format_prepare_failure(
@@ -573,13 +587,15 @@ def prepare_receptor_pdbqt(
     """
     Convert a receptor into a canonical PDBQT.
 
-    If ``input_path`` is already ``.pdbqt``, only canonicalization is applied,
-    even when a conversion command is configured. PDB inputs are sanitized before
-    external conversion.
+    Existing PDBQT inputs are normalized and validated. Missing donor hydrogens
+    trigger geometry-based recovery with a backup and a persistent prep report.
+    Output is replaced only after validation succeeds.
     """
     input_path = input_path.resolve()
     output_path = output_path.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if _effective_suffix(input_path) not in SUPPORTED_RECEPTOR_SUFFIXES:
+        raise ValueError(f"Unsupported receptor format: {input_path.name}")
 
     with tempfile.TemporaryDirectory(
         prefix=".molguard-receptor-",
@@ -594,10 +610,36 @@ def prepare_receptor_pdbqt(
             )
 
         if _effective_suffix(input_path) == ".pdbqt":
-            return canonicalize_receptor(prepared_input, output_path, timestamp=timestamp)
+            normalized = tmp_dir / "normalized.pdbqt"
+            normalize_receptor_input(prepared_input, normalized)
+            # Resolve alternate conformations before geometry-based recovery.
+            canonicalize_receptor(normalized, normalized, timestamp=timestamp)
+            recovery = None
+            if not has_donor_hydrogens(normalized):
+                recovered = tmp_dir / "recovered.pdbqt"
+                recovery = recover_donor_hydrogens(normalized, recovered)
+                normalized = recovered
+            canonical = tmp_dir / "canonical.pdbqt"
+            digest = canonicalize_receptor(normalized, canonical, timestamp=timestamp)
+            validate_receptor(canonical)
+            if recovery is not None:
+                original = input_path.read_bytes()
+                source_digest = hashlib.sha256(original).hexdigest()
+                backup_dir = output_path.parent / ".molguard-backups"
+                backup_dir.mkdir(exist_ok=True)
+                backup = backup_dir / f"{input_path.name}.{source_digest}.bak"
+                if not backup.exists():
+                    backup.write_bytes(original)
+                recovery.update(source=str(input_path), source_sha256=source_digest,
+                                output_sha256=digest, backup=str(backup))
+                report_path = output_path.with_suffix(".prep.json")
+                report_path.write_text(json.dumps(recovery, indent=2) + "\n", encoding="utf-8")
+                print(f"  [receptor-prep] original backup: {backup}; report: {report_path}")
+            canonical.replace(output_path)
+            return digest
 
         if not prepare_command:
-            prepare_command = _auto_receptor_prepare_command()
+            prepare_command = _auto_receptor_prepare_command(_effective_suffix(input_path))
             if not prepare_command:
                 raise ValueError(
                     "Receptor input is not a .pdbqt file and no conversion tool found.\n"
@@ -613,7 +655,13 @@ def prepare_receptor_pdbqt(
             seed=seed,
             cwd=tmp_dir,
         )
-        return canonicalize_receptor(tmp_pdbqt, output_path, timestamp=timestamp)
+        normalized = tmp_dir / "normalized.pdbqt"
+        normalize_receptor_input(tmp_pdbqt, normalized)
+        validate_receptor(normalized)
+        canonical = tmp_dir / "canonical.pdbqt"
+        digest = canonicalize_receptor(normalized, canonical, timestamp=timestamp)
+        canonical.replace(output_path)
+        return digest
 
 
 def receptor_inputs_in_directory(macro_dir: Path) -> list[Path]:
@@ -648,39 +696,27 @@ def prepare_receptors_in_directory(
     if not inputs:
         return []
 
-    existing_pdbqt_stems = {
-        receptor_output_stem(path)
-        for path in inputs
-        if _effective_suffix(path) == ".pdbqt" and path.suffix.lower() != ".gz"
-    }
+    # Process each receptor once, including on repeated runs after decompression
+    # or conversion. Forced raw preparation must not then be overwritten by an
+    # older compressed/prepared sibling later in the same discovery snapshot.
+    grouped: dict[str, list[Path]] = {}
+    for path in inputs:
+        grouped.setdefault(receptor_output_stem(path), []).append(path)
+
+    def priority(path: Path) -> tuple:
+        suffix = _effective_suffix(path)
+        formats = [".pdb", ".mol2", ".pdbqt"] if force else [".pdbqt", ".pdb", ".mol2"]
+        return (formats.index(suffix), path.suffix.lower() == ".gz",
+                path.suffix != suffix, path.name)
+
+    inputs = [min(grouped[stem], key=priority) for stem in sorted(grouped)]
 
     records: list[ReceptorPrepRecord] = []
+    failures: list[str] = []
     for source in inputs:
         suffix = _effective_suffix(source)
-        stem = receptor_output_stem(source)
-        if suffix == ".pdbqt":
-            if source.suffix.lower() == ".gz":
-                output = macro_dir / receptor_pdbqt_output_name(source)
-                if output.exists() and not force:
-                    continue
-            else:
-                output = source
-            action = "canonicalized"
-        else:
-            output = macro_dir / receptor_pdbqt_output_name(source)
-            if stem in existing_pdbqt_stems and not force:
-                print(
-                    f"  [receptor-prep] skipping {source.name}: "
-                    f"{output.name} already exists"
-                )
-                continue
-            if output.exists() and not force:
-                print(
-                    f"  [receptor-prep] reusing existing {output.name}; "
-                    "use force to regenerate"
-                )
-                continue
-            action = "prepared"
+        output = macro_dir / receptor_pdbqt_output_name(source)
+        action = "validated/canonicalized" if suffix == ".pdbqt" else "prepared"
 
         try:
             digest = prepare_receptor_pdbqt(
@@ -692,6 +728,7 @@ def prepare_receptors_in_directory(
             )
         except Exception as exc:
             print(f"  [receptor-prep] FAIL {source.name}: {exc}")
+            failures.append(f"{source.name}: {exc}")
             continue
         records.append(
             ReceptorPrepRecord(
@@ -702,4 +739,7 @@ def prepare_receptors_in_directory(
             )
         )
 
+    if failures:
+        raise RuntimeError("Receptor preparation failed before grid generation:\n  "
+                           + "\n  ".join(failures))
     return records
