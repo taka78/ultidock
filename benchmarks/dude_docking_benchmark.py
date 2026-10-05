@@ -680,8 +680,10 @@ def load_docking_rows(
     rows_by_site: dict[str, dict[Path, list[tuple[float, str | None]]]] = {}
     with sqlite3.connect(db_path) as conn:
         cur = conn.cursor()
+        columns = {row[1] for row in cur.execute("PRAGMA table_info(docking_results)")}
+        ligand_expression = "COALESCE(ligand_file, docking_file)" if "ligand_file" in columns else "docking_file"
         rows = cur.execute(
-            'SELECT docking_file, "binding_affinity (kcal/mol)", binding_site FROM docking_results'
+            f'SELECT {ligand_expression}, "binding_affinity (kcal/mol)", binding_site FROM docking_results'
         ).fetchall()
 
     for docking_file, affinity, binding_site in rows:
