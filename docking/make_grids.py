@@ -286,8 +286,9 @@ def _ensure_odd_clamped(nxyz, clamp=(60, 255)):
 
 
 def receptor_atom_types(pdbqt_path):
+    from molguard.io.receptor_checks import AD4_RECEPTOR_ELEMENTS
     found = []
-    valid = set(_AD4_TYPES)
+    valid = set(AD4_RECEPTOR_ELEMENTS)
     with open(pdbqt_path, "r", errors="ignore") as handle:
         for line in handle:
             if not line.startswith(("ATOM", "HETATM")):
@@ -298,7 +299,7 @@ def receptor_atom_types(pdbqt_path):
             if atom_type not in valid:
                 raise ValueError(
                     f"{pdbqt_path}: unsupported receptor atom type {atom_type!r}; "
-                    f"expected one of {', '.join(_AD4_TYPES)}"
+                    f"expected one of {', '.join(sorted(valid))}"
                 )
             if atom_type not in found:
                 found.append(atom_type)

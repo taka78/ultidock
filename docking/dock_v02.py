@@ -200,19 +200,8 @@ def prepare_sites_for_docking(receptor_pdbqt: str, macro_dir: str):
       'spacing': float, 'fld_path': str, 'out_dir': str
     }]
     """
-    # AutoGrid's affinity-map calculation requires a receptor donor hydrogen.
-    # MolGuard canonicalizes existing PDBQT inputs but does not add atoms.
-    has_donor_hydrogen = any(
-        line.startswith(("ATOM  ", "HETATM")) and line[77:79].strip() in {"HD", "HS"}
-        for line in Path(receptor_pdbqt).read_text(encoding="ascii").splitlines()
-    )
-    if not has_donor_hydrogen:
-        raise ValueError(
-            f"AutoGrid cannot build maps for {receptor_pdbqt}: no HD or HS donor "
-            "hydrogens are present. MolGuard only canonicalizes an existing "
-            "PDBQT; prepare a hydrogen-complete receptor from the source PDB "
-            "before docking."
-        )
+    from molguard.io.receptor_checks import validate_receptor
+    validate_receptor(Path(receptor_pdbqt))
 
     macro_dir = Path(macro_dir)
     macro_dir.mkdir(parents=True, exist_ok=True)
@@ -458,11 +447,11 @@ class DockingProcessor:
 
                 if isinstance(item, list):
                     for rec in item:
-                        if isinstance(rec, tuple) and len(rec) == 6:
+                        if isinstance(rec, tuple) and len(rec) in {6, 8}:
                             buffer.append(rec)
                         else:
                             print(f"[DB] skipping bad sub-record: {rec}")
-                elif isinstance(item, tuple) and len(item) == 6:
+                elif isinstance(item, tuple) and len(item) in {6, 8}:
                     buffer.append(item)
                 else:
                     print(f"[DB] skipping malformed record: {item}")
@@ -621,6 +610,7 @@ class ProcessFileThread(threading.Thread):
             return []
 
         results = []
+        model_ids = []
         current_model     = None
         current_affinity  = None
         current_rmsd_lb   = None
@@ -634,7 +624,10 @@ class ProcessFileThread(threading.Thread):
             if inside_model_block and (current_model is not None) and (current_affinity is not None):
                 lid = current_ligand_id or Path(ligand_file).stem or "ligand"
                 tag = f"{lid}-Model{current_model}-{receptor_name}"
-                results.append((tag, current_affinity, current_rmsd_lb, current_rmsd_ub, ligand_file, binding_site))
+                results.append((tag, current_affinity, current_rmsd_lb, current_rmsd_ub,
+                                str(Path(filepath).resolve()), binding_site,
+                                str(Path(ligand_file).resolve()), 0))
+                model_ids.append(current_model)
             current_model     = None
             current_affinity  = None
             current_rmsd_lb   = None
@@ -671,16 +664,25 @@ class ProcessFileThread(threading.Thread):
         if inside_model_block:
             finalize()
 
+        if results:
+            from docking.result_poses import write_vina_best_pose
+            index = min(range(len(results)), key=lambda i: results[i][1])
+            row = results[index]
+            best_path = write_vina_best_pose(filepath, model_ids[index])
+            results[index] = (*row[:4], str(best_path), *row[5:7], 1)
         return results
 
     def parse_adgpu_xml(self, xml_path, receptor_name, ligand_file_fallback):
         """
         Parse AutoDock-GPU XML and return a list of tuples:
-        (tag, affinity, rmsd_lb, rmsd_ub, ligand_file, binding_site)
+        (tag, affinity, rmsd_lb, rmsd_ub, docking_file, binding_site,
+         ligand_file, is_best_pose)
         tag format: <ligand_id>-Model<run_id>-<receptor_name>
         """
         results = []
         try:
+            from docking.result_poses import adgpu_best_pose
+            best_path, best_run = adgpu_best_pose(xml_path)
             tree = ET.parse(xml_path)
             root = tree.getroot()
             ligand_path  = root.findtext("ligand") or ligand_file_fallback
@@ -703,9 +705,15 @@ class ProcessFileThread(threading.Thread):
                 except ValueError:
                     continue
                 tag = f"{ligand_id}-Model{run_id}-{receptor_name}"
-                results.append((tag, affinity, None, None, ligand_file_fallback, binding_site))
+                is_best = run_id == best_run
+                output_path = best_path if is_best else Path(xml_path).resolve().with_suffix(".dlg")
+                results.append((tag, affinity, None, None, str(output_path), binding_site,
+                                str(Path(ligand_file_fallback).resolve()), int(is_best)))
+            if not any(row[7] for row in results):
+                raise ValueError(f"Best-pose run {best_run} has no XML score")
         except Exception as e:
             print(f"[XML-parse] Failed on {xml_path}: {e}")
+            return []
         return results
 
     def run(self):
