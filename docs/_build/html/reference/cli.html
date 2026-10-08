@@ -1,0 +1,323 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CLI reference &mdash; Ultidock Documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=58fbf978"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Configuration" href="configuration.html" />
+    <link rel="prev" title="HPC screening example" href="../tutorials/hpc-screening.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            Ultidock
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started/what-is-ultidock.html">What is Ultidock?</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started/installation.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started/installation.html#supported-starting-point">Supported starting point</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started/installation.html#native-tools">Native tools</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started/installation.html#gpu-and-pocket-methods">GPU and pocket methods</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started/quick-start.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started/first-docking-run.html">First Docking Run</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/preparing-receptor.html">Preparing a receptor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/preparing-ligands.html">Preparing ligands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/binding-site-discovery/index.html">Binding-site discovery</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/binding-site-discovery/cav-emps.html">CaV-EMPS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/binding-site-discovery/fpocket.html">fpocket</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/binding-site-discovery/p2rank.html">P2Rank</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/docking-engines/index.html">Docking engines</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/docking-engines/vina.html">AutoDock Vina</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/docking-engines/autodock-gpu.html">AutoDock-GPU</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/hpc-batch-screening.html">HPC / batch screening</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/hpc-batch-screening.html#isolate-jobs">Isolate jobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/hpc-batch-screening.html#budget-concurrency">Budget concurrency</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/results-reports.html">Results &amp; reports</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Scientific Background</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../scientific-background/docking-workflow.html">Docking workflow</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../scientific-background/binding-site-prediction.html">Binding-site prediction</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/binding-site-prediction.html#evaluate-site-recovery-separately">Evaluate site recovery separately</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../scientific-background/cav-emps-methodology.html">CaV-EMPS methodology</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/cav-emps-methodology.html#evidence-and-candidate-families">Evidence and candidate families</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/cav-emps-methodology.html#search-policies">Search policies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/cav-emps-methodology.html#validation-boundary">Validation boundary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../scientific-background/scoring-ranking.html">Scoring / ranking</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/scoring-ranking.html#which-pose-is-exported">Which pose is exported?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/scoring-ranking.html#compare-with-care">Compare with care</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../scientific-background/limitations.html">Limitations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/limitations.html#structural-and-chemical-assumptions">Structural and chemical assumptions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/limitations.html#sampling-and-scoring">Sampling and scoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/limitations.html#operational-boundaries">Operational boundaries</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/small-molecule-docking.html">Small-molecule docking</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/small-molecule-docking.html#inspect-the-inputs">1. Inspect the inputs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/small-molecule-docking.html#dock-the-three-ligands">2. Dock the three ligands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/small-molecule-docking.html#read-the-results">3. Read the results</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/small-molecule-docking.html#change-one-variable">4. Change one variable</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/unknown-binding-site.html">Unknown binding-site workflow</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/unknown-binding-site.html#prepare-a-dedicated-input-directory">1. Prepare a dedicated input directory</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/unknown-binding-site.html#preview-the-run">2. Preview the run</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/unknown-binding-site.html#inspect-site-coverage">3. Inspect site coverage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/unknown-binding-site.html#compare-an-alternative-method">4. Compare an alternative method</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/virtual-screening.html">Virtual screening</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/virtual-screening.html#prepare-the-library">1. Prepare the library</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/virtual-screening.html#fix-the-protocol">2. Fix the protocol</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/virtual-screening.html#scale-after-checking-the-pilot">3. Scale after checking the pilot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/virtual-screening.html#review-candidates">4. Review candidates</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/hpc-screening.html">HPC screening example</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">CLI reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#pipeline-options">Pipeline options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#teacher-and-example-options">Teacher and example options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#molguard">MolGuard</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="configuration.html">Configuration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html#public-setup-options">Public setup options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html#advanced-settings-and-concurrency">Advanced settings and concurrency</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="file-formats.html">File formats</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="file-formats.html#site-table">Site table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="file-formats.html#input-identity-versus-pose-identity">Input identity versus pose identity</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">Troubleshooting</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#receptor-failures">Receptor failures</a></li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#useful-bug-reports">Useful bug reports</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Development</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../development/architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../development/architecture.html#execution-and-persistence">Execution and persistence</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../development/architecture.html#documentation-build">Documentation build</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../development/contributing.html">Contributing</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../development/contributing.html#local-setup">Local setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../development/contributing.html#changes-to-review">Changes to review</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../development/testing.html">Testing</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../development/testing.html#focused-checks">Focused checks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../development/testing.html#documentation-build">Documentation build</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../development/citation.html">Citation</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">Ultidock</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">CLI reference</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/reference/cli.md.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="cli-reference">
+<h1>CLI reference<a class="headerlink" href="#cli-reference" title="Link to this heading"></a></h1>
+<p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">--help</span></code> lists commands; append <code class="docutils literal notranslate"><span class="pre">--help</span></code> to a command for its own options.
+From an uninstalled checkout, substitute <code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">-m</span> <span class="pre">cli.ultidock</span></code>. MolGuard’s
+checkout entry point is <code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">-m</span> <span class="pre">cli.molguard</span></code>.</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Command</p></th>
+<th class="head"><p>Purpose</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">doctor</span></code></p></td>
+<td><p>Report tools, paths and active workspace</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">setup</span> <span class="pre">[options]</span></code></p></td>
+<td><p>Prepare tools and generate pipeline configuration</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">run</span> <span class="pre">[options]</span></code></p></td>
+<td><p>Run the full pipeline</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">known-site</span> <span class="pre">--center</span> <span class="pre">X,Y,Z</span></code></p></td>
+<td><p>Dock inside a supplied box</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">cavity</span> <span class="pre">--autosites</span> <span class="pre">N</span></code></p></td>
+<td><p>Propose CaV-EMPS sites and dock</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">blind</span></code></p></td>
+<td><p>Use a whole-receptor search region</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">fpocket</span></code> / <code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">p2rank</span></code></p></td>
+<td><p>Predict pockets locally and dock</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">pocket-box</span> <span class="pre">--method</span> <span class="pre">METHOD</span> <span class="pre">--receptor</span> <span class="pre">FILE</span> <span class="pre">--output</span> <span class="pre">TSV</span></code></p></td>
+<td><p>Generate boxes without docking</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">profile-receptors</span></code></p></td>
+<td><p>Generate receptor geometry sidecars</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">example</span> <span class="pre">list</span></code></p></td>
+<td><p>Discover bundled example runners</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">example</span> <span class="pre">run</span> <span class="pre">NAME</span> <span class="pre">[arguments]</span></code></p></td>
+<td><p>Invoke an example with its own options</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">benchmark</span> <span class="pre">--help</span></code></p></td>
+<td><p>Discover benchmark subcommands</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">report</span> <span class="pre">DIRECTORY</span></code></p></td>
+<td><p>Build report artifacts from recognized result files</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">clean</span> <span class="pre">--</span> <span class="pre">--help</span></code></p></td>
+<td><p>Inspect cleanup scope and opt-in artifact deletion</p></td>
+</tr>
+</tbody>
+</table>
+<section id="pipeline-options">
+<h2>Pipeline options<a class="headerlink" href="#pipeline-options" title="Link to this heading"></a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">run</span> <span class="pre">--</span> <span class="pre">--help</span></code> and <code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">docking/run.py</span> <span class="pre">--help</span></code> describe setup/docking
+arguments. The separator forwards help to the underlying script; without it,
+<code class="docutils literal notranslate"><span class="pre">--help</span></code> displays the CLI wrapper’s own options. Wrapper commands such as <code class="docutils literal notranslate"><span class="pre">cavity</span></code>
+accept pipeline arguments after
+their own options. Common options include <code class="docutils literal notranslate"><span class="pre">--mode</span></code>, <code class="docutils literal notranslate"><span class="pre">--skip-wget</span></code>,
+<code class="docutils literal notranslate"><span class="pre">--macro-mol-dir</span></code>, <code class="docutils literal notranslate"><span class="pre">--ligands-dir</span></code>, <code class="docutils literal notranslate"><span class="pre">--results-dir</span></code>, <code class="docutils literal notranslate"><span class="pre">--vina-cpu</span></code>,
+<code class="docutils literal notranslate"><span class="pre">--vina-exhaustiveness</span></code>, <code class="docutils literal notranslate"><span class="pre">--vina-num-modes</span></code> and <code class="docutils literal notranslate"><span class="pre">--vina-seed</span></code>.
+See <a class="reference internal" href="configuration.html"><span class="std std-doc">Configuration</span></a> for defaults and scope.</p>
+</section>
+<section id="teacher-and-example-options">
+<h2>Teacher and example options<a class="headerlink" href="#teacher-and-example-options" title="Link to this heading"></a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>ultidock<span class="w"> </span>example<span class="w"> </span>run<span class="w"> </span>quickstart<span class="w"> </span>--<span class="w"> </span>--help
+ultidock<span class="w"> </span>example<span class="w"> </span>run<span class="w"> </span>quickstart<span class="w"> </span>--dry-run
+ultidock<span class="w"> </span>example<span class="w"> </span>run<span class="w"> </span>d2-antipsychotics<span class="w"> </span>--<span class="w"> </span>--help
+ultidock<span class="w"> </span>example<span class="w"> </span>run<span class="w"> </span>d2-antipsychotics<span class="w"> </span>p2rank<span class="w"> </span>--mode<span class="w"> </span>cpu
+</pre></div>
+</div>
+<p>The teacher uses <code class="docutils literal notranslate"><span class="pre">--site-method</span></code>; the D2 runner uses an optional positional method.
+<code class="docutils literal notranslate"><span class="pre">--yes</span></code> explicitly starts the teacher’s real docking workflow without prompts.
+The teacher and D2 <code class="docutils literal notranslate"><span class="pre">--dry-run</span></code> modes do not stage inputs or dock. Pipeline wrapper
+dry runs can write configuration, and pocket-method dry runs can invoke predictors;
+read each command’s help rather than assuming all dry runs have identical effects.</p>
+</section>
+<section id="molguard">
+<h2>MolGuard<a class="headerlink" href="#molguard" title="Link to this heading"></a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>molguard<span class="w"> </span>doctor
+molguard<span class="w"> </span>pdbqt<span class="w"> </span>check<span class="w"> </span>ligand.pdbqt
+molguard<span class="w"> </span>pdbqt<span class="w"> </span>normalize<span class="w"> </span>ligand.pdbqt<span class="w"> </span>-o<span class="w"> </span>normalized.pdbqt
+molguard<span class="w"> </span>receptor<span class="w"> </span>prepare<span class="w"> </span>source.pdb<span class="w"> </span>-o<span class="w"> </span>receptor.pdbqt
+molguard<span class="w"> </span>grids<span class="w"> </span>--help
+</pre></div>
+</div>
+<p>Receptor preparation and ligand normalization have different chemistry and record
+handling. Choose the command for the file’s actual role.</p>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="../tutorials/hpc-screening.html" class="btn btn-neutral float-left" title="HPC screening example" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="configuration.html" class="btn btn-neutral float-right" title="Configuration" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Taha Turgut.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

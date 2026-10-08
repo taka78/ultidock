@@ -1,0 +1,272 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HPC screening example &mdash; Ultidock Documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=58fbf978"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="CLI reference" href="../reference/cli.html" />
+    <link rel="prev" title="Virtual screening" href="virtual-screening.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            Ultidock
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started/what-is-ultidock.html">What is Ultidock?</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started/installation.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started/installation.html#supported-starting-point">Supported starting point</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started/installation.html#native-tools">Native tools</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started/installation.html#gpu-and-pocket-methods">GPU and pocket methods</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started/quick-start.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started/first-docking-run.html">First Docking Run</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/preparing-receptor.html">Preparing a receptor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/preparing-ligands.html">Preparing ligands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/binding-site-discovery/index.html">Binding-site discovery</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/binding-site-discovery/cav-emps.html">CaV-EMPS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/binding-site-discovery/fpocket.html">fpocket</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/binding-site-discovery/p2rank.html">P2Rank</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/docking-engines/index.html">Docking engines</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/docking-engines/vina.html">AutoDock Vina</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/docking-engines/autodock-gpu.html">AutoDock-GPU</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/hpc-batch-screening.html">HPC / batch screening</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/hpc-batch-screening.html#isolate-jobs">Isolate jobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/hpc-batch-screening.html#budget-concurrency">Budget concurrency</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/results-reports.html">Results &amp; reports</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Scientific Background</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../scientific-background/docking-workflow.html">Docking workflow</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../scientific-background/binding-site-prediction.html">Binding-site prediction</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/binding-site-prediction.html#evaluate-site-recovery-separately">Evaluate site recovery separately</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../scientific-background/cav-emps-methodology.html">CaV-EMPS methodology</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/cav-emps-methodology.html#evidence-and-candidate-families">Evidence and candidate families</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/cav-emps-methodology.html#search-policies">Search policies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/cav-emps-methodology.html#validation-boundary">Validation boundary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../scientific-background/scoring-ranking.html">Scoring / ranking</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/scoring-ranking.html#which-pose-is-exported">Which pose is exported?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/scoring-ranking.html#compare-with-care">Compare with care</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../scientific-background/limitations.html">Limitations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/limitations.html#structural-and-chemical-assumptions">Structural and chemical assumptions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/limitations.html#sampling-and-scoring">Sampling and scoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/limitations.html#operational-boundaries">Operational boundaries</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="small-molecule-docking.html">Small-molecule docking</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="small-molecule-docking.html#inspect-the-inputs">1. Inspect the inputs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="small-molecule-docking.html#dock-the-three-ligands">2. Dock the three ligands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="small-molecule-docking.html#read-the-results">3. Read the results</a></li>
+<li class="toctree-l2"><a class="reference internal" href="small-molecule-docking.html#change-one-variable">4. Change one variable</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="unknown-binding-site.html">Unknown binding-site workflow</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="unknown-binding-site.html#prepare-a-dedicated-input-directory">1. Prepare a dedicated input directory</a></li>
+<li class="toctree-l2"><a class="reference internal" href="unknown-binding-site.html#preview-the-run">2. Preview the run</a></li>
+<li class="toctree-l2"><a class="reference internal" href="unknown-binding-site.html#inspect-site-coverage">3. Inspect site coverage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="unknown-binding-site.html#compare-an-alternative-method">4. Compare an alternative method</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="virtual-screening.html">Virtual screening</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="virtual-screening.html#prepare-the-library">1. Prepare the library</a></li>
+<li class="toctree-l2"><a class="reference internal" href="virtual-screening.html#fix-the-protocol">2. Fix the protocol</a></li>
+<li class="toctree-l2"><a class="reference internal" href="virtual-screening.html#scale-after-checking-the-pilot">3. Scale after checking the pilot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="virtual-screening.html#review-candidates">4. Review candidates</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">HPC screening example</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../reference/cli.html">CLI reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../reference/cli.html#pipeline-options">Pipeline options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../reference/cli.html#teacher-and-example-options">Teacher and example options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../reference/cli.html#molguard">MolGuard</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/configuration.html">Configuration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../reference/configuration.html#public-setup-options">Public setup options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../reference/configuration.html#advanced-settings-and-concurrency">Advanced settings and concurrency</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/file-formats.html">File formats</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../reference/file-formats.html#site-table">Site table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../reference/file-formats.html#input-identity-versus-pose-identity">Input identity versus pose identity</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/troubleshooting.html">Troubleshooting</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../reference/troubleshooting.html#receptor-failures">Receptor failures</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../reference/troubleshooting.html#useful-bug-reports">Useful bug reports</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Development</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../development/architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../development/architecture.html#execution-and-persistence">Execution and persistence</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../development/architecture.html#documentation-build">Documentation build</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../development/contributing.html">Contributing</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../development/contributing.html#local-setup">Local setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../development/contributing.html#changes-to-review">Changes to review</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../development/testing.html">Testing</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../development/testing.html#focused-checks">Focused checks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../development/testing.html#documentation-build">Documentation build</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../development/citation.html">Citation</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">Ultidock</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">HPC screening example</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/tutorials/hpc-screening.md.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="hpc-screening-example">
+<h1>HPC screening example<a class="headerlink" href="#hpc-screening-example" title="Link to this heading"></a></h1>
+<p>This Slurm skeleton runs two CPU ligand shards. Adapt the partition, memory, time,
+paths and tool modules to your cluster. Before submitting an array, validate one
+job on a compute node. Install Ultidock in a shared virtual environment and make
+Vina, Open Babel and required native build dependencies available there.</p>
+<p>Prepare <code class="docutils literal notranslate"><span class="pre">/project/screen/shards/0</span></code> and <code class="docutils literal notranslate"><span class="pre">/project/screen/shards/1</span></code>, each containing
+only its ligand PDBQT files, plus <code class="docutils literal notranslate"><span class="pre">/project/screen/receptor.pdbqt</span></code>.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="ch">#!/bin/bash</span>
+<span class="c1">#SBATCH --job-name=ultidock</span>
+<span class="c1">#SBATCH --array=0-1</span>
+<span class="c1">#SBATCH --cpus-per-task=8</span>
+<span class="c1">#SBATCH --mem=16G</span>
+<span class="c1">#SBATCH --time=04:00:00</span>
+<span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
+<span class="nb">source</span><span class="w"> </span>/project/venvs/ultidock/bin/activate
+
+<span class="nv">job_root</span><span class="o">=</span><span class="s2">"/project/screen/jobs/</span><span class="si">${</span><span class="nv">SLURM_ARRAY_JOB_ID</span><span class="si">}</span><span class="s2">_</span><span class="si">${</span><span class="nv">SLURM_ARRAY_TASK_ID</span><span class="si">}</span><span class="s2">"</span>
+mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="nv">$job_root</span><span class="s2">/receptors"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$job_root</span><span class="s2">/ligands"</span>
+cp<span class="w"> </span>/project/screen/receptor.pdbqt<span class="w"> </span><span class="s2">"</span><span class="nv">$job_root</span><span class="s2">/receptors/"</span>
+cp<span class="w"> </span>/project/screen/shards/<span class="s2">"</span><span class="nv">$SLURM_ARRAY_TASK_ID</span><span class="s2">"</span>/*.pdbqt<span class="w"> </span><span class="s2">"</span><span class="nv">$job_root</span><span class="s2">/ligands/"</span>
+
+<span class="nb">export</span><span class="w"> </span><span class="nv">ULTIDOCK_HOME</span><span class="o">=</span><span class="s2">"</span><span class="nv">$job_root</span><span class="s2">/application"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">ULTIDOCK_WORKERS</span><span class="o">=</span><span class="m">4</span>
+srun<span class="w"> </span>--cpu-bind<span class="o">=</span>cores<span class="w"> </span>ultidock<span class="w"> </span>cavity<span class="w"> </span>--autosites<span class="w"> </span><span class="m">6</span><span class="w"> </span>--mode<span class="w"> </span>cpu<span class="w"> </span>--vina-cpu<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--skip-wget<span class="w"> </span>--macro-mol-dir<span class="w"> </span><span class="s2">"</span><span class="nv">$job_root</span><span class="s2">/receptors"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--ligands-dir<span class="w"> </span><span class="s2">"</span><span class="nv">$job_root</span><span class="s2">/ligands"</span><span class="w"> </span>--output-dir<span class="w"> </span><span class="s2">"</span><span class="nv">$job_root</span><span class="s2">/run"</span>
+</pre></div>
+</div>
+<p>Each job uses its own generated configuration, receptor grids and database. Four
+workers with two Vina threads each budget eight Vina CPU threads. The runner also
+sets OpenMP-related environment variables using the host CPU count; inspect logs
+and enforce scheduler CPU binding rather than assuming allocation-aware detection.
+The memory and time requests above are starting examples, not capacity guarantees.</p>
+<p>The independent application homes may each need a native build on first use.
+For larger arrays, pre-provision a tested tool installation and pass explicit tool
+directories; do not make many jobs build into the same writable source directory.
+GPU allocations require your cluster’s device directives and compatible runtime;
+choose <code class="docutils literal notranslate"><span class="pre">--mode</span> <span class="pre">gpu</span></code> only after validating device visibility inside a job.</p>
+<p>Keep each shard’s raw outputs and preparation metadata. Aggregate results only
+after checking failed or missing jobs and duplicate ligand identifiers. See
+<a class="reference internal" href="../user-guide/hpc-batch-screening.html"><span class="std std-doc">HPC / batch screening</span></a> for workspace rules.</p>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="virtual-screening.html" class="btn btn-neutral float-left" title="Virtual screening" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="../reference/cli.html" class="btn btn-neutral float-right" title="CLI reference" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Taha Turgut.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

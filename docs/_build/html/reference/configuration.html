@@ -1,0 +1,326 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Configuration &mdash; Ultidock Documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=58fbf978"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="File formats" href="file-formats.html" />
+    <link rel="prev" title="CLI reference" href="cli.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            Ultidock
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started/what-is-ultidock.html">What is Ultidock?</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started/installation.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started/installation.html#supported-starting-point">Supported starting point</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started/installation.html#native-tools">Native tools</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started/installation.html#gpu-and-pocket-methods">GPU and pocket methods</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started/quick-start.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started/first-docking-run.html">First Docking Run</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/preparing-receptor.html">Preparing a receptor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/preparing-ligands.html">Preparing ligands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/binding-site-discovery/index.html">Binding-site discovery</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/binding-site-discovery/cav-emps.html">CaV-EMPS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/binding-site-discovery/fpocket.html">fpocket</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/binding-site-discovery/p2rank.html">P2Rank</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/docking-engines/index.html">Docking engines</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/docking-engines/vina.html">AutoDock Vina</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/docking-engines/autodock-gpu.html">AutoDock-GPU</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/hpc-batch-screening.html">HPC / batch screening</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/hpc-batch-screening.html#isolate-jobs">Isolate jobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user-guide/hpc-batch-screening.html#budget-concurrency">Budget concurrency</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../user-guide/results-reports.html">Results &amp; reports</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Scientific Background</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../scientific-background/docking-workflow.html">Docking workflow</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../scientific-background/binding-site-prediction.html">Binding-site prediction</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/binding-site-prediction.html#evaluate-site-recovery-separately">Evaluate site recovery separately</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../scientific-background/cav-emps-methodology.html">CaV-EMPS methodology</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/cav-emps-methodology.html#evidence-and-candidate-families">Evidence and candidate families</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/cav-emps-methodology.html#search-policies">Search policies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/cav-emps-methodology.html#validation-boundary">Validation boundary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../scientific-background/scoring-ranking.html">Scoring / ranking</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/scoring-ranking.html#which-pose-is-exported">Which pose is exported?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/scoring-ranking.html#compare-with-care">Compare with care</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../scientific-background/limitations.html">Limitations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/limitations.html#structural-and-chemical-assumptions">Structural and chemical assumptions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/limitations.html#sampling-and-scoring">Sampling and scoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scientific-background/limitations.html#operational-boundaries">Operational boundaries</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/small-molecule-docking.html">Small-molecule docking</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/small-molecule-docking.html#inspect-the-inputs">1. Inspect the inputs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/small-molecule-docking.html#dock-the-three-ligands">2. Dock the three ligands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/small-molecule-docking.html#read-the-results">3. Read the results</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/small-molecule-docking.html#change-one-variable">4. Change one variable</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/unknown-binding-site.html">Unknown binding-site workflow</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/unknown-binding-site.html#prepare-a-dedicated-input-directory">1. Prepare a dedicated input directory</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/unknown-binding-site.html#preview-the-run">2. Preview the run</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/unknown-binding-site.html#inspect-site-coverage">3. Inspect site coverage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/unknown-binding-site.html#compare-an-alternative-method">4. Compare an alternative method</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/virtual-screening.html">Virtual screening</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/virtual-screening.html#prepare-the-library">1. Prepare the library</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/virtual-screening.html#fix-the-protocol">2. Fix the protocol</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/virtual-screening.html#scale-after-checking-the-pilot">3. Scale after checking the pilot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/virtual-screening.html#review-candidates">4. Review candidates</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/hpc-screening.html">HPC screening example</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="cli.html">CLI reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#pipeline-options">Pipeline options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#teacher-and-example-options">Teacher and example options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#molguard">MolGuard</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Configuration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#public-setup-options">Public setup options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#advanced-settings-and-concurrency">Advanced settings and concurrency</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="file-formats.html">File formats</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="file-formats.html#site-table">Site table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="file-formats.html#input-identity-versus-pose-identity">Input identity versus pose identity</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">Troubleshooting</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#receptor-failures">Receptor failures</a></li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#useful-bug-reports">Useful bug reports</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Development</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../development/architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../development/architecture.html#execution-and-persistence">Execution and persistence</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../development/architecture.html#documentation-build">Documentation build</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../development/contributing.html">Contributing</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../development/contributing.html#local-setup">Local setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../development/contributing.html#changes-to-review">Changes to review</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../development/testing.html">Testing</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../development/testing.html#focused-checks">Focused checks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../development/testing.html#documentation-build">Documentation build</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../development/citation.html">Citation</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">Ultidock</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Configuration</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/reference/configuration.md.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="configuration">
+<h1>Configuration<a class="headerlink" href="#configuration" title="Link to this heading"></a></h1>
+<p>The pipeline’s setup stage writes <code class="docutils literal notranslate"><span class="pre">docking/config.py</span></code> in the active application
+workspace. It is executable Python, not a user YAML schema. Wrapper commands also
+write <code class="docutils literal notranslate"><span class="pre">run_config.yaml</span></code> as a run description; that file does not replace the
+legacy pipeline configuration. Use <code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">doctor</span></code> to find the active workspace.</p>
+<section id="public-setup-options">
+<h2>Public setup options<a class="headerlink" href="#public-setup-options" title="Link to this heading"></a></h2>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Option</p></th>
+<th class="head"><p>Default / meaning</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--mode</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">auto</span></code>; allows CPU fallback. <code class="docutils literal notranslate"><span class="pre">gpu</span></code> requires a detected GPU; <code class="docutils literal notranslate"><span class="pre">cpu</span></code>, <code class="docutils literal notranslate"><span class="pre">cuda</span></code>, <code class="docutils literal notranslate"><span class="pre">opencl</span></code> select explicitly</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--skip-wget</span></code></p></td>
+<td><p>Use local ligand inputs without executing the download list</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--macro-mol-dir</span></code>, <code class="docutils literal notranslate"><span class="pre">--ligands-dir</span></code></p></td>
+<td><p>Receptor and ligand directories under the application docking directory</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--docking-dir</span></code>, <code class="docutils literal notranslate"><span class="pre">--analysis-dir</span></code>, <code class="docutils literal notranslate"><span class="pre">--results-dir</span></code></p></td>
+<td><p>Output locations; use absolute paths for independent runs</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--vina-dir</span></code>, <code class="docutils literal notranslate"><span class="pre">--autodock-gpu-dir</span></code></p></td>
+<td><p>Native tool directories</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--grid-mode</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">centers</span></code>; also <code class="docutils literal notranslate"><span class="pre">ligand</span></code>, <code class="docutils literal notranslate"><span class="pre">residues</span></code>, <code class="docutils literal notranslate"><span class="pre">blind</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--grid-spacing</span></code></p></td>
+<td><p>0.375 Å</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--grid-margin</span></code></p></td>
+<td><p>5.0 Å</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--grid-cap</span></code></p></td>
+<td><p>150.0 Å</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--autosites</span></code></p></td>
+<td><p>6 requested automatic sites</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--centers-tsv</span></code></p></td>
+<td><p>Site file path</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--ref-ligand-pdb</span></code></p></td>
+<td><p>Reference ligand for ligand-centered grids</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--vina-cpu</span></code></p></td>
+<td><p>2 threads per Vina job</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--vina-exhaustiveness</span></code></p></td>
+<td><p>8</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--vina-num-modes</span></code></p></td>
+<td><p>9</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--vina-seed</span></code></p></td>
+<td><p>Unset unless supplied</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--receptor-prep-mode</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">auto</span></code>; <code class="docutils literal notranslate"><span class="pre">off</span></code> disables preparation</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--receptor-prepare-command</span></code></p></td>
+<td><p>Optional converter template with <code class="docutils literal notranslate"><span class="pre">{input}</span></code>, <code class="docutils literal notranslate"><span class="pre">{output}</span></code>, <code class="docutils literal notranslate"><span class="pre">{seed}</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--receptor-prep-seed</span></code></p></td>
+<td><p>42</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--force-receptor-prep</span></code></p></td>
+<td><p>Regenerate same-stem receptor outputs</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--skip-profile</span></code></p></td>
+<td><p>Preserve existing receptor geometry sidecars</p></td>
+</tr>
+</tbody>
+</table>
+<p>High-level <code class="docutils literal notranslate"><span class="pre">known-site</span></code> accepts <code class="docutils literal notranslate"><span class="pre">--center</span></code> and <code class="docutils literal notranslate"><span class="pre">--box-size</span></code>; <code class="docutils literal notranslate"><span class="pre">cavity</span></code> accepts
+<code class="docutils literal notranslate"><span class="pre">--autosites</span></code>. Their <code class="docutils literal notranslate"><span class="pre">--output-dir</span></code> groups output artifacts but does not move your
+input receptor and ligand directories. Explicit input paths remain important.</p>
+</section>
+<section id="advanced-settings-and-concurrency">
+<h2>Advanced settings and concurrency<a class="headerlink" href="#advanced-settings-and-concurrency" title="Link to this heading"></a></h2>
+<p>For a controlled setting without a CLI flag, first generate configuration using
+<code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">setup</span></code>, edit the active <code class="docutils literal notranslate"><span class="pre">docking/config.py</span></code>, then run
+<code class="docutils literal notranslate"><span class="pre">ultidock</span> <span class="pre">run</span> <span class="pre">--skip-setup</span></code>. This preserves settings such as <code class="docutils literal notranslate"><span class="pre">SITE_POLICY</span></code>; setup
+would otherwise overwrite them. With <code class="docutils literal notranslate"><span class="pre">--skip-setup</span></code>, do not expect new setup flags
+to modify the existing configuration. Archive the actual configuration used.</p>
+<p><code class="docutils literal notranslate"><span class="pre">ULTIDOCK_HOME</span></code> selects a managed workspace. <code class="docutils literal notranslate"><span class="pre">ULTIDOCK_WORKERS</span></code> overrides worker
+count; <code class="docutils literal notranslate"><span class="pre">GPU_SLOTS_PER_DEV</span></code> defaults to 2. Avoid sharing generated configuration or
+writable receptor-grid directories between concurrent jobs. The engine subprocess
+thread environment is set by the runner; see <a class="reference internal" href="../user-guide/hpc-batch-screening.html"><span class="std std-doc">HPC / batch screening</span></a>.</p>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="cli.html" class="btn btn-neutral float-left" title="CLI reference" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="file-formats.html" class="btn btn-neutral float-right" title="File formats" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Taha Turgut.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
