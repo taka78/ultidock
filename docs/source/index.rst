@@ -7,7 +7,8 @@ teacher, then use the guides and reference pages for your own experiments.
 
 **New here?** Follow :doc:`getting-started/installation`, open the
 :doc:`getting-started/quick-start` teacher, and complete your
-:doc:`getting-started/first-docking-run`.
+:doc:`getting-started/first-docking-run`. To screen your own ligand library,
+follow the :doc:`tutorials/virtual-screening` walkthrough.
 
 .. toctree::
    :caption: Getting Started

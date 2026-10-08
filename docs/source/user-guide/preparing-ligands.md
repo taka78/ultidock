@@ -11,6 +11,19 @@ Treat alternative chemical states as distinct inputs with traceable names.
 PDBQT contains atom types, charges and a torsion tree; it is not a lossless archive
 of the source molecule's chemistry.
 
+For Meeko in an activated virtual environment:
+
+```bash
+python -m pip install meeko
+mk_prepare_ligand.py --help
+# If that executable is absent, try:
+python -m meeko.cli.mk_prepare_ligand -h
+```
+
+Prepare source chemistry and conformers before conversion; the exact command
+depends on the source format and Meeko version. The main Ultidock run accepts
+the resulting PDBQT files, not raw SMILES or SDF.
+
 Check a prepared file before staging it:
 
 ```bash

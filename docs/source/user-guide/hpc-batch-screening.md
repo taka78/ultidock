@@ -3,7 +3,9 @@
 First complete one representative receptor/ligand run on the actual compute node.
 Confirm tool availability, GPU visibility if requested, grid generation and result
 paths before submitting an array. A login-node check cannot validate a compute
-node's runtime or filesystem permissions.
+node's runtime or filesystem permissions. Use the
+[screening pilot](../tutorials/virtual-screening.md#5-measure-and-tune-a-pilot)
+to estimate time, memory and disk before sizing the array.
 
 ## Isolate jobs
 

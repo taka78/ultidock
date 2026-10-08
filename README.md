@@ -11,6 +11,8 @@ New users can start with the [documentation](docs/source/index.rst), including
 [installation](docs/source/getting-started/installation.md), an interactive
 [Quick Start teacher](docs/source/getting-started/quick-start.md), and the
 [D2 docking tutorial](docs/source/tutorials/small-molecule-docking.md).
+For a library run, follow the
+[high-throughput screening walkthrough](docs/source/tutorials/virtual-screening.md).
 The documentation is configured for Read the Docs; see [build instructions](docs/README.md).
 
 ---
@@ -59,7 +61,7 @@ On **Ubuntu 26.04**, install the native programs with:
 ```bash
 sudo apt update
 sudo apt install -y \
-  autoconf automake build-essential clinfo cmake csh curl \
+  autoconf automake autodock-vina build-essential clinfo cmake csh curl \
   g++-12 gcc-12 gfortran git libnetcdf-dev libtool libx11-dev \
   m4 make ocl-icd-opencl-dev openbabel openjdk-21-jre-headless \
   perl pkg-config python3 python3-pip python3-venv tar unzip wget
