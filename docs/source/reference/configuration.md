@@ -104,16 +104,17 @@ Change them only with a declared evaluation plan.
 ## Concurrency and workspace isolation
 
 `ULTIDOCK_HOME` chooses the managed application workspace.
-`ULTIDOCK_WORKERS` overrides the worker pool. CPU mode's default uses host
+`ULTIDOCK_WORKERS` overrides the maximum number of concurrent ligand workers;
+all discovered ligands are still queued for processing. CPU mode's default uses host
 CPU count divided by `VINA_CPU`; in a scheduler allocation, set workers
 explicitly so workers × Vina threads fits allocated cores. GPU mode uses
 `GPU_SLOTS_PER_DEV` (default 2) and detected device IDs. The runner also
 derives an OpenMP budget from host CPU count; check logs and bind allocated
 cores rather than assuming it knows your scheduler allocation.
 
-Concurrent jobs need separate generated configuration and writable
-receptor/grid directories. High-level commands automatically create separate
+Independent concurrent Ultidock processes need separate generated configuration
+and writable receptor/grid directories. High-level commands automatically create separate
 run folders and databases; the lower-level `ultidock run` command uses its
 configured output paths directly. See
-[HPC / batch screening](../user-guide/hpc-batch-screening.md) and
+[Independent concurrent runs](../user-guide/hpc-batch-screening.md) and
 [performance planning](../tutorials/virtual-screening.md).

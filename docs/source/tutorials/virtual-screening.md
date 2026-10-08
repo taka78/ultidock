@@ -92,12 +92,12 @@ settings. This is a planning estimate, not a completion guarantee.
 | --- | --- | --- |
 | More NVIDIA GPUs | More AutoDock-GPU jobs can run concurrently; the runner assigns jobs across detected devices | The log's GPU IDs, utilization and available GPU memory |
 | `GPU_SLOTS_PER_DEV` (default 2) | More simultaneous jobs per detected GPU | Device memory and completed pairs per hour; more slots are not always faster |
-| `ULTIDOCK_WORKERS` | Sets the worker pool for CPU or GPU runs | Host CPU and memory use; do not exceed a scheduler allocation |
+| `ULTIDOCK_WORKERS` | Sets the maximum concurrent ligand workers, not the total library size | Host CPU and memory use; on a cluster, stay within the allocated resources |
 | More binding sites or larger boxes | More ligand–site work and larger grids | Site coverage, disk use and run time |
 | CPU Vina threads (`--vina-cpu`) | More threads per CPU job | Worker count times Vina threads versus available cores |
 
-For cluster arrays, see the [HPC screening example](hpc-screening.md). Its
-per-job application homes protect the shared generated configuration; the
-high-level commands create separate output folders automatically. Keep the
+For the built-in worker scheduling and an optional cluster allocation, see
+[Batch screening with Ultidock](hpc-screening.md). The high-level `cavity`
+command creates a separate result folder automatically. Keep the
 input manifest or local ligand list, selected backend, receptor preparation
 notes, site settings and the resulting poses/database with any ranked screen.

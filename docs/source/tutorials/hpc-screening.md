@@ -1,57 +1,68 @@
-# HPC screening example
+# Batch screening with Ultidock
 
-This Slurm skeleton runs two ligand shards, with up to two allocated NVIDIA GPUs
-per job. Adapt the GPU request syntax, partition, memory, time, paths and tool
-modules to your cluster. Before submitting an array, validate one job on a
-compute node. Install Ultidock in a shared virtual environment and make
-AutoGrid, AutoDock-GPU build tools, Vina, Open Babel and the GPU runtime available.
+One Ultidock run can screen a library of many ligands. Ultidock discovers the
+ligand files, queues them in its own bounded worker pool and reports progress
+as they finish. The number of **workers running at once** is separate from the
+total number of ligands to screen. One run handles the library without manually
+splitting it into jobs or creating a directory per ligand.
 
-Prepare `/project/screen/shards/0` and `/project/screen/shards/1`, each containing
-only its ligand PDBQT files, plus `/project/screen/receptor.pdbqt`.
+## Start a library screen
+
+Install Ultidock and the [required native tools and GPU runtime](../getting-started/requirements.md).
+Run `ultidock doctor` to find the active workspace. Place the receptor in its
+`docking/MACRO_MOL_DIR/`. Then either put prepared ligand PDBQT files in
+`docking/LIGANDS_DIR/`, or save a selected ZINC AutoDock PDBQT download list as
+`docking/ligands.wget`. [Dock your own molecules](../user-guide/start-docking.md)
+explains the formats and how the download list works.
+
+For a `ligands.wget` library, run:
 
 ```bash
-#!/bin/bash
-#SBATCH --job-name=ultidock
-#SBATCH --array=0-1
-#SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:2
-#SBATCH --mem=16G
-#SBATCH --time=04:00:00
-set -euo pipefail
-source /project/venvs/ultidock/bin/activate
-
-job_root="/project/screen/jobs/${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
-mkdir -p "$job_root/receptors" "$job_root/ligands"
-cp /project/screen/receptor.pdbqt "$job_root/receptors/"
-cp /project/screen/shards/"$SLURM_ARRAY_TASK_ID"/*.pdbqt "$job_root/ligands/"
-
-export ULTIDOCK_HOME="$job_root/application"
-srun --cpu-bind=cores ultidock cavity --autosites 6 \
-  --macro-mol-dir "$job_root/receptors" \
-  --ligands-dir "$job_root/ligands" --output-dir "$job_root/run" --skip-wget
+ultidock cavity
 ```
 
-`ULTIDOCK_HOME` keeps generated configuration separate, and the staged receptor
-directory keeps grid files separate. `--skip-wget` prevents the bundled
-example download from entering each ligand shard. The `cavity` command creates the run's
-`docking/`, `analysis/` and `results/` directories and SQLite database inside
-`$job_root/run` automatically. Here, `--output-dir` chooses a predictable
-location for copying results off scratch; it is optional. With two visible
-NVIDIA GPUs, the default worker count is four (two slots per device), and jobs
-are assigned across the GPUs. The terminal prints the detected GPU IDs and
-worker count. The runner also sets OpenMP-related environment variables using
-the host CPU count; inspect logs and enforce scheduler CPU binding rather than
-assuming allocation-aware detection. The memory and time requests above are
-starting examples, not capacity guarantees. On a CPU-only partition, remove
-the GPU request; automatic mode uses Vina and sizes workers from CPU count
-and `VINA_CPU`. To require GPU execution, add `--mode gpu`.
+For local ligands only, skip the bundled example download:
 
-The independent application homes may each need a native build on first use.
-For larger arrays, pre-provision a tested tool installation and pass explicit tool
-directories; do not make many jobs build into the same writable source directory.
-GPU allocations require your cluster's device directives and compatible runtime.
-Check `nvidia-smi -L` inside the job before scaling up.
+```bash
+ultidock cavity --skip-wget
+```
 
-Keep each shard's raw outputs and preparation metadata. Aggregate results only
-after checking failed or missing jobs and duplicate ligand identifiers. See
-[HPC / batch screening](../user-guide/hpc-batch-screening.md) for workspace rules.
+The command prepares the receptor, proposes CaV-EMPS sites, builds grids,
+submits every discovered ligand for docking and creates a timestamped result folder. The
+input folders and result path are managed by Ultidock. Repeat the same command
+on a workstation or a compute node with the needed tools available.
+
+## How the worker scheduler uses hardware
+
+The default `auto` mode selects an available GPU backend, or CPU Vina if none
+is detected. In CPU mode, Ultidock sizes its worker pool from the host CPU
+count and Vina threads per worker. In CUDA mode, it distributes ligand work
+across detected NVIDIA GPUs; by default it allows two concurrent slots per
+GPU. The log prints the selected backend, ligand count and worker count, plus
+GPU IDs in GPU mode. One run can process more ligands than there are workers or GPU slots: the
+remaining ligands wait for a worker.
+
+To choose a different maximum number of concurrent ligand workers, set
+`ULTIDOCK_WORKERS` to a positive integer. For example:
+
+```bash
+ULTIDOCK_WORKERS=8 ultidock cavity --skip-wget
+```
+
+This still queues **all** ligands found in `LIGANDS_DIR`; `8` limits how
+many ligand workers run at once. Pick the value for the available CPU, memory
+and GPU capacity. In CUDA mode, `GPU_SLOTS_PER_DEV` also bounds simultaneous
+docking work on each GPU. Increasing either setting does not guarantee a faster
+screen. See [performance planning](virtual-screening.md) for a pilot-based
+estimate and the [configuration reference](../reference/configuration.md) for
+the controls.
+
+## Running on a cluster
+
+If a cluster requires a batch scheduler such as Slurm, request the CPUs, memory
+and GPUs you need and run the **same Ultidock command** inside one allocation.
+The cluster scheduler starts the process; Ultidock schedules the ligands within
+it and distributes CUDA work across the NVIDIA GPUs visible to that process.
+Check GPU visibility and native tools on the compute node. For separate
+Ultidock processes running at the same time, see
+[Independent concurrent runs](../user-guide/hpc-batch-screening.md).

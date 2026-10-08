@@ -24,5 +24,5 @@ to the DLG run before exporting its score. A missing or ambiguous match is repor
 rather than linking the input ligand as if it were a docked pose.
 
 GPU slots and worker concurrency should be chosen for available devices and
-memory. See [HPC / batch screening](../hpc-batch-screening.md). Keep the native
+memory. See [Independent concurrent runs](../hpc-batch-screening.md). Keep the native
 engine version, parameter files and runtime information with any published result.
