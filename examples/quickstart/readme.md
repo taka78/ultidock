@@ -11,7 +11,8 @@ past the final Run screen. Missing requirements are explained with installation
 hints; the teacher does not install packages or invoke sudo.
 
 The default lesson runs the real D2 example with haloperidol, escitalopram and
-morphine, using CPU Vina and CaV-EMPS. Choose another supported lesson or engine:
+morphine, using CPU Vina and CaV-EMPS. Choose another supported lesson or
+select GPU docking:
 
 ```bash
 ultidock example run quickstart --example sert-escitalopram

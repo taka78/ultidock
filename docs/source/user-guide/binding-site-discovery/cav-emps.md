@@ -5,16 +5,16 @@ geometry with receptor-derived AutoGrid interaction maps. It is the default site
 method in the D2 and SERT example runners.
 
 ```bash
-ultidock example run d2-antipsychotics cav-emps --mode cpu
+ultidock example run d2-antipsychotics --mode auto
 ```
 
 For your own prepared directories:
 
 ```bash
-ultidock cavity --autosites 6 --mode cpu --skip-wget \
+ultidock cavity --autosites 6 \
   --macro-mol-dir /absolute/inputs/receptors \
   --ligands-dir /absolute/inputs/ligands \
-  --output-dir /absolute/runs/cav-emps
+  --output-dir /absolute/runs/cav-emps --skip-wget
 ```
 
 The pipeline builds receptor maps, constructs internal and surface candidates,

@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Binding-site discovery
 
 A site finder proposes where to search. A docking engine then samples ligand
@@ -11,7 +15,9 @@ validation. Choose the workflow using the information available before docking.
 | Alternative pocket methods | `ultidock fpocket` or `ultidock p2rank` |
 | Broad whole-receptor baseline | `ultidock blind` |
 
-Append input directories, engine mode, and `--skip-wget` as shown in the tutorials.
+The default input folders and automatic backend selection work for these
+commands too. Pass directory overrides only when inputs are elsewhere. With
+local ligands, add `--skip-wget` to avoid the bundled example download.
 The number of sites is a search budget, not the number of true binding sites.
 Retain all site identifiers and box dimensions with docking results. A site's
 numeric label (S1, S2, …) is not a confidence statement.

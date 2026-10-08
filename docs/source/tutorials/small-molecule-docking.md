@@ -2,7 +2,8 @@
 
 Run the bundled D2 receptor comparison to learn preparation, site generation and
 best-pose inspection. Complete [Installation](../getting-started/installation.md)
-first; CPU mode needs Vina, AutoGrid and the receptor recovery dependencies.
+first; GPU mode needs a compatible runtime, while CPU fallback needs Vina.
+AutoGrid and receptor recovery dependencies are used in either case.
 
 ## 1. Inspect the inputs
 
@@ -18,7 +19,7 @@ retain their provenance when interpreting the run.
 ## 2. Dock the three ligands
 
 ```bash
-ultidock example run d2-antipsychotics --mode cpu
+ultidock example run d2-antipsychotics --mode auto
 ```
 
 The runner creates a fresh timestamped workspace, copies the listed molecules,
@@ -42,7 +43,7 @@ not evidence that no ligand can bind.
 With fpocket installed, run:
 
 ```bash
-ultidock example run d2-antipsychotics fpocket --mode cpu
+ultidock example run d2-antipsychotics fpocket --mode auto
 ```
 
 Compare search regions and poses across the two workspaces. Do not label morphine

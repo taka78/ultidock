@@ -1,42 +1,57 @@
 # CaV-EMPS methodology
 
-CaV-EMPS is Ultidock's receptor-derived site-proposal implementation. Its entry
-point is `autogenerate_centers_tsv` in `docking/make_grids.py`. It combines geometric
-cavity evidence and energetic map evidence to construct candidate docking boxes.
-This page describes the implementation, not a claim of universal predictive accuracy.
+**CaV-EMPS** means *Cavity detection via Electrostatic Map Pocket Scoring*.
+It proposes docking boxes from receptor geometry and receptor-derived AutoGrid
+signals when a co-crystal ligand center is unavailable. The implementation is
+`autogenerate_centers_tsv` in `docking/make_grids.py`, orchestrated by
+`docking/dock_v02.py`. A withheld crystal ligand can be used afterward as
+a benchmark reference; it is not a prediction input. The site score orders
+search hypotheses and is not a ligand-binding affinity.
 
 ## Evidence and candidate families
 
-The geometric path rasterizes receptor occupancy and uses a Euclidean distance
-transform to describe available space. Internal-cavity candidates and surface-cleft
-candidates address different receptor geometries. The map-based path uses AutoGrid
-fields, including carbon, electrostatic and desolvation information, with favorable
-contributions, spatial smoothing and receptor-proximity constraints. Neighborhood
-aggregation prevents the method from relying solely on an isolated favorable voxel.
+The geometric path rasterizes receptor atoms onto the AutoGrid lattice.
+An Euclidean distance transform (EDT) describes open volume and identifies
+internal cavities and channels. Surface-cleft candidates cover another
+receptor geometry. The map path uses AutoGrid carbon, electrostatic and
+desolvation signals: favorable energies are clipped to physically useful
+negative values, smoothed over a ligand-sized region and constrained to
+receptor-proximal pocket shells. This avoids treating one isolated favorable
+voxel as a complete binding pocket.
 
-Candidates are filtered, grouped and selected with spatial separation constraints.
-The resulting centers and grid dimensions define the downstream search regions.
-A proposal's internal score is a site-selection quantity, not a ligand binding energy.
+The default `receptor_search` policy assembles internal, surface and
+consensus candidates into a compact portfolio. Å-scale non-maximum
+suppression removes near-duplicates, and the retained centers and grid
+dimensions define downstream docking boxes. The cavity-radius threshold can
+be estimated from each receptor's EDT peaks instead of fixed globally.
+Inter-site separation is clamped relative to box side length to keep boxes
+distinct without becoming needlessly sparse.
 
-## Search policies
+## Search policies and controls
 
 | Generated `SITE_POLICY` | Candidate selection |
 | --- | --- |
-| `receptor_search` | Compact portfolio of complementary receptor-derived sites; default |
+| `receptor_search` | Compact complementary receptor-derived portfolio; default |
 | `exhaustive_search` | Broader search across candidate families |
-| `internal` | Internal-cavity family |
-| `surface` | Surface-cleft family (`maps` is an internal alias) |
+| `internal` | Internal cavities |
+| `surface` | Surface clefts (`maps` is an internal alias) |
 | `hybrid` | Consensus family |
 
-The requested site count is a search budget; geometry and filtering affect the
-actual proposals. Metadata in the centers file records the policy and parameters
-used for reuse checks. Preserve it when comparing runs. For controlled changes to
-non-CLI settings, see [Configuration](../reference/configuration.md).
+`AUTOSITES` is a requested site budget; geometry and filtering can yield
+fewer actual proposals. The `centers.tsv` metadata records policy and
+parameters for reuse checks. Preserve it when comparing runs. Site IDs
+`S1`, `S2`, etc. are output identifiers, not scores, priorities or
+quality labels. [Configuration](../reference/configuration.md) lists the
+adaptive EDT, surface-shell, map and separation settings. Edit non-CLI dials
+only with a declared evaluation plan and preserve the actual generated config.
 
 ## Validation boundary
 
-Map resolution, receptor extent, protonation and box parameters can alter results.
-A site omitted from the proposal set cannot be recovered by downstream local docking.
-Evaluate geometry-only, map-based and combined settings under a fixed site budget
-before attributing an improvement to a particular component. Use held-out reference
-sites and report failures as well as successes. See [Binding-site prediction](binding-site-prediction.md).
+Map resolution, receptor extent, protonation and box settings affect
+proposals. A site omitted from the proposal set cannot be recovered by local
+docking. Compare geometry-only, map-based and combined settings under a fixed
+site budget with held-out reference sites. Measure localization explicitly
+(for example DCC or centroid distance), report successes and failures across
+all generated sites, and avoid tuning thresholds on final evaluation targets.
+See [Binding-site prediction](binding-site-prediction.md) and
+[Benchmarking](../benchmarks/index.md).

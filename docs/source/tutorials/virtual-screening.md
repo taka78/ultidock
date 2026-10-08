@@ -1,193 +1,103 @@
 # Step-by-step high-throughput screening
 
-This walkthrough takes a prepared receptor and ligand library through a small
-pilot, a measured capacity estimate, a full screen and result checks. Commands
-assume Linux, an activated Ultidock environment and **prepared ligand PDBQT**
-files. Complete [Installation and screening preparation](../getting-started/installation.md)
-first. The bundled [first docking run](../getting-started/first-docking-run.md)
-is a useful three-ligand check before using your own data.
+Ultidock can screen a ligand library with one pipeline command. It prepares
+receptors, selects the available docking backend, proposes binding sites,
+builds grids, processes ligand archives, docks and analyzes results. Install
+the [required packages and GPU runtime](../getting-started/requirements.md)
+first. For a small run using supplied molecules, see
+[Run the bundled examples](examples.md).
 
-## 1. Define the screen
+**A direct library source:** choose a chemically appropriate 3D tranche set
+in [ZINC20](https://zinc20.docking.org/tranches/home/) or
+[ZINC-22](https://cartblanche22.docking.org/), export **AutoDock PDBQT.gz**
+with **WGET** commands, and save that command list as
+`docking/ligands.wget`. Ultidock downloads and splits the selected archives
+when you run `ultidock run`. The [ZINC instructions](../user-guide/start-docking.md)
+show the exact file handoff and format checks. ZINC's
+[3D archive](https://cache.docking.org/3D/) describes the available tranche
+properties and PDBQT files.
 
-Choose the receptor structure, chemical-state preparation protocol, site method
-and backend before comparing results. CPU mode uses Vina; GPU mode uses
-AutoDock-GPU, which has different search and scoring behavior. Use one backend
-and fixed settings across a single ranked screen. Keep source structures and a
-table mapping each PDBQT filename to its compound, stereochemistry, protonation
-state and preparation settings. Distinct states need distinct filenames.
+## 1. Place the inputs
 
-For this walkthrough, `cavity --autosites 1` proposes one CaV-EMPS site without
-requiring a manually supplied center. Inspect that site before scaling. If you
-have a validated known-site box, use
-`ultidock known-site --center X,Y,Z --box-size SIDE` with the same input and
-mode flags instead. The
-[unknown-site guide](unknown-binding-site.md) describes alternative predictors.
+Use the active workspace printed by `ultidock doctor`. Put receptor `.pdb`,
+`.mol2` or `.pdbqt` files in its `docking/MACRO_MOL_DIR/`. For ligands, use
+one of these paths:
 
-## 2. Stage and validate inputs
-
-Set these paths to your own **absolute** receptor file and prepared ligand
-directory. The output root is created separately, so no previous ligand files
-are silently included. Keep only intended `.pdbqt` files in `LIBRARY`:
-
-```bash
-export RECEPTOR=/absolute/path/to/receptor.pdbqt
-export LIBRARY=/absolute/path/to/prepared-ligands
-export SCREEN_ROOT="$PWD/ultidock-screen-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$SCREEN_ROOT/pilot/receptors" "$SCREEN_ROOT/pilot/ligands" \
-  "$SCREEN_ROOT/full/receptors"
-cp "$RECEPTOR" "$SCREEN_ROOT/pilot/receptors/"
-cp "$RECEPTOR" "$SCREEN_ROOT/full/receptors/"
-molguard pdbqt check "$RECEPTOR"
-find "$LIBRARY" -maxdepth 1 -type f -name '*.pdbqt' | wc -l
-```
-
-The count is the number of ligand files that the full run should discover.
-If your receptor is a raw PDB or MOL2, prepare it first as described in
-[Preparing a receptor](../user-guide/preparing-receptor.md). Validate prepared
-ligands with MolGuard before a large run:
-
-```bash
-for ligand in "$LIBRARY"/*.pdbqt; do
-  molguard pdbqt check "$ligand" || exit 1
-done
-```
-
-Resolve failed inputs using the original chemistry and
-[ligand preparation notes](../user-guide/preparing-ligands.md). Format
-normalization cannot choose protonation, stereochemistry or charges for you.
-
-Select 10–50 representative ligands for the pilot, including flexible or unusual
-molecules. The command below copies the first 20 sorted filenames as a quick
-mechanical smoke test; replace or supplement them with representative molecules
-before using pilot timing to size the full screen:
-
-```bash
-find "$LIBRARY" -maxdepth 1 -type f -name '*.pdbqt' -print0 |
-  sort -z | head -z -n 20 |
-  xargs -0 -r cp -t "$SCREEN_ROOT/pilot/ligands"
-find "$SCREEN_ROOT/pilot/ligands" -maxdepth 1 -type f -name '*.pdbqt' | wc -l
-```
-
-The `sort -z`, `head -z` and `cp -t` options above are GNU/Linux tools. Verify
-that both counts are nonzero and that the receptor folder contains only the
-intended receptor. Do not put source SDF files or unrelated PDBQTs in either
-ligand directory.
-
-## 3. Preview the pilot
-
-Use an explicit backend. This CPU example keeps Vina's sampling settings and
-site count visible. `--skip-wget` prevents the download manifest from adding
-ligands. `--output-dir` groups run outputs; it does not relocate the input
-directories:
-
-```bash
-ultidock doctor
-ultidock cavity --autosites 1 --mode cpu --vina-cpu 2 \
-  --vina-exhaustiveness 8 --vina-seed 42 --skip-wget \
-  --macro-mol-dir "$SCREEN_ROOT/pilot/receptors" \
-  --ligands-dir "$SCREEN_ROOT/pilot/ligands" \
-  --output-dir "$SCREEN_ROOT/pilot/run" --dry-run
-```
-
-Check the printed command and `run_config.yaml`. This dry run writes the run
-directory/configuration but does not execute setup, grid generation or docking.
-It does not establish that the molecules are chemically correct or that the
-native engines will run.
-
-## 4. Run and inspect the pilot
-
-Repeat the same command without `--dry-run`. Bash `time` reports elapsed wall
-time; record it together with CPU/GPU model, RAM, backend, tool versions, ligand
-count, site count, box size and settings:
-
-```bash
-time ultidock cavity --autosites 1 --mode cpu --vina-cpu 2 \
-  --vina-exhaustiveness 8 --vina-seed 42 --skip-wget \
-  --macro-mol-dir "$SCREEN_ROOT/pilot/receptors" \
-  --ligands-dir "$SCREEN_ROOT/pilot/ligands" \
-  --output-dir "$SCREEN_ROOT/pilot/run"
-```
-
-Inspect `$SCREEN_ROOT/pilot/run/sites.tsv` and its boxes against the prepared
-receptor. Confirm that the actual site count and ligand count match the plan.
-Check the raw `docking/` directory for `-best.pdbqt` poses, and
-`results/ultidock_results.db` plus any `*-docking-results.csv` exports:
-
-```bash
-find "$SCREEN_ROOT/pilot/run/docking" -name '*-best.pdbqt' | wc -l
-ls "$SCREEN_ROOT/pilot/run/results"
-du -sh "$SCREEN_ROOT/pilot/run" "$SCREEN_ROOT/pilot/receptors"
-```
-
-Review failures and missing poses instead of silently dropping them. A filtered
-CSV may be empty even when the database contains finite scores; see
-[Results and reports](../user-guide/results-reports.md) for an unfiltered export.
-Open representative best poses with the matching receptor. A site or preparation
-problem found here should be fixed before a full library run.
-
-## 5. Measure and tune a pilot
-
-The repository does not provide a hardware-neutral ligands-per-hour guarantee.
-Use the pilot's **completed ligand–site jobs per wall hour**, observed memory and disk
-growth on the machine that will run the real screen. A rough first estimate is
-`full ligand–site pairs / measured completed pairs per hour`, plus setup,
-staging and analysis time. Receptor/site/grid work is partly fixed, so this is
-an estimate, not a deadline. Retry or failure rates also matter.
-For example, 40 completed ligand–site jobs in one hour suggests roughly
-100 hours for 4,000 pairs on the same machine with the same settings, before
-allowing for changed chemistry, setup and failures.
-
-| Change | Likely throughput or capacity effect | Check before accepting it |
+| Input | Place it here | What the pipeline does |
 | --- | --- | --- |
-| More CPU cores and `ULTIDOCK_WORKERS` | More independent jobs can run at once until memory, I/O or CPU contention dominates | In CPU mode, keep workers × `--vina-cpu` within allocated cores; test the actual worker count. |
-| Higher `--vina-cpu` | More threads per Vina job; fewer jobs may run concurrently | Compare completed pairs per hour, not one ligand's latency. |
-| Higher `--vina-exhaustiveness` | More Vina search effort, usually longer per pair | Hold it constant across a ranked screen and compare sampling quality on controls. |
-| GPU backend and `GPU_SLOTS_PER_DEV` | GPU search can improve throughput; extra slots increase simultaneous GPU jobs | Verify a complete GPU run and watch device memory; CPU and GPU scores are not interchangeable. |
-| More sites or larger boxes | More ligand–site jobs and larger grids, with more memory/disk use | Inspect biological coverage and measure a pilot with the intended site count. |
-| Faster local scratch and enough free space | Less waiting on large map, pose and database I/O | Measure `du -sh`, `df -h` and job logs; retain outputs before scratch cleanup. |
+| Prepared ligand PDBQT files or `.pdbqt.gz` archives | `docking/LIGANDS_DIR/` | Uses those files; pass `--skip-wget` for a local-only screen |
+| Selected ZINC AutoDock PDBQT download list | Save the exported `wget` commands as `docking/ligands.wget` | Runs by default, downloads archives into `LIGANDS_DIR`, then extracts and splits them |
 
-The CPU worker default is based on the **host** CPU count divided by
-`VINA_CPU`, which can exceed a scheduler allocation. For example, an
-eight-core allocation with `--vina-cpu 2` can start with
-`export ULTIDOCK_WORKERS=4`; bind the job to its allocated cores. GPU runs
-default to two slots per detected device. Reduce slots if memory is constrained
-and measure any increase; native `NUMWI` is a build setting, not a quick
-per-run throughput switch. See [HPC / batch screening](../user-guide/hpc-batch-screening.md).
+`ligands.wget` is useful for repeating a screen from the same selected
+archive URLs. The bundled file contains one example download; replace it with
+your selection. The current pipeline runs it
+even when local ligands are present, so use `--skip-wget` to screen only local
+files. Pass `--wget FILE` to select a different manifest. [Dock your own molecules](../user-guide/start-docking.md)
+explains the manifest format and input directories. The pipeline checks and
+prepares staged receptors; it expects ligand PDBQT chemistry to be prepared
+already.
 
-## 6. Run the full library
+## 2. Start the screen
 
-After accepting the pilot's site and settings, run the full prepared library
-sequentially in its own output and receptor/grid directories. The command below
-uses the same CPU protocol; use `--mode gpu` only if the pilot also used GPU
-and its runtime passed a real run:
+From an activated Ultidock environment:
 
 ```bash
-time ultidock cavity --autosites 1 --mode cpu --vina-cpu 2 \
-  --vina-exhaustiveness 8 --vina-seed 42 --skip-wget \
-  --macro-mol-dir "$SCREEN_ROOT/full/receptors" \
-  --ligands-dir "$LIBRARY" \
-  --output-dir "$SCREEN_ROOT/full/run"
+ultidock run
 ```
 
-Compare `sites.tsv` and the generated boxes with the pilot before treating
-the two runs as one protocol. Save the actual generated `docking/config.py`
-from the active workspace and the run's `run_config.yaml`; a later setup in
-that workspace can replace `config.py`. Do not launch concurrent screens
-against the same `ULTIDOCK_HOME`, because they share generated configuration.
-For cluster arrays, isolate homes and output directories as shown in the
-[HPC screening example](hpc-screening.md).
+If you supplied local ligands instead of a download list, run
+`ultidock run --skip-wget` so the bundled example ligand is not added.
 
-## 7. Audit and rank results
+`run` executes setup, receptor preparation, the selected ligand download,
+site discovery, grid generation, docking and analysis. Its default hardware
+mode is `auto`: it selects CUDA when a compatible NVIDIA GPU is visible,
+otherwise a visible OpenCL GPU, otherwise CPU Vina. When several NVIDIA GPUs
+are detected, AutoDock-GPU jobs are distributed across them. The default is
+two concurrent slots per detected device; the terminal log prints the selected
+backend, GPU IDs, workers and slots. A GPU build also needs its driver and
+compute toolkit; see [System requirements](../getting-started/requirements.md).
 
-Check discovered ligand count, attempted/completed jobs, missing poses and failed
-preparations against the input manifest. Planned ligand–site work is the valid
-ligand count multiplied by the **actual** number of sites; failures can reduce
-completed work, while analysis filters only change the exported rows. Keep
-receptor, site, ligand state, engine and run/model identifiers together when
-merging shards; names alone
-can collide. Use the scored `docking_file` best pose rather than the
-`ligand_file` input for visual inspection.
+If a screen must use GPU or fail instead of falling back to CPU, run
+`ultidock run --mode gpu`. If you need a reproducible comparison across
+machines, record the selected backend and settings from the log. CPU Vina and
+AutoDock-GPU use different search and scoring paths; compare ranked results
+within a consistent backend.
 
-Inspect top poses, clashes and preparation diagnostics. When experimental labels
-exist, evaluate enrichment separately; a favorable docking score by itself is
-not proof of binding. See [Scoring and ranking](../scientific-background/scoring-ranking.md).
+The default site search is CaV-EMPS (`--grid-mode centers`). To search one
+broad box instead, use `ultidock run --grid-mode blind`. Optional fpocket and
+P2Rank methods have their own commands and tools; see
+[Binding-site discovery](../user-guide/binding-site-discovery/index.md).
+
+## 3. Find and review the results
+
+The command prints the active folders and discovered ligand count. In the
+workspace, `docking/MACRO_MOL_DIR/` contains prepared receptors and grids,
+`docking/DOCKING_DIR/` contains 3D output poses, and
+`docking/RESULTS_DIR/` contains the SQLite score database and CSV tables.
+[Results and reports](../user-guide/results-reports.md) explains how to find
+the scored pose corresponding to a ligand. A filtered CSV can be empty even
+when docking completed; inspect the database and logs before interpreting it.
+
+## Plan capacity for a large library
+
+No fixed ligands-per-hour figure applies across receptors, ligands, site
+counts and hardware. Use completed ligand–site jobs per wall hour from a
+representative run on the machine that will screen the full library. A first
+estimate is `planned ligand–site pairs / measured completed pairs per hour`,
+plus grid generation and analysis time. For example, 40 completed pairs in
+one hour suggests about 100 hours for 4,000 pairs on the same machine and
+settings. This is a planning estimate, not a completion guarantee.
+
+| Change | What to expect | What to check |
+| --- | --- | --- |
+| More NVIDIA GPUs | More AutoDock-GPU jobs can run concurrently; the runner assigns jobs across detected devices | The log's GPU IDs, utilization and available GPU memory |
+| `GPU_SLOTS_PER_DEV` (default 2) | More simultaneous jobs per detected GPU | Device memory and completed pairs per hour; more slots are not always faster |
+| `ULTIDOCK_WORKERS` | Sets the worker pool for CPU or GPU runs | Host CPU and memory use; do not exceed a scheduler allocation |
+| More binding sites or larger boxes | More ligand–site work and larger grids | Site coverage, disk use and run time |
+| CPU Vina threads (`--vina-cpu`) | More threads per CPU job | Worker count times Vina threads versus available cores |
+
+For cluster arrays, see the [HPC screening example](hpc-screening.md). Its
+per-job application homes protect the shared generated configuration; the
+high-level commands create separate output folders automatically. Keep the
+input manifest or local ligand list, selected backend, receptor preparation
+notes, site settings and the resulting poses/database with any ranked screen.

@@ -18,7 +18,9 @@ At each screen, press **Enter** for Next, **b** for Back, or **q** to exit.
 
 Nothing is staged and no docking starts until you advance past the final Run
 screen. The default lesson uses D2/6CM4 with haloperidol, escitalopram and morphine,
-CPU Vina, and CaV-EMPS. The example then prints a new timestamped workspace.
+CPU Vina, and CaV-EMPS. Select `--mode gpu` to run AutoDock-GPU on a compatible
+device. The example then prints a
+new timestamped workspace.
 
 Read the complete lesson without prompts or execution:
 

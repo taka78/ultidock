@@ -6,7 +6,7 @@ so you can follow the whole calculation without downloading a screening library.
 ```bash
 ultidock example list
 ultidock example run d2-antipsychotics --dry-run
-ultidock example run d2-antipsychotics --mode cpu
+ultidock example run d2-antipsychotics --mode auto
 ```
 
 The preview lists the inputs without creating a workspace. The real run stages
@@ -33,7 +33,9 @@ input. Open the pose with the corresponding receptor, and verify that the report
 site/model matches what you are viewing. An empty filtered CSV is possible:
 thresholds can exclude all rows even when docking completed successfully.
 
-For GPU execution, replace `--mode cpu` with `--mode gpu` after installing a
-working runtime. See [Results & reports](../user-guide/results-reports.md) for
+The `--mode auto` option uses a detected compatible GPU for AutoDock-GPU and
+CPU Vina when no GPU is visible. Without this option, the D2 example defaults
+to CPU mode. With several NVIDIA GPUs, jobs are distributed across the detected
+devices. Use `--mode gpu` if GPU execution is required. See [Results & reports](../user-guide/results-reports.md) for
 unfiltered analysis and [the D2 tutorial](../tutorials/small-molecule-docking.md)
 for interpreting this comparison set.

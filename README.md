@@ -287,21 +287,34 @@ Follow this checklist whenever you want to run Ultidock from a clean workspace.
      and canonicalized. Generated receptor folders use
      the same discovered stem, matching the `dock_v02.py`/`make_grids.py` flow.
    - Provide ligands via one of the following:
-     - Populate `docking/ligands.wget` with direct links to `.pdbqt.gz` archives
-       (one per line). Ultidock will download, verify, and extract them.
+     - Populate `docking/ligands.wget` with `wget` commands for `.pdbqt.gz`
+       archives (one command per line). The bundled file contains one example.
+       By default, Ultidock downloads the archives into `LIGANDS_DIR`, then
+       extracts them. A practical source is a subset selected in the
+       [ZINC20 3D tranche browser](https://zinc20.docking.org/tranches/home/):
+       choose the AutoDock PDBQT.gz format and WGET export, then save the exported
+       command list as `docking/ligands.wget`. See the
+       [docking guide](docs/source/user-guide/start-docking.md#start-with-a-selected-zinc-library)
+       for the steps. PubChem 3D SDF downloads need ligand preparation before
+       they can be used as PDBQT inputs.
      - Manually place `.pdbqt` or `.pdbqt.gz` files in `docking/LIGANDS_DIR/`.
-     - Pass `--skip-wget` when running `setup.py`/`run.py` to skip downloads and
-       rely entirely on pre-populated ligand files. Keep only the ligands you
-       intend to dock in that directory; the pipeline scans every `*.pdbqt`.
+       Pass `--skip-wget` for a local-only run because setup otherwise runs the
+       bundled example download too. Keep only the ligands you intend to dock
+       in that directory; the pipeline scans every `*.pdbqt`.
 
 5. **Run the setup + docking pipeline:**
    ```bash
-   ultidock run --mode gpu --skip-wget
+   ultidock run
    ```
+   For local ligands without the bundled example download, use
+   `ultidock run --skip-wget`.
    - With the source-checkout installation, use
-     `/usr/bin/python3 -m cli.ultidock run --mode gpu --skip-wget` instead.
-   - Use `--mode cpu` if you have no GPU; this uses AutoGrid and Vina.
-   - Omit `--skip-wget` only when you intend to run the download manifest.
+     `/usr/bin/python3 -m cli.ultidock run` instead.
+   - The default `auto` mode uses a detected NVIDIA CUDA or OpenCL GPU with
+     AutoDock-GPU, or CPU Vina if no GPU is detected. Multiple NVIDIA GPUs
+     share the docking work. Use `--mode gpu` to require GPU execution.
+   - Use `--wget FILE` to select a different manifest. `--skip-wget` disables
+     downloads; it does not skip docking.
    - Override directories as needed with `--LIGANDS_DIR`, `--MACRO_MOL_DIR`, etc.
      Absolute paths are recommended for scripted automation.
 
@@ -539,9 +552,9 @@ scripts.
    - Respects explicit CLI paths so scripted runs can reuse shared toolchains.
 
 2. **Ligand Preparation**
-   - `ligands.wget` entries are executed with robust retry logic and optional
-     HTTPS upgrades (HSTS aware) unless `--skip-wget` is specified, in which case
-     pre-seeded ligand archives are used as-is.
+   - The bundled `ligands.wget` entries run by default even when local ligand
+     PDBQT files or archives exist. `--wget FILE` selects a different manifest;
+     `--skip-wget` disables downloads for a local-only run.
    - `extract.py` orchestrates AutoDock Vina's `vina_split` to extract, split,
      and stage ligands with deterministic filenames so downstream consumers can
      glob without guessing naming schemes.
@@ -741,8 +754,9 @@ ultidock example run quickstart
 ```
 
 Enter advances, `b` goes back, and `q` exits. The final screen starts a real D2
-run using CPU Vina and CaV-EMPS. Add `--dry-run` to preview all lessons without
-staging inputs or running docking; use `--yes` for an explicitly unattended run.
+run using CPU Vina and CaV-EMPS by default. Pass `--mode gpu` for AutoDock-GPU.
+Add `--dry-run` to preview all lessons without staging inputs or running
+docking; use `--yes` for an explicitly unattended run.
 
 The `d2-antipsychotics`, `gabaa-benzos`, and `sert-escitalopram` examples showcase
 the docking workflow. D2 uses 6CM4 with haloperidol, escitalopram and morphine;
@@ -755,11 +769,10 @@ Each full example runner follows a documented researcher workflow:
 ```bash
 ultidock example list
 ultidock example run d2-antipsychotics --dry-run
-ultidock example run d2-antipsychotics --mode cpu
-ultidock example run sert-escitalopram
-ultidock example run sert-escitalopram p2rank
-ultidock example run sert-escitalopram fpocket
-ultidock example run sert-escitalopram p2rank --mode cpu  # no GPU runtime
+ultidock example run d2-antipsychotics --mode auto
+ultidock example run sert-escitalopram --mode auto
+ultidock example run sert-escitalopram p2rank --mode auto
+ultidock example run sert-escitalopram fpocket --mode auto
 ultidock example run gabaa-8dd2-cav-emps --dry-run
 ```
 
@@ -847,8 +860,8 @@ Use these scripts as blueprints for your own automation or CI workflows.
 
 - **`ultidock doctor` shows `[WARN] not compiled` for AutoGrid or AutoDock-GPU**
   - The source tree is present but the binaries have not been built yet.
-    Run `ultidock setup --mode gpu --skip-wget` (or `--mode cpu` without a GPU)
-    to compile them. After a successful
+    Run `ultidock setup` with the desired inputs in place to build the tools
+    for the detected backend. After a successful
     build, `doctor` will report `[OK]` with the resolved binary path.
 
 - **`molguard pdbqt check` reports `NO_DECIMAL` or `EXPONENT` errors**

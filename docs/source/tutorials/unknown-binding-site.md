@@ -1,28 +1,28 @@
 # Unknown binding-site workflow
 
 Use automatic site discovery when you do not have a defensible manual binding box.
-Prepare one receptor and a small ligand set before scaling up. The example paths
-below are placeholders for your own absolute directories.
+Put a receptor and ligand library in the default workspace folders described in
+[Dock your own molecules](../user-guide/start-docking.md). The pipeline prepares
+the receptor and selects the available GPU or CPU backend automatically.
 
-## 1. Prepare a dedicated input directory
+## 1. Choose the inputs
 
-Keep only the intended receptor in `/absolute/project/receptors` and prepared ligand
-PDBQTs in `/absolute/project/ligands`. Review [receptor preparation](../user-guide/preparing-receptor.md)
-and [ligand preparation](../user-guide/preparing-ligands.md). Do not leave a reference
-ligand embedded in a receptor used for receptor-only site prediction.
+Place receptor `.pdb`, `.mol2` or `.pdbqt` files in `docking/MACRO_MOL_DIR/`.
+Place prepared ligand PDBQTs in `docking/LIGANDS_DIR/`, or use
+`docking/ligands.wget` to download archives. Keep only the molecules intended
+for this run. Do not leave a reference ligand embedded in a receptor used for
+receptor-only site prediction.
 
-## 2. Preview the run
+## 2. Start docking
 
 ```bash
-ultidock cavity --autosites 6 --mode cpu --skip-wget \
-  --macro-mol-dir /absolute/project/receptors \
-  --ligands-dir /absolute/project/ligands \
-  --output-dir /absolute/project/run-cavity --dry-run
+ultidock cavity
 ```
 
-This writes run configuration and prints the pipeline command; it does not validate
-chemical correctness or prove that native tools can execute. Inspect the paths,
-then repeat without `--dry-run` to run preparation, site discovery and docking.
+This prepares receptors, proposes CaV-EMPS sites and docks ligands. If you
+placed local ligands in `LIGANDS_DIR`, add `--skip-wget` to exclude the bundled
+example download. To preview the generated command and run configuration
+without docking, add `--dry-run`.
 
 ## 3. Inspect site coverage
 

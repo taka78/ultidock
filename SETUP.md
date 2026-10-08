@@ -14,7 +14,7 @@ ultidock/                   ← repo root (clone here)
 │   ├── grids/check.py
 │   └── tests/
 └── docking/                ← pipeline scripts
-    ├── setup.py            ← first-time wizard (GPU detect, dirs, ligands)
+    ├── setup.py            ← automatic backend, directory and ligand setup
     ├── run.py              ← full pipeline entry-point
     ├── dock_v02.py
     ├── make_grids.py
@@ -113,27 +113,32 @@ it locally. GPU runtimes, compilers and Java remain native prerequisites.
 
 ## Step 2 — Run setup
 
-Choose the backend that matches your machine. Regular installs can run from
-any directory; source-checkout commands run from the repository root. A
-first run builds AutoGrid and, for GPU mode, AutoDock-GPU; this can take time.
-If your ligands are already present, skip the download manifest:
+Regular installs can run from any directory; source-checkout commands run from
+the repository root. A first run builds AutoGrid and, when a GPU is detected,
+AutoDock-GPU; this can take time. Place local ligand PDBQT files or archives in
+`docking/LIGANDS_DIR/`, or put `wget` commands in `docking/ligands.wget`.
+For a ready-made library, select a 3D tranche set in ZINC, export AutoDock
+PDBQT.gz as a WGET command list, and save it as `docking/ligands.wget`;
+see [Dock your own molecules](docs/source/user-guide/start-docking.md#start-with-a-selected-zinc-library).
+The default setup runs the bundled download list:
 
 ```bash
-ultidock setup --mode gpu --skip-wget
-# or, without a GPU:
-ultidock setup --mode cpu --skip-wget
+ultidock setup
 ```
+
+For local-only ligands, run `ultidock setup --skip-wget` so the bundled
+example archive is not added.
 
 With source-checkout system Python, replace `ultidock setup` with
 `/usr/bin/python3 -m cli.ultidock setup`. The lower-level command
-`python3 docking/setup.py --mode cpu --skip-wget` is also available.
+`python3 docking/setup.py` is also available.
 
-If you omit flags, the setup wizard will ask for:
-- Run mode: `auto` / `gpu` / `cpu` / `cuda` / `opencl`
-- Directory paths (or accept defaults — all relative to `docking/`)
-- Path to a `.wget` ligand download file (or skip)
+Without flags, setup selects `auto` hardware mode and the default directories
+under `docking/`. It runs the bundled `ligands.wget` by default even when local
+ligands exist. Pass `--wget FILE` to use a different manifest, or
+`--skip-wget` to disable downloads explicitly.
 
-`--mode gpu` requires a detected GPU and stops if detection fails. Only
+`--mode gpu` requires a detected GPU and stops if detection fails. The default
 `--mode auto` falls back to CPU automatically. NVIDIA detection uses
 `nvidia-smi -L`; OpenCL GPU detection uses `clinfo` (install `clinfo` along with
 your vendor's OpenCL runtime). `--mode cuda`, `--mode opencl`, and `--mode cpu`
@@ -164,8 +169,7 @@ It will then:
 AutoGrid needs `autoconf`, `automake`, `m4`, Perl, and `csh`; all are in the
 Ubuntu package list above. Its build regenerates Autotools files locally.
 
-> **Tip:** Use `ultidock setup --mode cpu --skip-wget` for a non-interactive
-> run with all default paths.
+> **Tip:** `ultidock setup` uses the default paths without directory prompts.
 
 ---
 
@@ -176,13 +180,17 @@ In the active workspace, put only the intended receptor(s) under
 `*.pdbqt` ligand in that directory is selected. Then run:
 
 ```bash
-ultidock run --skip-setup --skip-wget
+ultidock run
 ```
 
-This uses the GPU or CPU backend saved in step 2, then extracts ligands, docks,
-and analyses results. To do setup and docking in one command instead, use
-`ultidock run --mode gpu --skip-wget` (or `--mode cpu`). After a successful
-run, `ultidock run --skip-setup --skip-extract` reuses the existing config and
+For a local-only ligand library, use `ultidock run --skip-wget` so the bundled
+example download is excluded.
+
+This detects the available GPU or CPU backend, prepares receptors and ligands,
+builds grids, docks and analyses results. With several NVIDIA GPUs,
+AutoDock-GPU distributes jobs across the detected devices. Use `--mode gpu`
+when GPU execution is required. After a successful run,
+`ultidock run --skip-setup --skip-extract` reuses the existing config and
 prepared ligands. For source-checkout system Python, use
 `/usr/bin/python3 -m cli.ultidock run` in place of `ultidock run`.
 
@@ -265,9 +273,9 @@ To learn the workflow and try the bundled D2 or SERT example:
 ```bash
 ultidock example run quickstart
 ultidock example run quickstart --dry-run
-ultidock example run d2-antipsychotics --mode cpu
-ultidock example run sert-escitalopram p2rank
-ultidock example run sert-escitalopram fpocket
+ultidock example run d2-antipsychotics --mode auto
+ultidock example run sert-escitalopram p2rank --mode auto
+ultidock example run sert-escitalopram fpocket --mode auto
 ```
 
 The quickstart is an interactive Next/Back/Exit teacher. It checks prerequisites

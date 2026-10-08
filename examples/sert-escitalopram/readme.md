@@ -8,14 +8,15 @@ AutoGrid and either a working AutoDock-GPU backend or CPU-mode Vina.
 From the repository root, run one site method at a time:
 
 ```bash
-ultidock example run sert-escitalopram            # CaV-EMPS, the default
-ultidock example run sert-escitalopram p2rank     # P2Rank 2.5
-ultidock example run sert-escitalopram fpocket    # fpocket 4.2.3
+ultidock example run sert-escitalopram --mode auto          # CaV-EMPS, the default
+ultidock example run sert-escitalopram p2rank --mode auto   # P2Rank 2.5
+ultidock example run sert-escitalopram fpocket --mode auto  # fpocket 4.2.3
 ```
 
 With a source-checkout installation, replace `ultidock` with
-`/usr/bin/python3 -m cli.ultidock`. If you have no GPU runtime, append
-`--mode cpu` to any of the commands. The optional pocket programs are installed
+`/usr/bin/python3 -m cli.ultidock`. The runner defaults to GPU mode, which
+requires a working runtime. The `--mode auto` commands above use a detected
+GPU or fall back to CPU Vina. The optional pocket programs are installed
 locally when first selected; P2Rank needs Java 17–23, and fpocket needs the C
 build dependencies in the [setup guide](../../SETUP.md#step-1--install-prerequisites).
 

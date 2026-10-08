@@ -12,7 +12,7 @@ ultidock doctor
 Run the D2 example with fpocket sites:
 
 ```bash
-ultidock example run d2-antipsychotics fpocket --mode cpu
+ultidock example run d2-antipsychotics fpocket --mode auto
 ```
 
 Generate boxes without launching docking:
@@ -32,3 +32,20 @@ For a combined custom workflow, `ultidock fpocket --help` shows the receptor,
 box and output options; ordinary pipeline options are forwarded. Its `--dry-run`
 can still execute pocket prediction to create boxes—it is not a no-work preview.
 See [CLI reference](../../reference/cli.md).
+
+The installer targets fpocket 4.2.3 and needs `git`, `make`, a C/C++
+toolchain and NetCDF headers. It patches a GCC 15 pointer-type error in that
+source before compilation. Setup checks availability, but missing fpocket
+does not block other methods; selecting fpocket can install it locally.
+The adapter uses the centroid of its pocket coordinate file as box center.
+The default 35 Å side and 0.375 Å grid spacing use `make_grids.py` rounding
+and limits, with no additional pocket padding. `sites.tsv` and raw predictor
+output stay in the run directory.
+
+```bash
+ultidock fpocket --receptor receptor.pdbqt --autosites 6 \
+  --box-size 35
+```
+
+Pass `--receptor` explicitly when the default receptor directory has
+multiple PDBQT files.

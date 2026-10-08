@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Results & reports
 
 Keep input identity, receptor identity, site, engine run/model and pose file
@@ -9,10 +13,29 @@ name. Example runs print an isolated workspace containing:
 - `RESULTS_DIR/*-docking-results.csv`: filtered analysis exports.
 - `MACRO_MOL_DIR`: prepared receptors, grids, sites and preparation reports.
 
+The high-level `known-site`, `cavity`, `blind`, `fpocket` and `p2rank`
+commands create separate timestamped run folders under
+`docking/RESULTS_DIR/` by default; `--output-dir` selects another folder.
+Pocket-method folders also keep the staged receptor, predicted sites and raw
+predictor output. Other modes keep receptor grids in the configured
+`MACRO_MOL_DIR`. Older top-level `runs/` folders remain where they were.
+
 New analysis exports select the saved best pose per ligand/receptor/site/run
 invocation. `docking_file` points to that PDBQT; `ligand_file` records the prepared
 input. All parsed runs remain in SQLite. Legacy rows lacking best-pose metadata
 remain exportable, so mixed old/new databases need care.
+
+The SQLite database receives incremental docking records, so it can be
+inspected while a run is in progress. Analysis exports include
+`binding_site` to distinguish identical ligand/model names from different
+pockets; that field can be blank for unknown sites or older databases.
+Exports retain headers even if filters exclude all poses. The best GPU pose
+file is selected by AutoDock-GPU's total score and matched back to its DLG
+coordinates for the corresponding score and run ID; it need not be the
+lowest binding-energy XML row. Vina's best model is written separately.
+Raw outputs and other parsed runs remain available in SQLite.
+The analysis script writes CSV by default and supports Excel output when
+given an `.xlsx` or `.xls` output path and the required writer is installed.
 
 The default analysis filters can produce an empty CSV. To inspect all finite
 scores from a database in a source checkout:
@@ -31,6 +54,15 @@ helpers from recognized files such as `sites.tsv`, `predictions.tsv`,
 `top_hits.csv` or `scores.csv`. The generic report does not automatically convert
 every SQLite database or timestamped CSV into a populated top-hits table. Inspect
 the engine CSV/database directly if a report section is empty.
+
+When site coordinates are present, the report generator can write
+`report.md`, `report.html`, `cavity_centers.pdb`,
+`cavemps_sites.pml`, `site_boxes.pml`, `top_poses.pml`,
+`cavemps_sites.cxc` and `cavity_centers.bild`. The helper files
+support PyMOL or ChimeraX inspection and retain the command, configuration,
+software version and CaV-EMPS site ranking. Keep source structures,
+prepared inputs, site definitions, seeds, engine versions, logs and raw poses
+with any derived figures or hit list.
 
 Open a best PDBQT and its matching prepared receptor in a molecular viewer.
 Inspect placement, clashes, interactions and preparation warnings before choosing

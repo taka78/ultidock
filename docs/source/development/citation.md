@@ -19,3 +19,14 @@ For the D2 example, retain the structure and source-publication links recorded i
 Record modifications to the receptor and chemical preparation as part of your
 methods. See [Docking workflow](../scientific-background/docking-workflow.md) for
 the artifacts to archive.
+
+Ultidock is released under the
+[MIT License](https://github.com/taka78/ultidock/blob/v1.1.2/LICENSE).
+When applicable, also cite the engine methods used:
+
+- Trott, O., and Olson, A. J. (2010). *AutoDock Vina: Improving the speed and
+  accuracy of docking with a new scoring function, efficient optimization,
+  and multithreading*. Journal of Computational Chemistry 31(2), 455–461.
+- Santos-Martins, D., et al. (2021). *Accelerating AutoDock4 with GPUs and
+  Gradient-Based Local Search*. Journal of Chemical Theory and Computation
+  17(2), 1060–1073.

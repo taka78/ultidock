@@ -20,6 +20,7 @@ docs/
 │   ├── user-guide/
 │   ├── scientific-background/
 │   ├── tutorials/
+│   ├── benchmarks/
 │   ├── reference/
 │   └── development/
 └── build/                # Generated output, ignored by Git
@@ -61,6 +62,23 @@ docs\make.bat html
 Edit pages under `docs/source/`; add navigation entries in `source/index.rst` or
 the nested binding-site and docking-engine indexes. Generated HTML should not be
 committed. `make -C docs clean` removes generated documentation from `docs/build/`.
+
+## Where root-guide topics live
+
+| README.md / SETUP.md topic | Published documentation |
+| --- | --- |
+| One-command docking workflow | `user-guide/start-docking.md` |
+| Hardware, OS, native packages, CUDA/OpenCL and Rusticl | `getting-started/requirements.md` |
+| Python install choices, managed workspace and optional tools | `getting-started/installation.md` |
+| Setup wizard, local/downloaded inputs, full run and artifacts | `getting-started/setup-and-run.md` |
+| CLI commands, MolGuard and script entry points | `reference/cli.md` |
+| Generated config, flags, grid dials and concurrency | `reference/configuration.md` |
+| Receptor and ligand handling | `user-guide/preparing-receptor.md`, `user-guide/preparing-ligands.md` |
+| Site discovery and CaV-EMPS algorithm | `user-guide/binding-site-discovery/`, `scientific-background/cav-emps-methodology.md` |
+| User-guide examples and high-throughput screens | `tutorials/examples.md`, `tutorials/virtual-screening.md` (both in User Guide navigation) |
+| Benchmark commands and outputs | `benchmarks/index.md` |
+| SQLite, poses, reports and visualization | `user-guide/results-reports.md` |
+| Failures, repository layout, tests, citation and license | `reference/troubleshooting.md`, `development/` |
 
 ## Read the Docs setup
 

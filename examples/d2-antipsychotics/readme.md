@@ -4,14 +4,17 @@ Run the completed three-ligand example against `6CM4-edited.pdbqt`:
 
 ```bash
 ultidock example run d2-antipsychotics --dry-run
-ultidock example run d2-antipsychotics --mode cpu
+ultidock example run d2-antipsychotics --mode auto
 ultidock example run d2-antipsychotics --mode gpu
-ultidock example run d2-antipsychotics fpocket --mode cpu
-ultidock example run d2-antipsychotics p2rank --mode cpu
+ultidock example run d2-antipsychotics fpocket --mode auto
+ultidock example run d2-antipsychotics p2rank --mode auto
 ```
 
-The default is CPU Vina with CaV-EMPS site discovery. GPU mode uses AutoDock-GPU
-and requires its runtime; the other site methods require their corresponding tools.
+The D2 runner defaults to CPU Vina. `--mode auto` uses a detected GPU for
+AutoDock-GPU, including distributing jobs across multiple NVIDIA GPUs, and
+falls back to CPU Vina otherwise. CaV-EMPS is the default site finder.
+`--mode gpu` requires a working GPU runtime; the other
+site methods require their corresponding tools.
 In a source checkout, replace `ultidock` with `/usr/bin/python3 -m cli.ultidock`.
 
 | Input | Role |
