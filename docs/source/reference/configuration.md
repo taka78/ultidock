@@ -116,5 +116,5 @@ Independent concurrent Ultidock processes need separate generated configuration
 and writable receptor/grid directories. High-level commands automatically create separate
 run folders and databases; the lower-level `ultidock run` command uses its
 configured output paths directly. See
-[Independent concurrent runs](../user-guide/hpc-batch-screening.md) and
+[HPC / batch screening](../user-guide/hpc-batch-screening.md) and
 [performance planning](../tutorials/virtual-screening.md).

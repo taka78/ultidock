@@ -1,7 +1,3 @@
----
-orphan: true
----
-
 # Results & reports
 
 Keep input identity, receptor identity, site, engine run/model and pose file
@@ -16,6 +12,14 @@ name. Example runs print an isolated workspace containing:
 The high-level `known-site`, `cavity`, `blind`, `fpocket` and `p2rank`
 commands create separate timestamped run folders under
 `docking/RESULTS_DIR/` by default; `--output-dir` selects another folder.
+For `ultidock cavity`, the run database is
+`docking/RESULTS_DIR/cavity_<timestamp>/results/ultidock_results.db` in the
+active workspace. One invocation writes successfully parsed records for all
+its receptor–ligand–site combinations into that database. The
+`ligand_name` includes the receptor stem, `binding_site` identifies the site,
+and `ligand_file` and `docking_file` distinguish the input from the pose.
+A separate invocation creates a separate run database; there is no automatic
+cross-run SQLite merge.
 Pocket-method folders also keep the staged receptor, predicted sites and raw
 predictor output. Other modes keep receptor grids in the configured
 `MACRO_MOL_DIR`. Older top-level `runs/` folders remain where they were.

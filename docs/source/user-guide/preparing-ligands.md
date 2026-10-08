@@ -1,7 +1,3 @@
----
-orphan: true
----
-
 # Ligand inputs
 
 The docking runner automatically discovers prepared ligand PDBQT files and

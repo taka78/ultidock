@@ -1,7 +1,3 @@
----
-orphan: true
----
-
 # Automatic receptor preparation
 
 For a normal `ultidock run`, place a receptor `.pdb`, `.mol2` or `.pdbqt`

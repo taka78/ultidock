@@ -1,7 +1,3 @@
----
-orphan: true
----
-
 # Binding-site discovery
 
 A site finder proposes where to search. A docking engine then samples ligand

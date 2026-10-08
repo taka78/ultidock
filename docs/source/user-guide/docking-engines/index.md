@@ -1,7 +1,3 @@
----
-orphan: true
----
-
 # Docking engines
 
 Ultidock's `--mode` selects a computational backend. CPU uses AutoDock Vina;

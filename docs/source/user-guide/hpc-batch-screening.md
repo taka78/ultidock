@@ -1,53 +1,121 @@
----
-orphan: true
----
+# HPC / batch screening
 
-# Independent concurrent runs
+Ultidock can screen many receptors against a ligand library in **one run**.
+Each prepared ligand is assigned to a bounded worker; that worker visits every
+prepared receptor and each of its proposed binding sites. Ultidock manages the
+CPU or GPU worker pool and writes scored docking records from the run into one
+SQLite database. You can use the same workflow on a workstation or an HPC
+compute node.
 
-One Ultidock process already schedules all ligands in its library across a
-bounded CPU or GPU worker pool. Start there with
-[Batch screening with Ultidock](../tutorials/hpc-screening.md). This page is
-for the different case where several **independent Ultidock processes** run
-at the same time. Complete a representative screen first to estimate time,
-memory and disk from the [screening walkthrough](../tutorials/virtual-screening.md).
+## 1. Check the compute environment
 
-## Run folders and shared state
+Install Ultidock and its native programs using [Installation](../getting-started/installation.md)
+and [System requirements](../getting-started/requirements.md). For GPU docking,
+the driver and CUDA or OpenCL runtime must be visible in the environment where
+the screen runs. Run `ultidock doctor` there to see the active workspace and
+tool status. A small complete [first docking run](../getting-started/first-docking-run.md)
+checks more than an installation or login-node check can.
 
-High-level commands (`ultidock cavity`, `blind`, `known-site`, `fpocket` and
-`p2rank`) automatically create a timestamped run folder by default. Each folder contains
-its own `docking/`, `analysis/` and `results/` directories; the SQLite database
-is created at `results/ultidock_results.db`. You do not need to partition those
-outputs by hand. Use `--output-dir` only when you want a specific run folder;
-choose a different path for each concurrent job.
-Bundled example scripts also create a separate workspace for each run. The
-lower-level `ultidock run` command uses configured directories directly, so
-provide distinct paths if you use it for concurrent jobs.
+## 2. Place receptors and ligands in the workspace
 
-The pipeline still generates `docking/config.py` in the active application
-workspace. Concurrent jobs must not share that writable configuration: give
-each job its own `ULTIDOCK_HOME`. Grid generation also writes alongside the
-receptor, so stage the receptor in a separate writable directory per process. Use
-absolute paths and stage only the ligands intended for each process. The installed CLI
-materializes workflow resources in each application's home.
+Use the workspace printed by `ultidock doctor`. Put **all intended receptor
+files** directly in its `docking/MACRO_MOL_DIR/`; `.pdb`, `.mol2` and `.pdbqt`
+are accepted. Give each receptor a distinct filename stem, such as
+`kinase_a.pdb` and `kinase_b.pdb`. Setup prepares raw structures to PDBQT,
+checks the inputs, and creates per-receptor site and grid files. Every
+top-level prepared receptor PDBQT in that directory is included in the run.
+See [Automatic receptor preparation](preparing-receptor.md) for format and
+identity details.
 
-## Budget concurrency across processes
+Choose **one** ligand source:
 
-Within each process, `ULTIDOCK_WORKERS` sets the maximum concurrent ligand
-workers; it does not limit the total number of ligands processed. CPU runs also
-use `VINA_CPU` threads per Vina process. CUDA runs distribute work across
-detected NVIDIA GPU IDs using `GPU_SLOTS_PER_DEV` (default 2); OpenCL uses the
-runtime's visible device.
-The runner derives an OpenMP budget from host CPU count and worker count; do not
-assume it automatically interprets every scheduler allocation. Bind tasks to the
-allocated cores and check logs for actual worker/thread settings.
+| Source | Put it here | Run command |
+| --- | --- | --- |
+| Prepared local PDBQT ligands | `docking/LIGANDS_DIR/` | `ultidock cavity --skip-wget` |
+| ZINC AutoDock PDBQT archive list | Save exported `wget` commands as `docking/ligands.wget` | `ultidock cavity` |
 
-The high-level commands' separate run folders keep SQLite records from
-unrelated jobs apart. Grid maps can be large; account for storage, scratch
-lifetime and file-transfer cost. Copy each complete run folder and its
-preparation metadata back before scratch is removed. Avoid running cleanup
-against a directory still in use.
+`ligands.wget` is a text list of download commands for selected ligand
+archives. Ultidock downloads and splits those archives before docking. The
+bundled file contains an example download, so `--skip-wget` keeps a local-only
+screen limited to your staged ligands. [Dock your own molecules](start-docking.md)
+shows how to select a ZINC library and write the manifest. For local inputs,
+stage only the intended ligand `.pdbqt` files directly in `LIGANDS_DIR`;
+[Ligand inputs](preparing-ligands.md) covers their chemical preparation.
 
-See [Batch screening with Ultidock](../tutorials/hpc-screening.md) for the
-normal one-process workflow and the
-[configuration reference](../reference/configuration.md) for which settings
-are CLI flags versus generated Python variables.
+From an editable checkout root, this stages a local library in the standard
+folders; for a regular install, use the workspace path printed by `doctor`:
+
+```bash
+mkdir -p docking/MACRO_MOL_DIR docking/LIGANDS_DIR
+cp /path/to/receptors/*.pdb docking/MACRO_MOL_DIR/
+cp /path/to/ligands/*.pdbqt docking/LIGANDS_DIR/
+ultidock cavity --skip-wget
+```
+
+Use the extensions and paths matching your actual files. For a ZINC manifest,
+put its `wget` lines in `docking/ligands.wget` and run `ultidock cavity`.
+
+## 3. Let Ultidock schedule the screen
+
+The default `auto` mode chooses an available GPU backend, or CPU Vina when no
+GPU is detected. CUDA work is distributed across detected NVIDIA GPUs. One
+run uses a single selected backend; it does not mix Vina and AutoDock-GPU
+scores. The log prints the backend, discovered ligand count and worker count,
+plus detected NVIDIA device IDs in CUDA mode.
+
+`ULTIDOCK_WORKERS` controls **concurrent ligand workers**, not the number of
+ligands screened. The default CPU pool is sized from host CPU count and Vina
+threads; the default CUDA pool uses two slots per detected NVIDIA GPU. If you
+need a different concurrent worker count, set a positive value, for example:
+
+```bash
+ULTIDOCK_WORKERS=8 ultidock cavity --skip-wget
+```
+
+This still queues every discovered ligand. Each worker processes that ligand
+against all receptors and their sites. The progress counter counts completed
+**ligand files**, not completed receptor–ligand–site combinations. In CUDA mode,
+`GPU_SLOTS_PER_DEV` also bounds active docking work on each GPU. See
+[worker scheduling and cluster allocation](../tutorials/hpc-screening.md)
+and the [configuration reference](../reference/configuration.md).
+
+## 4. Find the shared SQLite results
+
+`ultidock cavity` creates a timestamped folder under the workspace's
+`docking/RESULTS_DIR/`. Inside that folder, `results/ultidock_results.db`
+contains the successfully parsed docking records for **all receptors, ligands
+and sites in this run**. Raw engine poses are in its `docking/` folder;
+receptor sites and grids are written under `MACRO_MOL_DIR/`. Results are saved
+as they are parsed, before the final analysis export. The `ligand_name`
+contains the receptor stem, `binding_site` records the site, and
+`docking_file` points to the pose output. Failed docking attempts do not
+become scored rows; check the log for errors. Separate `cavity` invocations
+create separate run folders and SQLite databases. See [Results & reports](results-reports.md)
+for exports and pose inspection.
+
+## 5. Size a large screen
+
+The docking workload scales with the number of ligands times the **sum of
+sites across all receptors**. For example, 200 receptors and 3,000 ligands
+mean 600,000 receptor–ligand combinations with one site each; six sites each
+would mean up to 3.6 million docking attempts. Actual sites, successful
+records, time and storage vary by input and hardware. Run a representative
+[screening pilot](../tutorials/virtual-screening.md)
+to measure throughput and grid/output size before a large library.
+
+On an HPC system, request CPUs, memory and any GPUs from the cluster scheduler,
+then run the same Ultidock command in the allocation. Ultidock schedules the
+ligands within that process. The worker pool is based on host CPU count or
+visible GPUs, so check the logged settings against the allocated resources.
+Grid maps and raw poses can consume substantial scratch space; retain the
+complete run folder and receptor preparation metadata with the database.
+
+### Multiple independent Ultidock processes
+
+You only need separate application workspaces if you deliberately start
+**multiple Ultidock processes at the same time**. Setup writes the shared
+`docking/config.py`, and grid generation writes beside the receptors. Give
+independent processes distinct `ULTIDOCK_HOME` values and writable receptor
+directories so their generated files cannot collide. Each high-level command
+creates its own result folder and SQLite database. This is a separate
+deployment choice from screening many receptors and ligands in one run.

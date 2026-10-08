@@ -12,6 +12,7 @@ bundled inputs.
 For a guided introduction, open the :doc:`getting-started/quick-start` teacher.
 For a selected ZINC library or your own prepared ligands, use
 :doc:`tutorials/virtual-screening`.
+For many receptors against a ligand library, use :doc:`user-guide/hpc-batch-screening`.
 For published method comparisons, use :doc:`benchmarks/index`.
 
 .. toctree::
@@ -26,14 +27,19 @@ For published method comparisons, use :doc:`benchmarks/index`.
 
 .. toctree::
    :caption: User Guide
-   :maxdepth: 1
+   :maxdepth: 2
 
    user-guide/start-docking
+   user-guide/preparing-receptor
+   user-guide/preparing-ligands
+   user-guide/binding-site-discovery/index
+   user-guide/docking-engines/index
    tutorials/examples
    tutorials/small-molecule-docking
    tutorials/unknown-binding-site
    tutorials/virtual-screening
-   tutorials/hpc-screening
+   user-guide/hpc-batch-screening
+   user-guide/results-reports
 
 .. toctree::
    :caption: Scientific Background

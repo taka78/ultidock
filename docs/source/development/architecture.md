@@ -52,8 +52,9 @@ AutoDock-GPU, and invokes shared MolGuard receptor preparation. Archive
 download has retry behavior and can be skipped for local inputs;
 `extract.py` uses `vina_split` to stage ligand PDBQTs. Grid generation
 persists receptor/site metadata and reuses suitable maps instead of always
-regenerating them. The docking worker pool dispatches independent
-receptor–site–ligand jobs with GPU device semaphores or Vina CPU threads.
+regenerating them. The bounded docking worker pool queues each discovered
+ligand; each worker visits all prepared receptors and their sites. CUDA work
+uses GPU device semaphores, while CPU mode runs Vina with configured threads.
 GPU slots default to two per detected device and can be tuned with
 `GPU_SLOTS_PER_DEV`.
 

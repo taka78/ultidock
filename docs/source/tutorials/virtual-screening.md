@@ -96,8 +96,9 @@ settings. This is a planning estimate, not a completion guarantee.
 | More binding sites or larger boxes | More ligand–site work and larger grids | Site coverage, disk use and run time |
 | CPU Vina threads (`--vina-cpu`) | More threads per CPU job | Worker count times Vina threads versus available cores |
 
-For the built-in worker scheduling and an optional cluster allocation, see
-[Batch screening with Ultidock](hpc-screening.md). The high-level `cavity`
-command creates a separate result folder automatically. Keep the
+For many receptors, built-in worker scheduling and an optional cluster
+allocation, see [HPC / batch screening](../user-guide/hpc-batch-screening.md).
+The high-level `cavity` command creates a separate result folder
+automatically. Keep the
 input manifest or local ligand list, selected backend, receptor preparation
 notes, site settings and the resulting poses/database with any ranked screen.
