@@ -6,6 +6,10 @@ checks it automatically before building grids. Start with
 [Dock your own molecules](start-docking.md); the details below explain what the
 preparation stage does and how to inspect a problem input.
 
+For the complete algorithm, where it runs in the pipeline, formatting and
+altloc policies, reproducibility conditions and sources, see
+[How MolGuard canonicalizes molecular inputs](../scientific-background/molguard-canonicalization.md).
+
 Choose a receptor structure appropriate for your question: chain/assembly,
 conformational state, retained cofactors or ions, waters, and protonation matter.
 Keep the source and record your edits. Split multiple structural models into
@@ -34,9 +38,12 @@ copy of the original before in-place preparation; no `.prep.json` recovery
 report or automatic recovery backup is produced here.
 
 Canonicalization sorts and renumbers atoms, rewrites representable numeric
-fields in AutoDock's fixed-width layout and reports a SHA-256 digest. Missing
-coordinates or charges, nonfinite values, unknown AD4 types, multiple models
-and ligand/flexible-receptor torsion records are rejected before docking.
+fields in AutoDock's fixed-width layout and reports a SHA-256 digest. Its lint
+gate rejects numeric-format errors, nonfinite values and missing atom-type
+fields. It does not validate model boundaries or torsion trees: only atom
+records and a generated remark are written. Supply a single rigid receptor,
+and keep ligand/flexible-receptor files out of this path. Unsupported receptor
+atom types are checked separately during grid preparation.
 Already prepared receptors are not automatically re-protonated. Review
 bond-perception and any Meeko residue-deletion rescue warning as a model
 change, not a silent format correction.
@@ -61,6 +68,11 @@ To canonicalize an existing receptor explicitly:
 molguard receptor canonicalize receptor.pdbqt -o receptor_canon.pdbqt
 ```
 
+For matching output bytes across repeated calls, add `--timestamp FIXED`.
+The direct command otherwise inserts the current UTC time into its remark,
+which changes the output hash. This hash identifies file bytes, not chemical
+equivalence or biological suitability.
+
 Preserve the raw structure, prepared PDBQT and conversion warnings with the
 result. For MD, additionally provide a reviewed protein PDB whose heavy atoms
 match the prepared docking receptor in the same frame. Read
@@ -68,5 +80,6 @@ match the prepared docking receptor in the same frame. Read
 that protocol; automatic docking preparation can make structural changes that
 must be reconciled with the MD input.
 
-Unknown atom types, non-finite values, missing required coordinates/charges, and
-incompatible torsion/model records fail validation. See [Troubleshooting](../reference/troubleshooting.md).
+Keep a single reviewed receptor model with valid coordinates, charges and
+engine-compatible atom types. See [Troubleshooting](../reference/troubleshooting.md)
+for preparation and grid errors.

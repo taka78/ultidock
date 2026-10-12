@@ -26,7 +26,7 @@ native package and GPU checks.
 
 | Symptom | Check and action |
 | --- | --- |
-| `molguard pdbqt check` reports `NO_DECIMAL` or `EXPONENT` | A converter wrote numeric fields outside AutoDock's fixed-width form. For a ligand, run `molguard pdbqt normalize FILE -o fixed.pdbqt`; this fixes formatting, not chemistry. |
+| `molguard pdbqt check` reports `NO_DECIMAL` or `EXPONENT` | Correct the converter's numeric output or regenerate the prepared file. Both normalization and receptor canonicalization lint first and reject these errors; see [MolGuard's format policy](../scientific-background/molguard-canonicalization.md). |
 | Unknown atom type, missing coordinate/charge or nonfinite value | Return to the source molecule and preparation settings; normalization cannot create missing chemical information. |
 | No HD/HS donor hydrogens | Existing PDBQT canonicalization does not add hydrogens. Prepare a hydrogen-complete receptor from its chemically appropriate source PDB; inspect converter warnings and the resulting types/charges. |
 | Too many ligands discovered | Every top-level `*.pdbqt` in `LIGANDS_DIR` is selected. Remove unrelated files or use a dedicated `--ligands-dir` for each batch; bundled examples create isolated workspaces. |

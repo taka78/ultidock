@@ -51,6 +51,12 @@ molguard pdbqt normalize ligand.pdbqt -o ligand-normalized.pdbqt
 Normalization preserves atom ordering and ROOT/BRANCH/TORSDOF records. It is a
 formatting operation, not a way to add missing chemistry. Resolve non-finite
 values, missing types, and invalid preparation with the source tool.
+The normal docking worker applies this normalization automatically before
+testing a ligand against receptors/sites. Formatting errors such as
+`NO_DECIMAL` and `EXPONENT` are rejected by its lint gate; correct the source
+writer or regenerate the prepared file before retrying. See
+[MolGuard's algorithm and sources](../scientific-background/molguard-canonicalization.md)
+for the exact fields, preservation guarantees and validation limits.
 
 Put only the desired `.pdbqt` files in the run's `LIGANDS_DIR`. The pipeline scans
 that directory; an unrelated molecule left there will also be docked. When
@@ -75,6 +81,6 @@ for ordinary runs. Benchmark mode uses lean artifact retention;
 `--no-keep-artifacts` selects that behavior for an ordinary run.
 Check the number and names of split ligands against your manifest.
 
-The [D2 example](../tutorials/small-molecule-docking.md) explicitly stages three
-ligands from its manifest. Haloperidol's supplied source is PubChem CID 3559;
-escitalopram and morphine are comparison molecules, not validated decoy labels.
+The [three-ligand 4COF example](../tutorials/small-molecule-docking.md) stages
+aspirin, ibuprofen and morphine inputs. Their use in a workflow example does
+not establish activity or validated decoy labels.
