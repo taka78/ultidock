@@ -6,6 +6,10 @@ checks it automatically before building grids. Start with
 [Dock your own molecules](start-docking.md); the details below explain what the
 preparation stage does and how to inspect a problem input.
 
+For the complete algorithm, where it runs in the pipeline, formatting and
+altloc policies, reproducibility conditions and sources, see
+[How MolGuard canonicalizes molecular inputs](../scientific-background/molguard-canonicalization.md).
+
 Choose a receptor structure appropriate for your question: chain/assembly,
 conformational state, retained cofactors or ions, waters, and protonation matter.
 Keep the source and record your edits. Split multiple structural models into
@@ -34,9 +38,12 @@ recovery and converter diagnostics. This does not repair missing heavy atoms or
 prove that a partially hydrogenated structure is complete.
 
 Canonicalization sorts and renumbers atoms, rewrites representable numeric
-fields in AutoDock's fixed-width layout and reports a SHA-256 digest. Missing
-coordinates or charges, nonfinite values, unknown AD4 types, multiple models
-and ligand/flexible-receptor torsion records are rejected before docking.
+fields in AutoDock's fixed-width layout and reports a SHA-256 digest. Its direct
+command lints formatting first, then retains atom records and a generated remark.
+The shared `receptor prepare` path adds numeric repair and rigid-receptor
+validation before canonicalization can discard context. That preparation path
+rejects missing coordinates/charges, nonfinite values, unsupported receptor
+types, multiple models and ligand/flexible-receptor torsion records.
 Donor-hydrogen recovery infers bonds from the existing heavy-atom coordinates,
 adds hydrogens and recalculates Gasteiger charges. It must preserve each heavy
 atom's identity, element and coordinates before replacing the receptor.
@@ -62,6 +69,13 @@ To canonicalize an existing receptor explicitly:
 ```bash
 molguard receptor canonicalize receptor.pdbqt -o receptor_canon.pdbqt
 ```
+
+For matching output bytes across repeated calls, add `--timestamp FIXED`.
+The direct command otherwise inserts the current UTC time into its remark,
+which changes the output hash. This hash identifies file bytes, not chemical
+equivalence or biological suitability. Use `molguard receptor prepare` when
+numeric repair, additional rigid-receptor validation or hydrogen recovery is
+needed; the direct canonicalizer does not run those extra steps.
 
 Preserve the raw structure, backup, prepared PDBQT, `.prep.json` and any
 conversion warnings with the result.

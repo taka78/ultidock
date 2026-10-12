@@ -21,3 +21,7 @@ For reproducibility, archive the source inputs, prepared files, site definitions
 configuration, engine versions, random seeds, logs and raw outputs. A fixed seed
 helps repeat a specified setup; it does not establish cross-engine equivalence.
 See [Scoring / ranking](scoring-ranking.md) before interpreting a hit list.
+
+For the exact input transformations, automatic call sites, reproducibility
+conditions and supporting sources, read
+[How MolGuard canonicalizes molecular inputs](molguard-canonicalization.md).

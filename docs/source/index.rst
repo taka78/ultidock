@@ -46,6 +46,7 @@ For published method comparisons, use :doc:`benchmarks/index`.
    :maxdepth: 1
 
    scientific-background/docking-workflow
+   scientific-background/molguard-canonicalization
    scientific-background/binding-site-prediction
    scientific-background/cav-emps-methodology
    scientific-background/scoring-ranking

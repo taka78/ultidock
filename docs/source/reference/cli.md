@@ -97,7 +97,7 @@ every `--dry-run` is a no-work preview.
 | Command | Result |
 | --- | --- |
 | `molguard doctor` | Version and optional converter diagnostics |
-| `molguard pdbqt check FILE` | Receptor/ligand PDBQT lint, including fixed-column, numeric and atom-type errors |
+| `molguard pdbqt check FILE` | Receptor/ligand PDBQT lint for fixed-width numeric fields, finite decimal values, ASCII and nonblank atom-type fields |
 | `molguard pdbqt normalize FILE -o OUT` | Reformat ligand numeric fields without changing its torsion tree |
 | `molguard receptor canonicalize FILE -o OUT` | Deterministically sort/renumber receptor PDBQT and report a SHA-256 digest |
 | `molguard receptor prepare FILE -o OUT` | Validate/canonicalize PDBQT or sanitize/convert raw receptor; recover missing donor hydrogens where possible |
@@ -107,3 +107,7 @@ Receptor preparation and ligand normalization have different chemistry and
 record handling. Use the command for the molecule's actual role. The
 [receptor guide](../user-guide/preparing-receptor.md) describes the backup
 and `.prep.json` provenance files.
+
+Read [MolGuard canonicalization](../scientific-background/molguard-canonicalization.md)
+for the exact transformations, automatic pipeline calls, fixed timestamps,
+validation limits and implementation/format sources.

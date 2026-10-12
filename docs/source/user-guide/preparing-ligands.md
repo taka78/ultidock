@@ -51,6 +51,13 @@ molguard pdbqt normalize ligand.pdbqt -o ligand-normalized.pdbqt
 Normalization preserves atom ordering and ROOT/BRANCH/TORSDOF records. It is a
 formatting operation, not a way to add missing chemistry. Resolve non-finite
 values, missing types, and invalid preparation with the source tool.
+The normal docking worker applies this normalization automatically before
+testing a ligand against receptors/sites. Formatting errors such as
+`NO_DECIMAL` and `EXPONENT` are rejected by the ligand normalization lint gate;
+correct the source writer or regenerate the prepared ligand before retrying.
+Receptor preparation has an additional numeric-repair path. See
+[MolGuard's algorithm and sources](../scientific-background/molguard-canonicalization.md)
+for the exact fields, preservation guarantees and validation limits.
 
 Put only the desired `.pdbqt` files in the run's `LIGANDS_DIR`. The pipeline scans
 that directory; an unrelated molecule left there will also be docked. When

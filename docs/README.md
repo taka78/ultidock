@@ -74,6 +74,7 @@ committed. `make -C docs clean` removes generated documentation from `docs/build
 | CLI commands, MolGuard and script entry points | `reference/cli.md` |
 | Generated config, flags, grid dials and concurrency | `reference/configuration.md` |
 | Receptor and ligand handling | `user-guide/preparing-receptor.md`, `user-guide/preparing-ligands.md` |
+| MolGuard algorithm, pipeline integration, reproducibility and sources | `scientific-background/molguard-canonicalization.md` |
 | Site discovery and CaV-EMPS algorithm | `user-guide/binding-site-discovery/`, `scientific-background/cav-emps-methodology.md` |
 | User-guide examples and high-throughput screens | `tutorials/examples.md`, `tutorials/virtual-screening.md` (both in User Guide navigation) |
 | Benchmark commands and outputs | `benchmarks/index.md` |
