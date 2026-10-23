@@ -7,13 +7,13 @@ This document explains **how to run the pipeline step by step**, details the
 major components, and highlights the features that make Ultidock different from
 traditional docking scripts.
 
-New users can start with the [documentation](docs/source/index.rst), including
-[installation](docs/source/getting-started/installation.md), an interactive
-[Quick Start teacher](docs/source/getting-started/quick-start.md), and the
-[D2 docking tutorial](docs/source/tutorials/small-molecule-docking.md).
+New users can start with the [documentation](https://docs.ultidock.org/en/release-v1.1.2/), including
+[installation](https://docs.ultidock.org/en/release-v1.1.2/getting-started/installation.html), an interactive
+[Quick Start teacher](https://docs.ultidock.org/en/release-v1.1.2/getting-started/quick-start.html), and the
+[D2 docking tutorial]().
 For a library run, follow the
-[high-throughput screening walkthrough](docs/source/tutorials/virtual-screening.md).
-The documentation is configured for Read the Docs; see [build instructions](docs/README.md).
+[high-throughput screening walkthrough](https://docs.ultidock.org/en/release-v1.1.2/tutorials/examples.html#run-the-bundled-examples).
+
 
 ---
 
