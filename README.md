@@ -3,6 +3,9 @@
 Ultidock is a high-throughput molecular docking workflow that automates ligand
 staging, grid preparation, AutoDock-GPU execution, and post-processing.
 
+Documents are available on:
+https://docs.ultidock.org/en/release-v1.1.2/
+
 This document explains **how to run the pipeline step by step**, details the
 major components, and highlights the features that make Ultidock different from
 traditional docking scripts.
