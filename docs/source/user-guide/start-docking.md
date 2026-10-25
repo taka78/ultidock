@@ -29,16 +29,16 @@ package install or another Linux distribution, follow [Installation](../getting-
 
 Put a `.pdb`, `.mol2` or `.pdbqt` receptor in the workspace's
 `docking/MACRO_MOL_DIR/`. The pipeline prepares and checks it automatically.
-In an editable checkout, the workspace is the repository by default; run these
-commands from its root:
+The cloned repository is the workspace by default, including with a regular
+install launched inside it. Run these commands from its root:
 
 ```bash
 mkdir -p docking/MACRO_MOL_DIR
 cp /path/to/receptor.pdb docking/MACRO_MOL_DIR/
 ```
 
-For a regular install, put the workspace path printed by `ultidock doctor`
-before `docking/`, for example `<workspace>/docking/MACRO_MOL_DIR/`. Choose
+If you explicitly set `ULTIDOCK_HOME`, use that workspace's
+`docking/MACRO_MOL_DIR/` instead. Choose
 a receptor structure appropriate to the experiment;
 automatic format preparation cannot decide its biological state for you.
 
@@ -79,8 +79,8 @@ to make individual ligand PDBQT files.
    as the method. Download the generated list of commands. If that export is
    already one `wget` command per line for `.pdbqt.gz` archives, copy or rename
    it to `docking/ligands.wget`, replacing the repository's one-archive example.
-   Run this from an editable checkout root; for a regular installation, use
-   the workspace path printed by `ultidock doctor` before `docking/`:
+   Run this from the cloned repository root. If you explicitly set
+   `ULTIDOCK_HOME`, use that workspace's `docking/ligands.wget` instead:
 
    ```bash
    cp /path/to/zinc-download-list docking/ligands.wget

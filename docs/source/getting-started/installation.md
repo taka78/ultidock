@@ -17,7 +17,7 @@ cd ultidock
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install .
+python -m pip install -e .
 ultidock --help
 ```
 
@@ -72,18 +72,22 @@ chemistry and conformers before conversion. See
 [Preparing a receptor](../user-guide/preparing-receptor.md) and
 [Preparing ligands](../user-guide/preparing-ligands.md).
 
-## Managed workspace
+(portable-workspace)=
+## Portable workspace
 
-A regular installation can run outside the source checkout. On first workflow
-use, Ultidock materializes scripts, examples, benchmark code and native build
-sources under `$XDG_DATA_HOME/ultidock`, defaulting to
-`~/.local/share/ultidock`. Configuration, compiled tools, predictor
-downloads and run results live there; installed Python files remain untouched.
-Set `ULTIDOCK_HOME=/path/to/workspace` to choose another location.
-Package upgrades refresh managed source files while retaining configuration
-and results. Editable and direct checkout runs use the repository layout by
-default, but also honor `ULTIDOCK_HOME`. `ultidock doctor` prints the
-active workspace.
+The cloned repository is your self-contained workspace. Install with
+`python -m pip install -e .` from its root, then keep receptors in
+`docking/MACRO_MOL_DIR/`, the download list in `docking/ligands.wget`, and
+results in `docking/RESULTS_DIR/`. Configuration, native builds, and optional
+tool downloads also stay inside the clone. On a cluster, clone onto scratch
+or the storage intended for your screening data.
+
+A regular `python -m pip install .` also uses the clone when launched from
+its root or a subdirectory. Editable installs locate their checkout even
+when launched elsewhere. `ultidock doctor` prints the active workspace.
+Set `ULTIDOCK_HOME=/path/to/workspace` only when you want an explicit override.
+If no checkout is found, a regular install uses the current directory and
+materializes its bundled workflow resources there on first use.
 
 ## Optional fpocket and P2Rank
 

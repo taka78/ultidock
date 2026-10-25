@@ -1,0 +1,36 @@
+name: pytest
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MPLBACKEND: Agg
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install development and packaging dependencies
+        run: |
+          python -m pip install --upgrade pip 'setuptools>=68' wheel
+          python -m pip install -e '.[dev]'
+
+      - name: Run CPU tests
+        run: python -m pytest molguard/tests/ test_dude_benchmark_helpers.py

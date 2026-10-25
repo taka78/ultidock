@@ -13,17 +13,16 @@ advanced workflows. For a guided three-ligand run, use
 
 ## 1. Prepare the active workspace
 
-Regular installs materialize scripts, examples, benchmarks and native build
-sources under `$XDG_DATA_HOME/ultidock` (normally
-`~/.local/share/ultidock`). `ULTIDOCK_HOME` can select a different writable
-home; `ultidock doctor` prints the active one. Editable installs and direct
-checkout commands use the repository by default. Package upgrades refresh
-managed sources while preserving configuration and results. Wheels contain
-native sources, not machine-specific docking executables.
+Use the cloned repository as the workspace. After cloning, install from its
+root with `python -m pip install -e .`. Inputs, configuration, native tools,
+and outputs stay inside that folder. A regular install also discovers the
+clone when launched from its root or a subdirectory. `ultidock doctor` prints
+the active workspace; `ULTIDOCK_HOME` explicitly selects another location.
+See {ref}`Installation <portable-workspace>` for workspace selection.
 
-From a regular install, commands work in any directory. If you use
-`/usr/bin/python3 -m cli.ultidock` without installing the package, run from
-the repository root and substitute that form for `ultidock` below.
+Run the commands below from the repository root. If you use
+`/usr/bin/python3 -m cli.ultidock` without installing the package, substitute
+that form for `ultidock` below.
 
 ## 2. Run setup
 

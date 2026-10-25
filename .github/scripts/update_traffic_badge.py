@@ -2,17 +2,19 @@ import os
 import requests
 import json
 
-token = os.environ['GH_TOKEN']
+token = os.environ.get('GH_TOKEN', '').strip()
+if not token:
+    raise SystemExit('Set GH_TRAFFIC_TOKEN to a token with repository traffic access.')
 repo = os.environ['REPO']
 
 headers = {
-    'Authorization': f'Bearer {token}'
-    'Accept': 'application/vnd.github.v3+json'
+    'Authorization': f'Bearer {token}',
+    'Accept': 'application/vnd.github+json'
 }
 
 url = f'https://api.github.com/repos/{repo}/traffic/clones'
 
-response = requests.get(url, headers=headers)
+response = requests.get(url, headers=headers, timeout=30)
 
 if response.status_code == 200:
     data = response.json()

@@ -119,6 +119,19 @@ def test_sdist_wheel_installs_and_runs_outside_checkout(tmp_path):
     )
     assert origins[0] == "1.1.2"
     assert all(str(venv) in origin for origin in origins[1:])
+    # Isolated Python imports the wheel even when launched inside a clone.
+    portable_env = dict(env)
+    portable_env.pop("ULTIDOCK_HOME")
+    for cwd, expected in ((source, source), (source / "docking", source), (outside, outside)):
+        selected = json.loads(_run(
+            [python, "-I", "-c",
+             "import json, ultidock; from ultidock.paths import workspace_root; "
+             "print(json.dumps([ultidock.__file__, str(workspace_root())]))"],
+            cwd=cwd, env=portable_env,
+        ))
+        assert str(venv) in selected[0]
+        assert Path(selected[1]) == expected
+
     installed = Path(origins[1]).parents[1]
     initial_files = {path.relative_to(installed) for path in installed.rglob("*") if path.is_file()}
     ultidock = str(venv / "bin/ultidock")
@@ -148,6 +161,14 @@ def test_sdist_wheel_installs_and_runs_outside_checkout(tmp_path):
     assert (report_dir / "report.html").is_file()
     _run([ultidock, "clean"], cwd=outside, env=env)
     assert (report_dir / "report.html").is_file()
+    assert initial_files == {
+        path.relative_to(installed) for path in installed.rglob("*") if path.is_file()
+    }
+
+    # A standalone wheel materializes resources locally without a home override.
+    _run([ultidock, "example", "list"], cwd=outside, env=portable_env)
+    assert (outside / ".ultidock-runtime.json").is_file()
+    assert (outside / "docking/run.py").is_file()
     assert initial_files == {
         path.relative_to(installed) for path in installed.rglob("*") if path.is_file()
     }

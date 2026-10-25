@@ -3,14 +3,17 @@
 Install development dependencies, then run from the repository root:
 
 ```bash
+python -m pip install --upgrade pip 'setuptools>=68' wheel
 python -m pip install -e '.[dev]'
-python -m pytest
+python -m pytest molguard/tests/ test_dude_benchmark_helpers.py
 ```
 
-Tests live under `molguard/tests/`, including coverage for the broader workflow,
-CLI and packaging. Some integrations depend on installed native tools; review skip
-reasons and failures rather than treating a partial environment as a complete
-end-to-end validation.
+The `pytest` GitHub Actions workflow runs both targets on a CPU runner with
+Python 3.12 for pushes and pull requests. The suite covers molecular I/O,
+workflow dispatch, packaging, and DUD-E benchmark helpers without requiring
+a GPU or a native docking-engine build. Two optional Holo4K checks skip when
+their external probe evidence is absent. These tests do not replace native
+end-to-end docking validation.
 
 ## Focused checks
 

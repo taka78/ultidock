@@ -103,7 +103,7 @@ Change them only with a declared evaluation plan.
 
 ## Concurrency and workspace isolation
 
-`ULTIDOCK_HOME` chooses the managed application workspace.
+`ULTIDOCK_HOME` explicitly overrides the default workspace in the cloned repository.
 `ULTIDOCK_WORKERS` overrides the maximum number of concurrent ligand workers;
 all discovered ligands are still queued for processing. CPU mode's default uses host
 CPU count divided by `VINA_CPU`; in a scheduler allocation, set workers

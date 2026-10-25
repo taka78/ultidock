@@ -1,14 +1,59 @@
-"""Installed workflows must write to their managed home, preserving run data."""
+"""Workflows use portable directories and preserve existing run data."""
+
+import pytest
 
 from ultidock import paths
 
 
-def test_installed_home_uses_xdg_data_directory(monkeypatch, tmp_path):
-    monkeypatch.delenv("ULTIDOCK_HOME", raising=False)
-    monkeypatch.setattr(paths, "source_root", lambda: None)
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+def _checkout(root):
+    (root / "docking").mkdir(parents=True)
+    (root / "pyproject.toml").touch()
+    (root / "docking/run.py").touch()
+    return root
 
-    assert paths.workspace_root() == tmp_path / "data/ultidock"
+
+@pytest.mark.parametrize("subdirectory", [".", "docking", "examples/nested"])
+def test_regular_install_discovers_working_checkout(monkeypatch, tmp_path, subdirectory):
+    checkout = _checkout(tmp_path / "checkout")
+    cwd = checkout / subdirectory
+    cwd.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(paths, "__file__", str(tmp_path / "site-packages/ultidock/paths.py"))
+    monkeypatch.delenv("ULTIDOCK_HOME", raising=False)
+    monkeypatch.chdir(cwd)
+
+    assert paths.source_root() == checkout
+    assert paths.application_root() == checkout
+    assert not (checkout / ".ultidock-runtime.json").exists()
+
+
+@pytest.mark.parametrize(
+    "package_path", ["ultidock/paths.py", ".venv/lib/site-packages/ultidock/paths.py"]
+)
+def test_package_ancestors_locate_checkout_from_elsewhere(monkeypatch, tmp_path, package_path):
+    checkout = _checkout(tmp_path / "checkout")
+    other = _checkout(tmp_path / "other")
+    monkeypatch.setattr(paths, "__file__", str(checkout / package_path))
+    monkeypatch.delenv("ULTIDOCK_HOME", raising=False)
+    monkeypatch.chdir(other)
+
+    assert paths.workspace_root() == checkout
+
+
+@pytest.mark.parametrize("marker", ["pyproject.toml", "docking/run.py"])
+def test_incomplete_checkout_uses_current_directory(monkeypatch, tmp_path, marker):
+    partial = tmp_path / marker
+    partial.parent.mkdir(parents=True, exist_ok=True)
+    partial.touch()
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    monkeypatch.setattr(paths, "__file__", str(tmp_path / "site-packages/ultidock/paths.py"))
+    monkeypatch.delenv("ULTIDOCK_HOME", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.chdir(cwd)
+
+    assert paths.source_root() is None
+    assert paths.workspace_root() == cwd
+    assert not (tmp_path / "data").exists()
 
 
 def test_explicit_home_materializes_resources_and_preserves_results(monkeypatch, tmp_path):

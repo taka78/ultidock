@@ -73,7 +73,8 @@ active. Other distro versions must meet the dependencies in `pyproject.toml`.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install .            # installs Ultidock, MolGuard tools and Python dependencies
+# Install Ultidock, MolGuard tools and Python dependencies
+python -m pip install -e .
 python -m ultidock --help
 ```
 
@@ -88,20 +89,21 @@ environment has the old distribution named `molguard`, uninstall it with
 `python -m pip uninstall molguard` before installing `ultidock`. The `molguard`
 command and Python imports are retained by the new package.
 
-### Installed workspace
+### Portable workspace
 
-Regular installs work from any directory. Ultidock prepares a writable
-workspace on first workflow use under `$XDG_DATA_HOME/ultidock`, defaulting to
-`~/.local/share/ultidock`. Set `ULTIDOCK_HOME=/path/to/workspace` to override it.
-`ultidock doctor` prints the active workspace. The examples, benchmark scripts,
-native build sources and setup guides are included in the package, so the
-source checkout is no longer needed after installation. Package upgrades
-refresh managed source files while retaining configuration and results.
+The cloned repository is your self-contained workspace. Install with
+`python -m pip install -e .` from its root, then keep receptors in
+`docking/MACRO_MOL_DIR/`, the download list in `docking/ligands.wget`, and
+results in `docking/RESULTS_DIR/`. Configuration, native builds, and optional
+tool downloads also stay inside the clone. On a cluster, clone onto scratch
+or the storage intended for your screening data.
 
-Paths below such as `docking/config.py`, `docking/LIGANDS_DIR/`, and
-`examples/<name>/workspace/` are relative to this active workspace for regular
-installs. Editable installs and direct source-checkout commands keep using the
-repository by default and also support `ULTIDOCK_HOME`.
+A regular `python -m pip install .` also uses the clone when launched from
+its root or a subdirectory. Editable installs locate their checkout even
+when launched elsewhere. `ultidock doctor` prints the active workspace.
+Set `ULTIDOCK_HOME=/path/to/workspace` only when you want an explicit override.
+If no checkout is found, a regular install uses the current directory and
+materializes its bundled workflow resources there on first use.
 
 Wheels include native build sources but no machine-specific executables.
 Install `vina` and `vina_split` with `sudo apt install autodock-vina` or put
@@ -113,9 +115,9 @@ it locally. GPU runtimes, compilers and Java remain native prerequisites.
 
 ## Step 2 — Run setup
 
-Regular installs can run from any directory; source-checkout commands run from
-the repository root. A first run builds AutoGrid and, when a GPU is detected,
-AutoDock-GPU; this can take time. Place local ligand PDBQT files or archives in
+Run from the cloned repository root. A first run builds AutoGrid and, when a
+GPU is detected, AutoDock-GPU; this can take time. Place local ligand PDBQT
+files or archives in
 `docking/LIGANDS_DIR/`, or put `wget` commands in `docking/ligands.wget`.
 For a ready-made library, select a 3D tranche set in ZINC, export AutoDock
 PDBQT.gz as a WGET command list, and save it as `docking/ligands.wget`;

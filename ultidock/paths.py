@@ -1,4 +1,4 @@
-"""Keep installed packages read-only and managed workflows in a writable home."""
+"""Keep workflows and run data in a portable checkout or explicit workspace."""
 
 from __future__ import annotations
 
@@ -14,21 +14,22 @@ from ultidock import __version__
 
 
 def source_root() -> Path | None:
-    root = Path(__file__).resolve().parents[1]
-    if (root / "pyproject.toml").is_file() and (root / "docking/run.py").is_file():
-        return root
+    """Find a checkout around the package, then around the working directory."""
+    cwd = Path.cwd().resolve()
+    for root in (*Path(__file__).resolve().parents, cwd, *cwd.parents):
+        if (root / "pyproject.toml").is_file() and (root / "docking/run.py").is_file():
+            return root
     return None
 
 
 def workspace_root() -> Path:
-    """Use an explicit home, the development checkout, or the user data directory."""
+    """Use an explicit home, a discovered checkout, or the current directory."""
     if os.environ.get("ULTIDOCK_HOME"):
         return Path(os.environ["ULTIDOCK_HOME"]).expanduser().resolve()
     checkout = source_root()
     if checkout is not None:
         return checkout
-    data_home = Path(os.environ.get("XDG_DATA_HOME", "~/.local/share")).expanduser()
-    return (data_home / "ultidock").resolve()
+    return Path.cwd().resolve()
 
 
 def _link_native_programs(root: Path, checkout: Path | None) -> None:

@@ -1,16 +1,12 @@
+import importlib.util
 import json
 import sqlite3
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import numpy as np
-
-DOCKING_ROOT = Path(__file__).resolve().parent / "docking"
-if str(DOCKING_ROOT) not in sys.path:
-    sys.path.insert(0, str(DOCKING_ROOT))
-
-import make_grids
-import profile_receptors
+import pytest
 
 from benchmarks.dude_docking_benchmark import (
     collect_scores_from_db,
@@ -20,6 +16,41 @@ from benchmarks.dude_docking_benchmark import (
 from benchmarks.evaluate_cavities import evaluate_sites
 from benchmarks.summary_tools import write_method_outputs
 from molguard.io.receptor_prep import _parse_excess_bond_residues, sanitize_pdb_for_meeko
+
+
+@pytest.fixture
+def workflow_config(monkeypatch):
+    """Supply test settings without reading or creating generated config.py."""
+    config = ModuleType("config")
+    config.__dict__.update(
+        AUTODOCK_GPU_DIR="", DOCKING_DIR="", RESULTS_DIR="", NUMWI=1,
+        LIGANDS_DIR="", MACRO_MOL_DIR="", CENTERS_TSV="centers.tsv",
+        GRID_MODE="blind", GRID_SPACING=0.375, GRID_MARGIN=5.0, GRID_CAP=150.0,
+        R_MIN_CAVITY_A=None, HOTSPOT_BOX_ANGLE=35.0, HOTSPOT_NMS_MINSEP_A=14.0,
+        SURFACE_SHELL__MIN_A=2.0, SURFACE_SHELL__MAX_A=20.0,
+        SURFACE_NMS_MINSEP_A=5.0, MAX_CENTER_DIST_A=10.0, CONTACT_SHELL_A=4.0,
+        MIN_SURFACE_FRAC=0.01, AUTOSITES=6,
+    )
+    monkeypatch.setitem(sys.modules, "config", config)
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parent / "docking"))
+
+
+def _load_workflow_module(name):
+    path = Path(__file__).resolve().parent / "docking" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def make_grids(workflow_config):
+    return _load_workflow_module("make_grids")
+
+
+@pytest.fixture
+def profile_receptors(workflow_config):
+    return _load_workflow_module("profile_receptors")
 
 
 def test_sanitize_pdb_for_meeko_preserves_ions_and_remaps_residues(tmp_path: Path) -> None:
@@ -272,19 +303,19 @@ def test_reset_sqlite_outputs_removes_db_and_sidecars(tmp_path: Path) -> None:
     assert not shm_path.exists()
 
 
-def test_hotspot_box_sizing_uses_side_length_semantics() -> None:
+def test_hotspot_box_sizing_uses_side_length_semantics(make_grids) -> None:
     assert make_grids._npts_for_box_side(31.2, 0.375) == 85
     assert make_grids._npts_for_size(31.2, 0.375) == 85
     assert make_grids._npts_for_extent(31.2, 0.375, 129.0) == 85
 
 
-def test_maps_pocket_shell_bounds_follow_profiled_r_min() -> None:
+def test_maps_pocket_shell_bounds_follow_profiled_r_min(make_grids) -> None:
     assert make_grids._maps_pocket_shell_bounds(3.0) == (1.5, 15.0)
     assert make_grids._maps_pocket_shell_bounds(5.0) == (2.5, 15.0)
     assert make_grids._maps_pocket_shell_bounds(1.0) == (0.75, 15.0)
 
 
-def test_detect_maps_hotspots_does_not_double_box_side() -> None:
+def test_detect_maps_hotspots_does_not_double_box_side(make_grids) -> None:
     shape = (31, 31, 31)
     hotspot_slice = slice(13, 18)
 
@@ -310,7 +341,7 @@ def test_detect_maps_hotspots_does_not_double_box_side() -> None:
     assert (sites[0]["nx"], sites[0]["ny"], sites[0]["nz"]) == (85, 85, 85)
 
 
-def test_sparse_whole_protein_maps_are_not_marked_degenerate() -> None:
+def test_sparse_whole_protein_maps_are_not_marked_degenerate(make_grids) -> None:
     c_map = np.zeros((20, 20, 20), dtype=np.float32)
     e_axis = np.linspace(-0.08, -0.02, 20, dtype=np.float32)
     e_map = np.broadcast_to(e_axis[None, None, :], (20, 20, 20)).copy()
@@ -322,7 +353,7 @@ def test_sparse_whole_protein_maps_are_not_marked_degenerate() -> None:
     assert make_grids._maps_are_degenerate(c_map, e_map, d_map) is False
 
 
-def test_flat_electrostatics_are_marked_degenerate() -> None:
+def test_flat_electrostatics_are_marked_degenerate(make_grids) -> None:
     c_map = np.zeros((10, 10, 10), dtype=np.float32)
     e_map = np.zeros((10, 10, 10), dtype=np.float32)
     d_map = np.zeros((10, 10, 10), dtype=np.float32)
@@ -330,7 +361,7 @@ def test_flat_electrostatics_are_marked_degenerate() -> None:
     assert make_grids._maps_are_degenerate(c_map, e_map, d_map) is True
 
 
-def test_select_r_min_cavity_uses_significant_peak_lower_tail() -> None:
+def test_select_r_min_cavity_uses_significant_peak_lower_tail(profile_receptors) -> None:
     stats = {
         "p25": 2.99,
         "significant_peak_p10": 3.76,
@@ -339,7 +370,7 @@ def test_select_r_min_cavity_uses_significant_peak_lower_tail() -> None:
     assert profile_receptors._select_r_min_cavity(stats) == 3.76
 
 
-def test_select_r_min_cavity_falls_back_to_p25_when_needed() -> None:
+def test_select_r_min_cavity_falls_back_to_p25_when_needed(profile_receptors) -> None:
     stats = {
         "p25": 2.45,
     }
@@ -347,7 +378,7 @@ def test_select_r_min_cavity_falls_back_to_p25_when_needed() -> None:
     assert profile_receptors._select_r_min_cavity(stats) == 2.45
 
 
-def test_build_hybrid_sites_combines_internal_and_surface_candidates() -> None:
+def test_build_hybrid_sites_combines_internal_and_surface_candidates(make_grids) -> None:
     internal_sites = [
         {"site_id": "S1", "cx": 0.0, "cy": 0.0, "cz": 0.0, "nx": 81, "ny": 81, "nz": 81, "spacing": 0.375, "r_peak": 4.0, "F": 0.9},
         {"site_id": "S2", "cx": 20.0, "cy": 0.0, "cz": 0.0, "nx": 81, "ny": 81, "nz": 81, "spacing": 0.375, "r_peak": 3.5, "F": 0.4},
@@ -370,7 +401,7 @@ def test_build_hybrid_sites_combines_internal_and_surface_candidates() -> None:
     assert abs(hybrid_sites[0]["cx"]) < 1.5
 
 
-def test_receptor_search_picks_one_site_per_family_when_available() -> None:
+def test_receptor_search_picks_one_site_per_family_when_available(make_grids) -> None:
     internal = [
         {"site_id": "I1", "cx": 0.0, "cy": 0.0, "cz": 0.0, "selection_score": 0.9, "F": 0.9, "family": "internal"},
     ]
@@ -393,7 +424,7 @@ def test_receptor_search_picks_one_site_per_family_when_available() -> None:
     assert [site["family"] for site in selected] == ["hybrid", "internal", "surface"]
 
 
-def test_receptor_search_preserves_central_surface_candidate() -> None:
+def test_receptor_search_preserves_central_surface_candidate(make_grids) -> None:
     internal = [
         {"site_id": "I1", "cx": 0.0, "cy": 0.0, "cz": 0.0, "selection_score": 0.9, "F": 0.9, "family": "internal"},
     ]
@@ -417,7 +448,7 @@ def test_receptor_search_preserves_central_surface_candidate() -> None:
     assert any(site["family"] == "surface" and site.get("center_closeness") == 0.95 for site in selected)
 
 
-def test_receptor_search_preserves_low_score_central_hybrid_candidate() -> None:
+def test_receptor_search_preserves_low_score_central_hybrid_candidate(make_grids) -> None:
     surface = [
         {"site_id": "S1", "cx": 0.0, "cy": 0.0, "cz": 0.0, "selection_score": 1.0, "F": 1.0, "family": "surface"},
     ]
@@ -438,7 +469,7 @@ def test_receptor_search_preserves_low_score_central_hybrid_candidate() -> None:
     assert any(site["family"] == "hybrid" and site.get("center_closeness") == 0.95 for site in selected)
 
 
-def test_select_internal_search_r_min_relaxes_when_profiled_threshold_is_too_strict() -> None:
+def test_select_internal_search_r_min_relaxes_when_profiled_threshold_is_too_strict(make_grids) -> None:
     relaxed = make_grids._select_internal_search_r_min(
         requested_r_min_A=3.76,
         peak_radii_A=[1.05, 1.18, 1.24, 1.31, 1.35],
@@ -447,7 +478,7 @@ def test_select_internal_search_r_min_relaxes_when_profiled_threshold_is_too_str
     assert relaxed == 1.5
 
 
-def test_select_internal_search_r_min_keeps_requested_threshold_when_supported() -> None:
+def test_select_internal_search_r_min_keeps_requested_threshold_when_supported(make_grids) -> None:
     relaxed = make_grids._select_internal_search_r_min(
         requested_r_min_A=3.20,
         peak_radii_A=[2.9, 3.4, 3.8, 4.1, 4.4],

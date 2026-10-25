@@ -1,7 +1,11 @@
 # Ultidock
 
+[![pytest](https://github.com/taka78/ultidock/actions/workflows/pytest.yml/badge.svg?branch=release%2Fv1.1.2)](https://github.com/taka78/ultidock/actions/workflows/pytest.yml?query=branch%3Arelease%2Fv1.1.2)
+
 Ultidock is a high-throughput molecular docking workflow that automates ligand
 staging, grid preparation, AutoDock-GPU execution, and post-processing.
+
+For bug reports, support, tests, and pull requests, see [Contributing](CONTRIBUTING.md).
 
 Documents are available on:
 https://docs.ultidock.org/en/release-v1.1.2/
@@ -165,7 +169,7 @@ python -m pip install --upgrade pip
 Install Ultidock and its Python dependencies in one step from the repository:
 
 ```bash
-python -m pip install .
+python -m pip install -e .
 python -m ultidock --help
 ```
 
@@ -179,14 +183,19 @@ an environment that contains the old `molguard` distribution, remove it first
 with `python -m pip uninstall molguard`, then run the installation above.
 For development, use `python -m pip install -e ".[dev]"` instead.
 
-A regular installation works outside the checkout. On first workflow use,
-Ultidock prepares its scripts, examples, and native build sources in
-`$XDG_DATA_HOME/ultidock` (default `~/.local/share/ultidock`). Configuration,
-compiled tools, pocket-tool downloads, and run outputs stay there; installed
-Python files remain untouched. Set `ULTIDOCK_HOME=/path/to/workspace` to choose
-another location. `ultidock doctor` prints the active workspace. Editable and
-direct source-checkout runs keep the existing repository layout by default;
-they also honor `ULTIDOCK_HOME`.
+The cloned repository is your self-contained workspace. Install with
+`python -m pip install -e .` from its root, then keep receptors in
+`docking/MACRO_MOL_DIR/`, the download list in `docking/ligands.wget`, and
+results in `docking/RESULTS_DIR/`. Configuration, native builds, and optional
+tool downloads also stay inside the clone. On a cluster, clone onto scratch
+or the storage intended for your screening data.
+
+A regular `python -m pip install .` also uses the clone when launched from
+its root or a subdirectory. Editable installs locate their checkout even
+when launched elsewhere. `ultidock doctor` prints the active workspace.
+Set `ULTIDOCK_HOME=/path/to/workspace` only when you want an explicit override.
+If no checkout is found, a regular install uses the current directory and
+materializes its bundled workflow resources there on first use.
 
 Python wheels do not contain machine-specific docking executables. Install
 [AutoDock Vina](https://packages.ubuntu.com/en/source/resolute/autodock-vina)

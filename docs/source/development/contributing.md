@@ -11,8 +11,9 @@ git clone --branch release/v1.1.2 https://github.com/taka78/ultidock.git
 cd ultidock
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip 'setuptools>=68' wheel
 python -m pip install -e '.[dev]'
-python -m pytest
+python -m pytest molguard/tests/ test_dude_benchmark_helpers.py
 ```
 
 Native integrations have additional prerequisites; see [Testing](testing.md).
