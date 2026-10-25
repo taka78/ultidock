@@ -58,6 +58,9 @@ docking/*
 !docking/VINA_DIR/**
 !docking/MACRO_MOL_DIR/*.pdbqt
 
+# Optional local CUDA tensor dependency; do not track as an embedded repository.
+/docking/AUTODOCK_GPU_DIR/wmma_extension/
+
 # AutoGrid output files
 *.map
 *.e.map
