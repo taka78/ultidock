@@ -31,13 +31,14 @@ ultidock benchmark cavity-recovery \
 ```
 
 The benchmark predicts sites without the crystal ligand and evaluates them
-afterward. It records both center-to-centroid distance and DCC distance to
+afterward. It records both center-to-centroid distance and DCA distance to
 the nearest ligand atom. These measure different localization questions.
-The output includes `summary.csv` (target-level closest-site, DCC and Top-k
+The output includes `summary.csv` (target-level closest-site, DCA and Top-k
 flags), `sites.csv` (per-site distances and ranking metadata),
 `predictions.tsv` (normalized CaV-EMPS predictions), and each target's
 `centers.tsv` boxes. The underlying script is
 `benchmarks/cavity_recovery_benchmark.py`; `--jobs` parallelizes targets.
+The cavity-recovery CSVs retain `dcc` in legacy field names for DCA values.
 
 Large AutoGrid maps and scratch files are temporary by default. Use
 `--keep-artifacts` for a debugging target and `--work-root` to place scratch
@@ -55,7 +56,7 @@ ultidock benchmark site-prediction \
 ```
 
 The command downloads `rdk/p2rank-datasets` when needed, normalizes receptors
-and ligand labels, runs each chosen predictor, evaluates DCC Top-n and
+and ligand labels, runs each chosen predictor, evaluates DCA Top-n and
 Top-(n+2), and writes Markdown/HTML reports. Prediction and evaluation are
 separate stages: reference ligand geometry is not fed to receptor-only
 prediction. The CaV-EMPS arm uses compact scratch by default;

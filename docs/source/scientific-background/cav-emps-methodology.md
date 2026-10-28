@@ -14,9 +14,10 @@ The geometric path rasterizes receptor atoms onto the AutoGrid lattice.
 An Euclidean distance transform (EDT) describes open volume and identifies
 internal cavities and channels. Surface-cleft candidates cover another
 receptor geometry. The map path uses AutoGrid carbon, electrostatic and
-desolvation signals: favorable energies are clipped to physically useful
-negative values, smoothed over a ligand-sized region and constrained to
-receptor-proximal pocket shells. This avoids treating one isolated favorable
+desolvation signals: C and E are clipped to negative-energy support, while the
+absolute D-map signal is normalized separately. The signals are combined,
+smoothed over a ligand-sized region and constrained to receptor-proximal
+pocket shells. This avoids treating one isolated favorable
 voxel as a complete binding pocket.
 
 The default `receptor_search` policy assembles internal, surface and
@@ -51,7 +52,7 @@ Map resolution, receptor extent, protonation and box settings affect
 proposals. A site omitted from the proposal set cannot be recovered by local
 docking. Compare geometry-only, map-based and combined settings under a fixed
 site budget with held-out reference sites. Measure localization explicitly
-(for example DCC or centroid distance), report successes and failures across
+(for example DCA or center-to-centroid distance), report successes and failures across
 all generated sites, and avoid tuning thresholds on final evaluation targets.
 See [Binding-site prediction](binding-site-prediction.md) and
 [Benchmarking](../benchmarks/index.md).

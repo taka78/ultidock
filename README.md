@@ -393,7 +393,7 @@ most relevant README section instead of burying the terminal in long guidance.
 | `ultidock clean [-y] [--all]` | Reset compiled binaries and outputs. Forwards all flags to `docking/clean.py`. |
 | `ultidock benchmark cavity-recovery [options]` | CLI wrapper for the receptor-only site-recovery benchmark. |
 | `ultidock benchmark download-dude [options]` | Download DUD-E receptor, crystal ligand, active, and decoy files. |
-| `ultidock benchmark site-prediction [options]` | Download/normalize COACH420/HOLO4K, run `cav-emps\|fpocket\|p2rank`, evaluate DCC metrics, and generate reports. |
+| `ultidock benchmark site-prediction [options]` | Download/normalize COACH420/HOLO4K, run `cav-emps\|fpocket\|p2rank`, evaluate DCA metrics, and generate reports. |
 | `ultidock example list` / `ultidock example run <name>` | Discover and run bundled example pipelines. |
 | `ultidock doctor` | Print tool locations and versions. Distinguishes between binaries not compiled yet (source present) and not found at all. |
 | `molguard pdbqt check <file>` | Lint a receptor or ligand PDBQT for AutoDock column-format issues (exponent notation, missing decimals, bad atom types). |
@@ -576,8 +576,8 @@ scripts.
      pipeline is restarted.
    - Site folders are named from the discovered receptor stem; site IDs such as
      `S1` and `S2` are output identifiers only, not quality labels.
-   - Semaphore-guarded worker pool maintains one AutoDock-GPU process per GPU
-     while CPU preparation remains concurrent.
+   - Semaphore-guarded worker pool allows up to `GPU_SLOTS_PER_DEV` concurrent
+     jobs per GPU; the default is 2. CPU preparation remains concurrent.
    - Metadata (grid centers, hotspots, cavity statistics) is persisted for MD
      seeding and reproducibility.
 
@@ -643,9 +643,10 @@ signals:
 
 - **Internal geometry:** receptor atoms are rasterized onto the AutoGrid lattice,
   and an Euclidean distance transform identifies enclosed cavities and channels.
-- **Surface/map favorability:** favorable AutoGrid interaction maps are clipped
-  to physically useful negative values, smoothed over a ligand-sized region, and
-  masked to receptor-proximal pocket shells. This avoids selecting a single
+- **Surface/map favorability:** C and E maps are clipped to negative-energy
+  support; the absolute D-map signal is normalized separately. The signals are
+  combined, smoothed over a ligand-sized region, and constrained to
+  receptor-proximal pocket shells. This avoids selecting a single
   favorable surface voxel as if it were a pocket center.
 - **Hybrid portfolio assembly:** internal, surface, and consensus candidates are
   de-duplicated by Å-scale non-maximum suppression and written as docking boxes.
@@ -696,16 +697,18 @@ ultidock benchmark cavity-recovery \
 ```
 
 The benchmark records both the legacy distance from each generated site center
-to the centroid of the co-crystallized ligand and the paper-facing DCC distance
-to the closest ligand atom. The ligand geometry is an external reference for the
+to the centroid of the co-crystallized ligand and the DCA distance to the closest
+ligand atom. The ligand geometry is an external reference for the
 experimentally observed bound pose; it is not used during site generation.
 
 Important output files:
 
-- `summary.csv`: target-level closest-site, DCC, and Top-k success flags
-- `sites.csv`: per-site centroid distances, DCC distances, and ranking metadata
+- `summary.csv`: target-level closest-site, DCA, and Top-k success flags
+- `sites.csv`: per-site centroid distances, DCA distances, and ranking metadata
 - `predictions.tsv`: normalized `cav-emps` predictions for shared evaluators
 - per-target `centers.tsv`: the generated docking boxes used for evaluation
+
+The cavity-recovery CSVs retain `dcc` in legacy field names for DCA values.
 
 By default, benchmark runs use a compact artifact layout: large AutoGrid maps
 and scratch files are written to temporary work directories and removed after
@@ -726,7 +729,7 @@ ultidock benchmark site-prediction \
 ```
 
 The command downloads `rdk/p2rank-datasets` when needed, normalizes receptors
-and ligand labels, runs each selected method, evaluates DCC Top-n/Top-(n+2), and
+and ligand labels, runs each selected method, evaluates DCA Top-n/Top-(n+2), and
 writes Markdown/HTML reports under the output directory.
 
 The site-prediction benchmark follows the same compact default for CaV-EMPS
